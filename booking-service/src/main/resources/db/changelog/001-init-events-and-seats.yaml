@@ -1,0 +1,86 @@
+databaseChangeLog:
+
+  - changeSet:
+      id: 1
+      author: kalanas210
+      changes:
+        - createTable:
+            tableName: events
+            columns:
+              - column:
+                  name: id
+                  type: bigint
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: name
+                  type: varchar(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: venue
+                  type: varchar(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: starts_at
+                  type: timestamptz
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 2
+      author: kalanas210
+      changes:
+        - createTable:
+            tableName: seats
+            columns:
+              - column:
+                  name: id
+                  type: bigint
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: event_id
+                  type: bigint
+                  constraints:
+                    nullable: false
+                    foreignKeyName: fk_seats_event
+                    references: events(id)
+              - column:
+                  name: seat_number
+                  type: varchar(20)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: status
+                  type: varchar(20)
+                  defaultValue: AVAILABLE
+                  constraints:
+                    nullable: false
+              - column:
+                  name: held_by
+                  type: varchar(255)
+              - column:
+                  name: held_until
+                  type: timestamptz
+              - column:
+                  name: version
+                  type: bigint
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+        - addUniqueConstraint:
+            tableName: seats
+            columnNames: event_id, seat_number
+            constraintName: uq_event_seat
+        - createIndex:
+            tableName: seats
+            indexName: idx_seats_event_id
+            columns:
+              - column:
+                  name: event_id
