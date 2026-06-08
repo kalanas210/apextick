@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: apextick-postgres
+    environment:
+      POSTGRES_DB: apextick
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: eta8827
+    ports:
+      - "5440:5432"
+    volumes:
+      - apextick_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d apextick"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  booking-service:
+    build: ./booking-service
+    container_name: apextick-booking
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/apextick
+    ports:
+      - "8081:8081"
+
+volumes:
+  apextick_pgdata:
