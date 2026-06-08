@@ -16,6 +16,18 @@ services:
       timeout: 3s
       retries: 5
 
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.6.3
+    container_name: apextick-keycloak
+    command: start-dev
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    ports:
+      - "8180:8080"
+    volumes:
+      - apextick_keycloak_data:/opt/keycloak/data
+
   booking-service:
     build: ./booking-service
     container_name: apextick-booking
@@ -29,3 +41,4 @@ services:
 
 volumes:
   apextick_pgdata:
+  apextick_keycloak_data:

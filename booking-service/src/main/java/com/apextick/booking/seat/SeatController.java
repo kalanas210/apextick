@@ -1,25 +1,28 @@
 package com.apextick.booking.seat;
 
-import com.apextick.booking.seat.dto.HoldSeatRequest;
 import com.apextick.booking.seat.dto.HoldSeatResponse;
-import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/seats")
-@RequiredArgsConstructor
 public class SeatController {
 
     private final SeatService seatService;
 
-    @PostMapping("/{seatId}/hold")
-    public ResponseEntity<HoldSeatResponse> hold(
-            @PathVariable Long seatId,
-            @Valid @RequestBody HoldSeatRequest request) {
+    public SeatController(SeatService seatService) {
+        this.seatService = seatService;
+    }
 
-        Seat held = seatService.holdSeat(seatId, request.userId());
-        return ResponseEntity.ok(HoldSeatResponse.from(held));
+    @PostMapping("/{seatId}/hold")
+    public HoldSeatResponse hold(@PathVariable Long seatId,
+                                 @AuthenticationPrincipal Jwt jwt) {
+        String userId = jwt.getClaimAsString("preferred_username");
+        Seat seat = seatService.holdSeat(seatId, userId);
+        return HoldSeatResponse.from(seat);
     }
 }
