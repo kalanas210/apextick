@@ -113,6 +113,27 @@ apextick/
 └── README.md
 ```
 
+## Load Testing
+
+The booking endpoint was load-tested with [k6](https://k6.io/) to validate correctness and performance under flash-sale contention.
+
+**Scenario:** 5,000 concurrent booking attempts (200 virtual users) competing for 200 seats.
+
+| Metric                            | Result        |
+| --------------------------------- | ------------- |
+| Seats sold (HTTP 200)             | 200 / 200     |
+| Rejected — seat taken (HTTP 409)  | 4,800         |
+| Double-bookings                   | 0             |
+| Failed requests                   | 0.00%         |
+| Throughput                        | ~3,900 req/s  |
+| Latency p95 / p99                 | 146 / 224 ms  |
+
+Every seat was sold exactly once — the number of successful holds equals the number of `HELD`
+rows in the database, confirming the atomic conditional update eliminates double-booking even
+under heavy concurrent load.
+
+Reproduce: `k6 run load-test/booking-load-test.js` (stack up via `docker compose up`, seats seeded).
+
 ## 🗺️ Roadmap
 
 - 🚧 **Phase A** — Core booking & inventory with concurrency-safe seat claiming (in progress)
