@@ -1,151 +1,201 @@
-# 🎟️ ApexTick
-
-**A distributed, real-time ticket reservation system built to survive a high-contention flash sale — thousands of users booking the same seats in the same second, with _zero double-booking_.**
+# ApexTick
 
 ![Java](https://img.shields.io/badge/Java-21-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white)
-![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.x-6DB33F?style=for-the-badge&logo=springboot&logoColor=white)
-![Maven](https://img.shields.io/badge/Maven-C71A36?style=for-the-badge&logo=apachemaven&logoColor=white)
+![Spring Boot](https://img.shields.io/badge/Spring_Boot-6DB33F?style=for-the-badge&logo=springboot&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
-![Hibernate](https://img.shields.io/badge/JPA_•_Hibernate-59666C?style=for-the-badge&logo=hibernate&logoColor=white)
-![Flyway](https://img.shields.io/badge/Flyway-CC0200?style=for-the-badge&logo=flyway&logoColor=white)
-![Keycloak](https://img.shields.io/badge/Keycloak-4D4D4D?style=for-the-badge&logo=keycloak&logoColor=white)
-![WSO2 API Manager](https://img.shields.io/badge/WSO2_API_Manager-FF7300?style=for-the-badge)
+![Liquibase](https://img.shields.io/badge/Liquibase-2962FF?style=for-the-badge&logo=liquibase&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)
 ![RabbitMQ](https://img.shields.io/badge/RabbitMQ-FF6600?style=for-the-badge&logo=rabbitmq&logoColor=white)
-![Redis](https://img.shields.io/badge/Redis-FF4438?style=for-the-badge&logo=redis&logoColor=white)
-![Next.js](https://img.shields.io/badge/Next.js-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)
-![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
-![TanStack Query](https://img.shields.io/badge/TanStack_Query-FF4154?style=for-the-badge&logo=reactquery&logoColor=white)
+![Keycloak](https://img.shields.io/badge/Keycloak-008AAA?style=for-the-badge&logo=keycloak&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
-![Terraform](https://img.shields.io/badge/Terraform-7B42BC?style=for-the-badge&logo=terraform&logoColor=white)
-![AWS S3](https://img.shields.io/badge/AWS_S3-569A31?style=for-the-badge&logo=amazons3&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)
 
----
+> A distributed, real-time ticket reservation system built to survive a high-contention flash sale — where thousands of users race for the same seat and **exactly one** wins, with no double-booking and no slowdown.
 
-## 📌 Overview
+ApexTick simulates the hardest moment in any ticketing platform: the instant a popular event goes on sale and a flood of requests collide on the same limited inventory. The whole system is designed around a single guarantee — **correctness under concurrency** — and that guarantee is *measured*, not assumed.
 
-ApexTick simulates the moment a ticket drop goes live: five thousand fans rush to book the same seats in the same few seconds, and only one can win each seat. The entire system is engineered around a single hard problem:
+## Proven under load
 
-> **When thousands of users try to book the same seat at the same instant, exactly one must succeed, the same seat must never be sold twice, and the system must stay fast and stay up.**
+A [k6](https://k6.io) test fires 5,000 hold attempts from 200 concurrent virtual users at an event with exactly 200 seats:
 
-It is built as a deliberately right-sized **microservices architecture** with a modern enterprise stack — concurrency-safe booking, event-driven messaging, OAuth2 security, an API gateway, containerization, and Infrastructure as Code.
+| Metric | Result |
+| --- | --- |
+| Concurrent virtual users | 200 |
+| Total hold attempts | 5,000 |
+| Seats available | 200 |
+| **Holds won** | **200 / 200** |
+| Holds correctly rejected | 4,800 |
+| **Double-bookings** | **0** |
+| Throughput | ~3,900 req/s |
+| Latency (p95) | 146 ms |
+| Latency (p99) | 224 ms |
+| Failed requests | 0.00% |
 
-## ✨ Highlights
+Every seat was sold exactly once. Every losing request received a clean rejection. No seat was ever held by two people at the same time.
 
-- **No double-booking under load** — correctness is enforced at the database with an atomic, lock-free seat claim, safe across many service instances (where an in-JVM lock would silently fail).
-- **Hold-then-confirm flow** — seats are held with a TTL during checkout and auto-released if abandoned, just like real ticketing.
-- **Event-driven** — successful bookings publish an `OrderCreated` event to RabbitMQ; a Notification service handles emails and ticket PDFs asynchronously, keeping the booking path fast.
-- **Secured with OAuth2 / OIDC** — Keycloak issues JWTs; the API is a Spring Security resource server behind a WSO2 API Manager gateway that enforces rate limiting.
-- **Proven at scale** — load-tested with thousands of concurrent virtual users, verifying every seat is sold exactly once.
-- **Production-style DevOps** — one-command local environment with Docker Compose, infrastructure as code with Terraform, deployable to AWS.
-
-## 🏗️ Architecture
+## Architecture
 
 ```mermaid
-flowchart TD
-    Browser["Browser — Next.js"]
-    APIM["WSO2 API Manager<br/>(Gateway)"]
-    KC["Keycloak<br/>(OAuth2 / OIDC)"]
-    Booking["Booking & Inventory Service<br/>(Spring Boot)"]
-    Notif["Notification Service<br/>(Spring Boot)"]
-    MQ["RabbitMQ"]
-    Cache["Redis"]
-    PG[("PostgreSQL")]
-    S3["AWS S3"]
+graph TB
+    User([User])
+    Next["Next.js Frontend<br/>React + OIDC"]
+    KC["Keycloak<br/>OAuth2 / OIDC"]
+    API["Booking + Inventory Service<br/>Spring Boot"]
+    DB[("PostgreSQL<br/>source of truth")]
+    Redis[("Redis<br/>TTL holds")]
+    MQ{{"RabbitMQ<br/>topic exchange"}}
+    Notif["Notification Service<br/>Spring Boot"]
 
-    Browser -->|login| KC
-    Browser -->|Bearer token| APIM
-    APIM -.->|validate token| KC
-    APIM -->|validate + route| Booking
-    Booking -->|claim seat / write order| PG
-    Booking -->|hold + cache| Cache
-    Booking -->|OrderCreated event| MQ
-    MQ --> Notif
-    Notif -->|ticket PDF| S3
+    User --> Next
+    Next -->|login| KC
+    Next -->|JWT API calls| API
+    API -->|validate JWT| KC
+    API --> DB
+    API --> Redis
+    API -->|publish seat.held| MQ
+    MQ -->|consume| Notif
+    Redis -.->|key expired| API
 ```
 
-## 🧰 Tech Stack
+Two independent services share a message contract, not code:
 
-| Area | Technologies |
-|---|---|
-| **Backend** | Java 21, Spring Boot, Maven, Spring Data JPA, Spring Security |
-| **Data** | PostgreSQL, Hibernate/JPA, Flyway (migrations) |
-| **Identity & Edge** | Keycloak (OAuth2/OIDC), WSO2 API Manager (gateway) |
-| **Messaging & Cache** | RabbitMQ, Redis |
-| **Frontend** | Next.js, React, TanStack Query, Axios |
-| **DevOps & Cloud** | Docker, docker-compose, Terraform, AWS (ECS, RDS, S3), Vercel |
-| **Testing** | JUnit, Mockito, Testcontainers, k6 / Gatling |
+- **Booking & Inventory Service** — the secured REST API. It claims seats atomically, records holds, publishes events, and manages hold expiry.
+- **Notification Service** — a fully independent consumer that reacts to booking events asynchronously. It can restart or fail without affecting bookings.
 
-## 🚀 Getting Started
+Supporting infrastructure: **PostgreSQL** (the source of truth), **Redis** (self-expiring holds), **RabbitMQ** (the event bus), and **Keycloak** (OAuth2 / OIDC).
+
+## How the concurrency works
+
+The heart of the system is a single atomic statement:
+
+```sql
+UPDATE seats
+   SET status = 'HELD',
+       held_by = :userId,
+       held_until = :expiry
+ WHERE id = :seatId
+   AND status = 'AVAILABLE';
+```
+
+When hundreds of requests target the same seat at once, they all run this `UPDATE`. PostgreSQL serializes them against that one row: the first to commit flips the seat to `HELD` and affects **1 row**; every other request now fails the `status = 'AVAILABLE'` condition and affects **0 rows**. The service simply reads the affected-row count — `1` means the seat is yours, `0` means it was already taken.
+
+There are no `synchronized` blocks, no application-level mutexes, and no distributed locks. **The row in the database is the synchronization point**, which means the guarantee holds no matter how many copies of the service are running. This is the single most important decision in the project: *correctness lives in the shared database, not in any one JVM.*
+
+## Engineering highlights
+
+- **Lock-free atomic concurrency**, proven at 200/200 holds with zero double-bookings under load.
+- **Self-expiring holds** — a held seat is written to Redis with a TTL. When the key expires, a Redis keyspace notification triggers the seat's release back to `AVAILABLE` — no polling loop on the happy path.
+- **Event-driven decoupling** — the booking service publishes `seat.held` to a RabbitMQ topic exchange; the notification service consumes independently. Cross-service message deserialization works without shared code by relying on the consumer's inferred target type.
+- **Stateless JWT security** — Keycloak issues OIDC tokens that the API validates statelessly. Auth keeps working even when the API runs containerized, by fetching signing keys over the internal Docker network while validating the public-facing issuer.
+- **One-command infrastructure** — the backend and all infrastructure start with `docker compose up`, and every secret is externalized to a git-ignored `.env`.
+
+## Tech stack
+
+| Layer | Technology | Why |
+| --- | --- | --- |
+| Language | Java 21 | Virtual threads, records, modern language features |
+| Framework | Spring Boot | Production-grade REST, security, data, and messaging |
+| Database | PostgreSQL | ACID guarantees underpin the concurrency model |
+| Migrations | Liquibase | Versioned, reviewable schema changes |
+| Cache / TTL | Redis | Self-expiring holds via keyspace notifications |
+| Messaging | RabbitMQ | Reliable, task-queue style event delivery |
+| Auth | Keycloak | Standard OAuth2 / OIDC, portable across providers |
+| Frontend | Next.js (React) | App Router, OIDC login, live seat map |
+| Load testing | k6 | Scriptable concurrency and correctness verification |
+| Containerization | Docker Compose | Reproducible, one-command environment |
+
+## Getting started
 
 ### Prerequisites
 
-- JDK 21
 - Docker Desktop
-- Node.js (for the frontend)
+- Node.js 20+
+- (Optional) [k6](https://k6.io), to run the load test
 
-### Run locally
+### 1. Clone and configure
 
 ```bash
-# Clone
 git clone https://github.com/kalanas210/apextick.git
 cd apextick
-
-# Start infrastructure (PostgreSQL, and later RabbitMQ, Redis, Keycloak)
-docker compose up -d
-
-# Run the booking service
-cd booking-service
-./mvnw spring-boot:run
+cp .env.example .env   # the defaults are fine for local development
 ```
 
-The booking service starts on `http://localhost:8080`.
+### 2. Start the backend and infrastructure
 
-## 📁 Project Structure
+```bash
+docker compose up --build
+```
 
-```text
+This launches the Booking & Inventory Service together with PostgreSQL, Keycloak, RabbitMQ, and Redis.
+
+### 3. Configure Keycloak (one-time)
+
+Open the admin console at **http://localhost:8180** and sign in with the admin credentials from your `.env`.
+
+1. Create a realm named **`apextick`**.
+2. Create a **public** client **`apextick-web`** with:
+   - Standard flow and Direct access grants enabled
+   - Valid redirect URI: `http://localhost:3000/*`
+   - Web origin: `http://localhost:3000`
+   - Advanced → PKCE method: `S256`
+3. Create a user in the realm and set a password.
+
+### 4. Run the frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open **http://localhost:3000**, log in, and book a seat.
+
+### 5. (Optional) Run the notification service
+
+To watch the asynchronous flow, run the notification service (from your IDE, or `./mvnw spring-boot:run` inside `notification-service/`). It consumes `seat.held` events and logs a notification for every hold.
+
+## Running the load test
+
+Seed an event with 200 available seats first, then run the k6 script:
+
+```bash
+# from load-test/
+k6 run booking-load-test.js
+```
+
+The script reports holds won versus rejected and confirms that no seat is ever held twice — the same test that produced the numbers above.
+
+## Project structure
+
+```
 apextick/
-├── frontend/              # Next.js app
-├── booking-service/       # Spring Boot — core booking & inventory (concurrency)
-├── notification-service/  # Spring Boot — async event consumer
-├── infra/                 # Terraform & docker configs
-├── docs/                  # diagrams & full project document
-├── docker-compose.yml
-└── README.md
+├── booking-service/        # Spring Boot — atomic seat claims, JWT-secured REST API
+├── notification-service/   # Spring Boot — asynchronous RabbitMQ consumer
+├── frontend/               # Next.js — seat map UI with OIDC login
+├── load-test/              # k6 load + correctness test
+├── docker-compose.yml      # Full stack: services + Postgres, Keycloak, RabbitMQ, Redis
+└── .env.example            # Template for required environment variables
 ```
 
-## Load Testing
+## Ports
 
-The booking endpoint was load-tested with [k6](https://k6.io/) to validate correctness and performance under flash-sale contention.
+| Service | URL / Port |
+| --- | --- |
+| Booking & Inventory API | http://localhost:8081 |
+| Frontend | http://localhost:3000 |
+| Keycloak | http://localhost:8180 |
+| RabbitMQ management | http://localhost:15672 |
+| PostgreSQL | localhost:5440 |
+| Redis | localhost:6379 |
 
-**Scenario:** 5,000 concurrent booking attempts (200 virtual users) competing for 200 seats.
+## Roadmap
 
-| Metric                            | Result        |
-| --------------------------------- | ------------- |
-| Seats sold (HTTP 200)             | 200 / 200     |
-| Rejected — seat taken (HTTP 409)  | 4,800         |
-| Double-bookings                   | 0             |
-| Failed requests                   | 0.00%         |
-| Throughput                        | ~3,900 req/s  |
-| Latency p95 / p99                 | 146 / 224 ms  |
-
-Every seat was sold exactly once — the number of successful holds equals the number of `HELD`
-rows in the database, confirming the atomic conditional update eliminates double-booking even
-under heavy concurrent load.
-
-Reproduce: `k6 run load-test/booking-load-test.js` (stack up via `docker compose up`, seats seeded).
-
-## 🗺️ Roadmap
-
-- 🚧 **Phase A** — Core booking & inventory with concurrency-safe seat claiming (in progress)
-- ⬜ **Phase B** — Keycloak auth + Next.js frontend
-- ⬜ **Phase C** — RabbitMQ notification service + Redis holds/caching
-- ⬜ **Phase D** — WSO2 API Manager gateway + load testing
-- ⬜ **Phase E** — Terraform + AWS deployment
-
-## 📖 Documentation
-
-A full technical deep-dive — architecture, the concurrency model, the complete tech-stack rationale, and all diagrams — lives in [`docs/ApexTick-Project-Document.md`](docs/ApexTick-Project-Document.md).
+- Containerize the notification service and frontend for a single-command full stack
+- Automated Keycloak realm import to skip the manual setup
+- API gateway (WSO2 API Manager) in front of the services
+- CI pipeline (GitHub Actions) running the concurrency test on every push
+- Infrastructure-as-code deployment (Terraform + AWS)
 
 ---
 
-<sub>Built as a portfolio project to demonstrate distributed systems, concurrency, and full-stack engineering.</sub>
+Built by [Kalana Sandakelum](https://github.com/kalanas210).
