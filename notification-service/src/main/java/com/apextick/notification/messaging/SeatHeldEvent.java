@@ -1,4 +1,10 @@
 package com.apextick.notification.messaging;
 
-public record SeatHeldEvent() {
-}
+import java.time.Instant;
+
+public record SeatHeldEvent(
+        Long seatId,
+        String seatNumber,
+        String heldBy,
+        Instant heldUntil
+) {}

@@ -39,6 +39,24 @@ services:
     ports:
       - "8081:8081"
 
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: apextick-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: apextick
+      RABBITMQ_DEFAULT_PASS: apextick
+    ports:
+      - "5672:5672"     # AMQP — your services connect here
+      - "15672:15672"   # management UI — you open this in a browser
+  
+  redis:
+    image: redis:7-alpine
+    container_name: apextick-redis
+    command: redis-server --notify-keyspace-events Ex
+    ports:
+      - "6379:6379"
+      
 volumes:
   apextick_pgdata:
   apextick_keycloak_data:
+

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { AuthProvider } from 'react-oidc-context';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const oidcConfig = {
     authority: 'http://localhost:8180/realms/apextick',
@@ -11,18 +12,24 @@ const oidcConfig = {
     response_type: 'code',
     scope: 'openid profile email',
     onSigninCallback: () => {
-        // wipe the ?code=...&state=... off the URL after login completes
         window.history.replaceState({}, document.title, window.location.pathname);
     },
 };
 
 export default function Providers({ children }: { children: React.ReactNode }) {
     const [mounted, setMounted] = useState(false);
+    const [queryClient] = useState(() => new QueryClient());
     useEffect(() => setMounted(true), []);
 
     if (!mounted) {
         return <div className="p-8">Loading…</div>;
     }
 
-    return <AuthProvider {...oidcConfig}>{children}</AuthProvider>;
+    return (
+        <AuthProvider {...oidcConfig}>
+            <QueryClientProvider client={queryClient}>
+                {children}
+            </QueryClientProvider>
+        </AuthProvider>
+    );
 }
