@@ -3,15 +3,15 @@ services:
     image: postgres:18
     container_name: apextick-postgres
     environment:
-      POSTGRES_DB: apextick
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: eta8827
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5440:5432"
     volumes:
       - apextick_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d apextick"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -21,12 +21,29 @@ services:
     container_name: apextick-keycloak
     command: start-dev
     environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
     ports:
       - "8180:8080"
     volumes:
       - apextick_keycloak_data:/opt/keycloak/data
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: apextick-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  redis:
+    image: redis:7-alpine
+    container_name: apextick-redis
+    command: redis-server --notify-keyspace-events Ex
+    ports:
+      - "6379:6379"
 
   booking-service:
     build: ./booking-service
@@ -34,29 +51,24 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      keycloak:
+        condition: service_started
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_started
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/apextick
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/apextick/protocol/openid-connect/certs
     ports:
       - "8081:8081"
 
-  rabbitmq:
-    image: rabbitmq:4-management
-    container_name: apextick-rabbitmq
-    environment:
-      RABBITMQ_DEFAULT_USER: apextick
-      RABBITMQ_DEFAULT_PASS: apextick
-    ports:
-      - "5672:5672"     # AMQP — your services connect here
-      - "15672:15672"   # management UI — you open this in a browser
-  
-  redis:
-    image: redis:7-alpine
-    container_name: apextick-redis
-    command: redis-server --notify-keyspace-events Ex
-    ports:
-      - "6379:6379"
-      
 volumes:
   apextick_pgdata:
   apextick_keycloak_data:
-
