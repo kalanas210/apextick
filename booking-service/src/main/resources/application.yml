@@ -8,8 +8,8 @@ spring:
     name: booking-service
   datasource:
     url: jdbc:postgresql://localhost:5440/apextick
-    username: postgres
-    password: eta8827
+    username: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
   jpa:
     open-in-view: false        
     hibernate:
@@ -23,8 +23,8 @@ spring:
   rabbitmq:
     host: localhost
     port: 5672
-    username: apextick
-    password: apextick
+    username: ${RABBITMQ_USER}
+    password: ${RABBITMQ_PASSWORD}
 
   data:
     redis:
