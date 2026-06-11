@@ -6,8 +6,11 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.List;
 
 public interface SeatRepository extends JpaRepository<Seat,Long> {
+
+    List<Seat> findByEventIdOrderByIdAsc(Long eventId);
 
     @Modifying
     @Query(value = """
@@ -22,5 +25,10 @@ public interface SeatRepository extends JpaRepository<Seat,Long> {
     int holdSeat(@Param("seatId") Long seatId,
                  @Param("userId") String userId,
                  @Param("heldUntil") Instant heldUntil);
+
+    @Modifying
+    @Query(value = "UPDATE seats SET status = 'AVAILABLE', held_by = NULL, held_until = NULL " +
+            "WHERE id = :seatId AND status = 'HELD'", nativeQuery = true)
+    int releaseSeat(@Param("seatId") Long seatId);
 
 }
