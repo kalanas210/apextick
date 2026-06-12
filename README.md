@@ -2,6 +2,7 @@
 
 ![Java](https://img.shields.io/badge/Java-21-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white)
 ![Spring Boot](https://img.shields.io/badge/Spring_Boot-6DB33F?style=for-the-badge&logo=springboot&logoColor=white)
+![Swagger](https://img.shields.io/badge/Swagger-85EA2D?style=for-the-badge&logo=swagger&logoColor=black)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
 ![Liquibase](https://img.shields.io/badge/Liquibase-2962FF?style=for-the-badge&logo=liquibase&logoColor=white)
 ![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)
@@ -153,6 +154,10 @@ Open **http://localhost:3000**, log in, and book a seat.
 ### 5. (Optional) Run the notification service
 
 To watch the asynchronous flow, run the notification service (from your IDE, or `./mvnw spring-boot:run` inside `notification-service/`). It consumes `seat.held` events and logs a notification for every hold.
+
+## API documentation
+
+Once the backend is running, the Booking & Inventory API serves interactive OpenAPI docs (Swagger UI) via [springdoc-openapi](https://springdoc.org) at **http://localhost:8081/swagger-ui.html**. Use the **Authorize** button to paste a Keycloak access token, then browse and try the secured endpoints directly from the browser.
 
 ## Running the load test
 
