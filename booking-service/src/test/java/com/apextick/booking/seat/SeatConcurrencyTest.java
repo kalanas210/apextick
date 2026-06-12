@@ -1,15 +1,13 @@
 package com.apextick.booking.seat;
 
+import com.apextick.booking.IntegrationTestConfig;
 import com.apextick.booking.event.Event;
 import com.apextick.booking.event.EventRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
+import org.springframework.context.annotation.Import;
 
 import java.time.Instant;
 import java.util.concurrent.*;
@@ -18,13 +16,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
-@Testcontainers
+@Import(IntegrationTestConfig.class)
 class SeatConcurrencyTest {
-
-    @Container
-    @ServiceConnection
-    static PostgreSQLContainer<?> postgres =
-            new PostgreSQLContainer<>("postgres:16-alpine");
 
     @Autowired SeatService seatService;
     @Autowired SeatRepository seatRepository;
@@ -64,8 +57,8 @@ class SeatConcurrencyTest {
                 String user = "user-" + i;
                 pool.submit(() -> {
                     try {
-                        startGate.await();                  // line up...
-                        seatService.holdSeat(seatId, user); // ...then all fire at once
+                        startGate.await();
+                        seatService.holdSeat(seatId, user);
                         wins.incrementAndGet();
                     } catch (SeatUnavailableException e) {
                         rejections.incrementAndGet();
@@ -77,12 +70,12 @@ class SeatConcurrencyTest {
                 });
             }
 
-            startGate.countDown();                          // release the stampede
+            startGate.countDown();
             assertThat(doneGate.await(20, TimeUnit.SECONDS)).isTrue();
         }
 
-        assertThat(wins.get()).isEqualTo(1);                    // exactly one winner
-        assertThat(rejections.get()).isEqualTo(contenders - 1); // everyone else rejected
+        assertThat(wins.get()).isEqualTo(1);
+        assertThat(rejections.get()).isEqualTo(contenders - 1);
 
         Seat finalSeat = seatRepository.findById(seatId).orElseThrow();
         assertThat(finalSeat.getStatus()).isEqualTo(SeatStatus.HELD);
