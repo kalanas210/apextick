@@ -12,7 +12,8 @@
       "directAccessGrantsEnabled": true,
       "redirectUris": [
         "http://localhost:3000/*",
-        "http://13.212.113.135:3000/*"
+        "http://54.255.121.222:3000/*",
+        "https://54.255.121.222.nip.io/*"
       ],
       "webOrigins": [
         "+"

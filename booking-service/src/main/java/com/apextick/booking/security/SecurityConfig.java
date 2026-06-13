@@ -1,5 +1,6 @@
 package com.apextick.booking.security;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
@@ -14,6 +15,13 @@ import java.util.List;
 
 @Configuration
 public class SecurityConfig {
+
+    // Comma-separated list of browser origins allowed to call this API.
+    // Defaults to local dev; in deployed environments set APP_CORS_ALLOWED_ORIGINS
+    // (e.g. "http://localhost:3000,http://<server-ip>:3000") so the real frontend
+    // origin passes the CORS preflight instead of being rejected.
+    @Value("${app.cors.allowed-origins:http://localhost:3000}")
+    private List<String> allowedOrigins;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -33,7 +41,7 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of("http://localhost:3000"));
+        config.setAllowedOrigins(allowedOrigins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
