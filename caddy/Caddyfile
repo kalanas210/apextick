@@ -1,0 +1,34 @@
+# Single public HTTPS origin for the whole app. Caddy terminates TLS with an
+# automatically-provisioned, browser-trusted ACME certificate and routes by
+# path to the internal services over the docker network.
+#
+# SERVER_IP is injected from the environment (docker-compose), e.g.
+# 13.212.113.135  ->  https://13.212.113.135.nip.io
+{$SERVER_IP}.nip.io {
+	encode gzip
+
+	# --- Keycloak (OIDC: discovery, token, auth, login theme, admin) ---
+	# `handle` (not handle_path) keeps the full path so Keycloak sees /realms/...
+	handle /realms/* {
+		reverse_proxy keycloak:8080
+	}
+	handle /resources/* {
+		reverse_proxy keycloak:8080
+	}
+	handle /admin/* {
+		reverse_proxy keycloak:8080
+	}
+	handle /js/* {
+		reverse_proxy keycloak:8080
+	}
+
+	# --- Booking API ---
+	handle /api/* {
+		reverse_proxy booking-service:8081
+	}
+
+	# --- Everything else -> Next.js frontend (/, /_next, /favicon.ico, ...) ---
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

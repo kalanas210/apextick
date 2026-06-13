@@ -22,6 +22,10 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      # Behind the Caddy reverse proxy: trust X-Forwarded-* and advertise the
+      # public HTTPS URL so issuer / auth / redirect URLs are correct.
+      KC_PROXY_HEADERS: xforwarded
+      KC_HOSTNAME: https://${SERVER_IP}.nip.io
     ports:
       - "8180:8080"
     volumes:
@@ -68,8 +72,12 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
       SPRING_RABBITMQ_HOST: rabbitmq
       SPRING_DATA_REDIS_HOST: redis
+      # Keys are fetched server-side over the internal docker network, but the
+      # issuer claim in tokens is the public HTTPS URL (what the browser used),
+      # so issuer-uri must match that exactly.
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/apextick/protocol/openid-connect/certs
-      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://${SERVER_IP}:8180/realms/apextick
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: https://${SERVER_IP}.nip.io/realms/apextick
+      APP_CORS_ALLOWED_ORIGINS: http://localhost:3000,http://${SERVER_IP}:3000,https://${SERVER_IP}.nip.io
     ports:
       - "8081:8081"
     restart: unless-stopped
@@ -94,5 +102,29 @@ services:
       - "3000:3000"
     restart: unless-stopped
 
+  # TLS-terminating reverse proxy. Serves one HTTPS origin
+  # (https://<SERVER_IP>.nip.io) and routes by path:
+  #   /realms,/resources,/admin,/js -> keycloak   /api -> booking   else -> frontend
+  # Caddy auto-provisions a browser-trusted cert via ACME (ports 80/443).
+  caddy:
+    image: caddy:2-alpine
+    container_name: apextick-caddy
+    depends_on:
+      - frontend
+      - keycloak
+      - booking-service
+    environment:
+      SERVER_IP: ${SERVER_IP}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
 volumes:
   apextick_pgdata:
+  caddy_data:
+  caddy_config:

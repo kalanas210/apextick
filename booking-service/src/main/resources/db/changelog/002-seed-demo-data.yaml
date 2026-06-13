@@ -1,0 +1,31 @@
+databaseChangeLog:
+
+  # Seed one demo event + a 4x5 block of available seats so the UI has something
+  # to render out of the box. Guarded by a precondition: if the events table is
+  # already populated, the changeSet is marked as ran without executing, so it
+  # never conflicts with data inserted by hand or on a re-run.
+  - changeSet:
+      id: 3
+      author: kalanas210
+      comment: Seed demo event 1 with 20 AVAILABLE seats (skipped if events already exist)
+      preConditions:
+        - onFail: MARK_RAN
+        - sqlCheck:
+            expectedResult: 0
+            sql: SELECT COUNT(*) FROM events
+      changes:
+        - sql:
+            sql: >-
+              INSERT INTO events (name, venue, starts_at)
+              VALUES ('ApexTick Live 2026', 'Main Arena', TIMESTAMPTZ '2026-09-01 19:00:00+00');
+        - sql:
+            sql: >-
+              INSERT INTO seats (event_id, seat_number)
+              SELECT (SELECT id FROM events ORDER BY id LIMIT 1), v.s
+              FROM (VALUES ('A1'),('A2'),('A3'),('A4'),('A5'),
+                           ('B1'),('B2'),('B3'),('B4'),('B5'),
+                           ('C1'),('C2'),('C3'),('C4'),('C5'),
+                           ('D1'),('D2'),('D3'),('D4'),('D5')) AS v(s);
+      rollback:
+        - sql: DELETE FROM seats;
+        - sql: DELETE FROM events;

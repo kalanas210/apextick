@@ -36,10 +36,20 @@ resource "aws_instance" "app" {
   tags = { Name = "apextick-server" }
 }
 
+# A static (Elastic) IP pinned to the instance, so the public IP no longer
+# changes when the instance is stopped/started. Without this, a reboot hands
+# the box a new IP and breaks both the <ip>.nip.io hostname and the TLS cert.
+resource "aws_eip" "app" {
+  instance   = aws_instance.app.id
+  domain     = "vpc"
+  tags       = { Name = "apextick-eip" }
+  depends_on = [aws_internet_gateway.main]
+}
+
 output "server_ip" {
-  value = aws_instance.app.public_ip
+  value = aws_eip.app.public_ip
 }
 
 output "ssh_command" {
-  value = "ssh -i apextick-key ubuntu@${aws_instance.app.public_ip}"
+  value = "ssh -i apextick-key ubuntu@${aws_eip.app.public_ip}"
 }

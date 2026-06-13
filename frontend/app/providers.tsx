@@ -15,9 +15,17 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     const oidcConfig = useMemo(() => {
         if (!mounted) return null;
         const host = window.location.hostname;   // localhost  OR  the EC2 IP
-        const origin = window.location.origin;   // http://<host>:3000
+        const origin = window.location.origin;   // http://<host>:3000  OR  https://<host>
+        // Over HTTPS we're behind the Caddy reverse proxy, so Keycloak is reachable
+        // same-origin under /realms (no port, no CORS, and PKCE's crypto.subtle works
+        // because the page is now a secure context). Over plain HTTP (local dev /
+        // direct-IP) we hit Keycloak on its own port instead.
+        const proxied = window.location.protocol === 'https:';
+        const authority = proxied
+            ? `${origin}/realms/apextick`
+            : `http://${host}:8180/realms/apextick`;
         return {
-            authority: `http://${host}:8180/realms/apextick`,
+            authority,
             client_id: 'apextick-web',
             redirect_uri: origin,
             post_logout_redirect_uri: origin,
