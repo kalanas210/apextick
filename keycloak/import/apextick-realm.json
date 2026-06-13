@@ -11,7 +11,8 @@
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": true,
       "redirectUris": [
-        "http://localhost:3000/*"
+        "http://localhost:3000/*",
+        "http://13.212.113.135:3000/*"
       ],
       "webOrigins": [
         "+"
