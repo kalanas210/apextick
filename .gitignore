@@ -1,0 +1,24 @@
+# Build output
+target/
+build/
+*.class
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS / logs
+.DS_Store
+Thumbs.db
+*.log

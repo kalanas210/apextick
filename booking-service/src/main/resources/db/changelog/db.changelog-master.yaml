@@ -1,0 +1,7 @@
+databaseChangeLog:
+  - include:
+      file: 001-init-events-and-seats.yaml
+      relativeToChangelogFile: true
+  - include:
+      file: 002-seed-demo-data.yaml
+      relativeToChangelogFile: true
