@@ -90,7 +90,7 @@ export function Hero() {
       onMouseLeave={() => setPaused(false)}
       onFocusCapture={() => setPaused(true)}
       onBlurCapture={() => setPaused(false)}
-      className="relative h-screen min-h-[640px] overflow-hidden"
+      className="relative h-svh min-h-[640px] overflow-hidden"
       style={{ "--tint": tint } as CSSProperties}
     >
       {/* Image stack, video-like Ken Burns push on the active frame */}
@@ -168,7 +168,7 @@ export function Hero() {
       </div>
 
       {/* Foreground */}
-      <div className="shell relative z-10 flex h-full flex-col justify-between pb-24 pt-20 md:pb-32 md:pt-[6.5rem]">
+      <div className="shell relative z-10 flex h-full flex-col justify-between pb-28 pt-20 md:pb-32 md:pt-[6.5rem]">
         <h1 className="sr-only">
           ApexTick, live tickets for the ICC T20 World Cup 2026, the Indian
           Premier League, the Premier League, and the FIFA World Cup
