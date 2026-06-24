@@ -1,26 +1,293 @@
 @import "tailwindcss";
 
+/* ----------------------------------------------------------------------------
+   ApexTick design tokens
+   A warm near-black canvas, a bone off-white, and a single electric-lime accent.
+   Each event carries its own tint, used only inside its own context.
+---------------------------------------------------------------------------- */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Canvas + ink */
+  --ink: #0b0b0c;
+  --ink-2: #101012;
+  --ink-3: #17171a;
+  --ink-4: #1f1f23;
+
+  /* Off-white + text */
+  --bone: #f4f2ec;
+  --bone-2: #e7e4da;
+  --muted: #9a958a;
+  --faint: #8a857b;
+
+  /* Hairlines */
+  --line: rgba(244, 242, 236, 0.1);
+  --line-2: rgba(244, 242, 236, 0.18);
+  --line-strong: rgba(244, 242, 236, 0.32);
+
+  /* Signature accent */
+  --accent: #c9f23f;
+  --accent-ink: #0b0b0c;
+
+  /* Event tints */
+  --icc: #46b1ff;
+  --ipl: #ff3d77;
+  --pl: #ed3f2c;
+
+  /* The active event tint, set per page/section via inline style */
+  --tint: var(--accent);
+
+  --shell: 1480px;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+  --color-bone: var(--bone);
+  --color-bone-2: var(--bone-2);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-tint: var(--tint);
+
+  --font-display: var(--font-bricolage), "Inter Tight", ui-sans-serif, system-ui,
+    sans-serif;
+  --font-body: var(--font-inter-tight), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", monospace;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  * {
+    border-color: var(--line);
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background: var(--ink);
+    color: var(--bone);
+    font-family: var(--font-body);
+    font-feature-settings: "ss01", "cv01";
+    overflow-x: hidden;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  ::selection {
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  /* Native form controls keep our tint */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--ink);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--ink-4);
+    border-radius: 999px;
+    border: 2px solid var(--ink);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #2c2c31;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  .shell {
+    width: 100%;
+    max-width: var(--shell);
+    margin-inline: auto;
+    padding-inline: clamp(1.25rem, 5vw, 4rem);
+  }
+
+  /* Eyebrow / kicker label */
+  .kicker {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    font-weight: 500;
+    color: var(--muted);
+  }
+
+  .tnum {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  /* Display headline rhythm */
+  .display {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.035em;
+    line-height: 0.92;
+    text-wrap: balance;
+  }
+
+  .hairline {
+    border-top: 1px solid var(--line);
+  }
+
+  /* Thin animated underline used on inline links */
+  .ulink {
+    position: relative;
+    white-space: nowrap;
+  }
+  .ulink::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: -2px;
+    height: 1px;
+    width: 100%;
+    background: currentColor;
+    transform: scaleX(0);
+    transform-origin: right;
+    transition: transform 0.45s var(--ease-out-expo);
+  }
+  .ulink:hover::after {
+    transform: scaleX(1);
+    transform-origin: left;
+  }
+}
+
+@layer utilities {
+  .text-tint {
+    color: var(--tint);
+  }
+  .bg-tint {
+    background-color: var(--tint);
+  }
+  .border-tint {
+    border-color: var(--tint);
+  }
+
+  .mask-fade-r {
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent,
+      #000 8%,
+      #000 92%,
+      transparent
+    );
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      #000 8%,
+      #000 92%,
+      transparent
+    );
+  }
+
+  .mask-fade-b {
+    -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent);
+    mask-image: linear-gradient(to bottom, #000 70%, transparent);
+  }
+}
+
+/* Continuous marquee tracks */
+@keyframes apex-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+@keyframes apex-marquee-rev {
+  from {
+    transform: translateX(-50%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+.marquee-track {
+  animation: apex-marquee linear infinite;
+}
+.marquee-track-rev {
+  animation: apex-marquee-rev linear infinite;
+}
+.marquee:hover .marquee-track,
+.marquee:hover .marquee-track-rev {
+  animation-play-state: paused;
+}
+
+/* Keyboard skip link: parked above the viewport, slides in on focus */
+.skip-link {
+  position: fixed;
+  left: 1rem;
+  top: -5rem;
+  z-index: 70;
+  opacity: 0;
+  transition:
+    top 0.25s ease,
+    opacity 0.25s ease;
+}
+.skip-link:focus {
+  top: 1rem;
+  opacity: 1;
+}
+
+/* Lenis smooth scroll */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+.lenis.lenis-stopped {
+  overflow: clip;
+}
+
+/* Respect reduced motion: stop scrubbing/looping, keep content legible. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .marquee-track,
+  .marquee-track-rev {
+    animation: none !important;
+  }
 }

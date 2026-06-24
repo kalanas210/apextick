@@ -6,6 +6,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 export default function Providers({ children }: { children: React.ReactNode }) {
     const [mounted, setMounted] = useState(false);
     const [queryClient] = useState(() => new QueryClient());
+    // One-time mount flag so the OIDC config is built only in the browser.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     useEffect(() => setMounted(true), []);
 
     // Build the OIDC config once, after mount. `window` doesn't exist during

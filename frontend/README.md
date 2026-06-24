@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ApexTick
 
-## Getting Started
+A real time ticket booking experience for the biggest nights in world sport. This is the public marketing and seat selection frontend: a flagship, type led interface built on mock data so the whole thing runs on its own with no backend.
 
-First, run the development server:
+Three flagship series are modelled as distinct brand worlds inside one design system:
+
+- ICC T20 World Cup 2026 (cricket, international)
+- Indian Premier League (cricket, franchise)
+- Premier League (football, English matchday)
+
+## Stack
+
+- Next.js 16 (App Router) with React 19 and TypeScript
+- Tailwind CSS v4 with design tokens defined in `app/globals.css`
+- Framer Motion for scroll driven and physical motion
+- Lenis for inertial smooth scrolling, disabled under reduced motion
+- `next/font` self hosting Bricolage Grotesque, Inter Tight, and Geist Mono
+- `next/image` with optimized remote imagery
+
+## Getting started
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000. The app needs nothing else running.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run build   # production build
+npm run lint    # eslint
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Routes
 
-## Learn More
+| Route | Purpose |
+| --- | --- |
+| `/` | Scroll driven hero, series showcase, fixtures, stats, and the matchday story |
+| `/events` | Every fixture, filterable by sport, series, and month |
+| `/events/[slug]` | A single fixture: matchup, pricing tiers, and stand selector |
+| `/events/[slug]/seats` | Interactive seat map with a live order summary and hold timer |
 
-To learn more about Next.js, take a look at the following resources:
+## Structure
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```
+app/                 routes and the root layout
+components/
+  ui/                reusable primitives (buttons, motion, crest, marquee, grain)
+  site/              header, footer, logo, smooth scroll
+  home/              home page sections
+  fixtures/          fixture card, listing explorer, tier panel
+  seatmap/           seat map, stadium diagram, tier colors
+data/                typed mock data for series, fixtures, teams, tiers
+lib/                 formatting, color, seat generation, class helpers
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Design system
 
-## Deploy on Vercel
+- Warm near black canvas (`#0B0B0C`) and a bone off white (`#F4F2EC`)
+- One signature accent, an electric lime (`#C9F23F`), used sparingly site wide
+- A secondary tint per series, used only inside that series' own context
+- Bricolage Grotesque for tight display headlines, Inter Tight for body, Geist Mono for tabular numbers
+- Hairline borders, a baseline grid, film grain, and graded photography for energy
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Data
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+All fixtures, teams, prices, and seating are sample data in `data/events.ts`. Team crests are typographic monograms generated in code, not official logos. Seat availability is produced from a deterministic hash so it is stable between renders. The seat selection and checkout are a demonstration only and take no payment.
