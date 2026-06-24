@@ -102,7 +102,7 @@ function SeriesBand({
 
 export function SeriesShowcase() {
   return (
-    <section id="series" className="shell scroll-mt-24 py-24 md:py-32">
+    <section id="series" className="shell scroll-mt-24 pb-24 pt-10 md:py-32">
       <SectionHeading
         index="01"
         kicker="Four worlds"

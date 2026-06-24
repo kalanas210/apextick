@@ -14,24 +14,24 @@ const EASE = [0.16, 1, 0.3, 1] as const;
 
 const SEGMENTS = [
   {
-    series: seriesList[0],
+    series: seriesList[0], // ICC T20 World Cup
     title: ["Every nation,", "one trophy."],
     meta: "Final, 8 Mar 2026, Ahmedabad",
   },
   {
-    series: seriesList[1],
-    title: ["Ten cities,", "one obsession."],
-    meta: "Apr to May 2026, across India",
-  },
-  {
-    series: seriesList[2],
+    series: seriesList[2], // Premier League
     title: ["Ninety minutes,", "full voice."],
     meta: "Every weekend, England",
   },
   {
-    series: seriesList[3],
+    series: seriesList[3], // FIFA World Cup
     title: ["The world's game,", "biggest stage."],
     meta: "Jun to Jul 2026, North America",
+  },
+  {
+    series: seriesList[1], // Indian Premier League
+    title: ["Ten cities,", "one obsession."],
+    meta: "Apr to May 2026, across India",
   },
 ] as const;
 
@@ -168,7 +168,7 @@ export function Hero() {
       </div>
 
       {/* Foreground */}
-      <div className="shell relative z-10 flex h-full flex-col justify-between pb-28 pt-20 md:pb-32 md:pt-[6.5rem]">
+      <div className="shell relative z-10 flex h-full flex-col justify-between pb-20 pt-20 md:pb-32 md:pt-[6.5rem]">
         <h1 className="sr-only">
           ApexTick, live tickets for the ICC T20 World Cup 2026, the Indian
           Premier League, the Premier League, and the FIFA World Cup
