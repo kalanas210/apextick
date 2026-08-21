@@ -4,11 +4,29 @@ on:
   push:
     branches: [ main, develop ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, develop ]
+
+# Least privilege: the build must never be able to push or modify the repo.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  guard:
+    name: Injected-code guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+      - name: Scan for injected/obfuscated code in config files
+        run: bash scripts/ci/check-injected-code.sh
+
   booking-service:
     name: Booking Service
+    needs: guard
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -27,6 +45,7 @@ jobs:
 
   notification-service:
     name: Notification Service
+    needs: guard
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -45,6 +64,7 @@ jobs:
 
   frontend:
     name: Frontend
+    needs: guard
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -59,7 +79,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: frontend
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build
         working-directory: frontend
