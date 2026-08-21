@@ -1,0 +1,7 @@
+# Test profile: infrastructure comes from Testcontainers (@ServiceConnection),
+# so only behavioural overrides live here.
+spring:
+  jpa:
+    show-sql: false
+  liquibase:
+    contexts: demo
