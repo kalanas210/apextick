@@ -1,0 +1,6 @@
+# Keep shell scripts / hooks / wrappers LF so they run inside containers and Git Bash
+*.sh               text eol=lf
+scripts/git-hooks/* text eol=lf
+mvnw               text eol=lf
+Caddyfile          text eol=lf
+*.tftpl            text eol=lf
