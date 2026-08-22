@@ -27,4 +27,13 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     @Query("select count(oi) > 0 from OrderItem oi where oi.seatId in :seatIds "
             + "and oi.order.status = com.apextick.booking.order.OrderStatus.PENDING_PAYMENT")
     boolean existsPendingForSeats(@Param("seatIds") Collection<Long> seatIds);
+
+    boolean existsByEventId(Long eventId);
+
+    org.springframework.data.domain.Page<Order> findAllByOrderByCreatedAtDesc(org.springframework.data.domain.Pageable pageable);
+
+    org.springframework.data.domain.Page<Order> findByStatusOrderByCreatedAtDesc(OrderStatus status, org.springframework.data.domain.Pageable pageable);
+
+    @Query("select coalesce(sum(o.total), 0) from Order o where o.event.id = :eventId and o.status = com.apextick.booking.order.OrderStatus.PAID")
+    java.math.BigDecimal paidRevenueForEvent(@Param("eventId") Long eventId);
 }
