@@ -1,7 +1,9 @@
-package com.apextick.booking.event;
+package com.apextick.booking.catalog;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -9,27 +11,30 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-import java.time.Instant;
 
 @Entity
-@Table(name = "events")
+@Table(name = "teams")
 @Getter
 @Setter
 @NoArgsConstructor
-public class Event {
+public class Team {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private Sport sport;
+
     @Column(nullable = false)
     private String name;
 
-    @Column(nullable = false)
-    private String venue;
+    @Column(name = "short_code", nullable = false)
+    private String shortCode;
 
-    @Column(name = "starts_at", nullable = false)
-    private Instant startsAt;
-
+    private String monogram;
+    private String color;
+    private String flag;
+    private String logo;
 }
-
