@@ -5,7 +5,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 export default function Providers({ children }: { children: React.ReactNode }) {
     const [mounted, setMounted] = useState(false);
-    const [queryClient] = useState(() => new QueryClient());
+    const [queryClient] = useState(() => new QueryClient({
+        defaultOptions: {
+            queries: {
+                // seat availability moves constantly; never serve it stale on focus
+                refetchOnWindowFocus: true,
+                retry: 1,
+            },
+        },
+    }));
     // One-time mount flag so the OIDC config is built only in the browser.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     useEffect(() => setMounted(true), []);
@@ -33,14 +41,21 @@ export default function Providers({ children }: { children: React.ReactNode }) {
             post_logout_redirect_uri: origin,
             response_type: 'code',
             scope: 'openid profile email',
+            // keep long checkout sessions alive rather than 401-ing mid-payment
+            automaticSilentRenew: true,
             onSigninCallback: () => {
+                // drop ?code=&state= from the address bar, keeping the page the
+                // user signed in from (useSession passes it as redirect_uri)
                 window.history.replaceState({}, document.title, window.location.pathname);
             },
         };
     }, [mounted]);
 
-    if (!mounted || !oidcConfig) {
-        return <div className="p-8">Loading…</div>;
+    // Children always render, even before the auth client exists: the marketing
+    // pages stay server-rendered, and `useSession` reports "loading" until the
+    // provider below mounts.
+    if (!oidcConfig) {
+        return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
     }
 
     return (

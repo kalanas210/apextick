@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { AuthShell } from "@/components/auth/auth-shell";
-import { RegisterForm } from "@/components/auth/register-form";
+import { KeycloakSignIn } from "@/components/auth/keycloak-signin";
 import { IMG } from "@/data/images";
 
 export const metadata: Metadata = {
@@ -20,7 +20,7 @@ export default function RegisterPage() {
       quote="Join the room. The best nights in sport, one tap away."
       quoteCaption="Premier League"
     >
-      <RegisterForm />
+      <KeycloakSignIn action="register" />
     </AuthShell>
   );
 }

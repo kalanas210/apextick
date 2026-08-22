@@ -1,12 +1,10 @@
 import axios from 'axios';
+import type { ProblemDetail } from './types';
 
-// This module can be evaluated during server-side rendering, where `window`
-// doesn't exist, so guard it. Your API calls only ever fire in the browser,
-// where window IS defined and gives the correct host.
-//
-// Over HTTPS we're behind the Caddy reverse proxy: the booking API is same-origin
-// under /api (baseURL = origin). Over plain HTTP (local dev / direct-IP) we hit the
-// booking service on its own port. Endpoints are prefixed with /api either way.
+/**
+ * Behind Caddy (https) the API is same-origin; in local development the
+ * booking service answers on :8081 alongside `next dev` on :3000.
+ */
 const baseURL =
     typeof window !== 'undefined'
         ? (window.location.protocol === 'https:'
@@ -15,3 +13,36 @@ const baseURL =
         : '';
 
 export const api = axios.create({ baseURL });
+
+/** Absolute URL for an API path — needed for links the browser follows itself (PDF downloads). */
+export function apiUrl(path: string): string {
+    return `${baseURL}${path}`;
+}
+
+export function authHeaders(token?: string): Record<string, string> {
+    return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+/**
+ * Human-readable message from an API failure. The backend speaks RFC-7807, so
+ * prefer its `detail` over axios's generic "Request failed with status code…".
+ */
+export function apiErrorMessage(error: unknown, fallback = 'Something went wrong.'): string {
+    if (axios.isAxiosError(error)) {
+        const problem = error.response?.data as ProblemDetail | undefined;
+        if (problem?.detail) {
+            return problem.detail;
+        }
+        if (error.response?.status === 401) {
+            return 'Your session expired. Please sign in again.';
+        }
+    }
+    return fallback;
+}
+
+/** The API's machine-readable error code (e.g. `SEAT_UNAVAILABLE`), when present. */
+export function apiErrorCode(error: unknown): string | undefined {
+    return axios.isAxiosError(error)
+        ? (error.response?.data as ProblemDetail | undefined)?.code
+        : undefined;
+}

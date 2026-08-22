@@ -6,6 +6,7 @@ import { ScrollProgress } from "@/components/ui/scroll-progress";
 import { SmoothScroll } from "@/components/site/smooth-scroll";
 import { Chrome } from "@/components/site/chrome";
 import { Footer } from "@/components/site/footer";
+import Providers from "./providers";
 
 const display = Bricolage_Grotesque({
   subsets: ["latin"],
@@ -69,7 +70,9 @@ export default function RootLayout({
         <Grain />
         <SmoothScroll />
         <ScrollProgress />
-        <Chrome footer={<Footer />}>{children}</Chrome>
+        <Providers>
+          <Chrome footer={<Footer />}>{children}</Chrome>
+        </Providers>
       </body>
     </html>
   );
