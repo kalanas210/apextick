@@ -22,3 +22,5 @@ app:
     fee-percent: 5
     payment-window: PT10M
     sweeper-interval: PT30S
+  payment:
+    provider: mock

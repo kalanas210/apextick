@@ -82,3 +82,5 @@ app:
     fee-percent: ${APP_ORDER_FEE_PERCENT:5}
     payment-window: ${APP_ORDER_PAYMENT_WINDOW:PT10M}
     sweeper-interval: ${APP_ORDER_SWEEPER_INTERVAL:PT30S}
+  payment:
+    provider: ${APP_PAYMENT_PROVIDER:mock}

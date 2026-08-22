@@ -104,6 +104,15 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
             """)
     int releaseSeatsHeldBy(@Param("ids") Collection<Long> ids, @Param("sub") String sub);
 
+    @Modifying(flushAutomatically = true)
+    @Query("""
+            update Seat s
+               set s.status = com.apextick.booking.seat.SeatStatus.BOOKED,
+                   s.heldUntil = null, s.version = s.version + 1
+             where s.id in :ids and s.status = com.apextick.booking.seat.SeatStatus.HELD and s.heldBy = :sub
+            """)
+    int bookSeatsHeldBy(@Param("ids") Collection<Long> ids, @Param("sub") String sub);
+
     // ---- counts (catalog) ----
 
     long countByEventId(Long eventId);
