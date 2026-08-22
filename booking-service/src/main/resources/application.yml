@@ -67,3 +67,11 @@ app:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:3000}
   public-url: ${APP_PUBLIC_URL:http://localhost:8081}
   web-url: ${APP_WEB_URL:http://localhost:3000}
+  hold:
+    duration: ${APP_HOLD_DURATION:PT5M}
+    max-seats: ${APP_HOLD_MAX_SEATS:8}
+  outbox:
+    poll-interval: ${APP_OUTBOX_POLL_INTERVAL:PT1S}
+    batch-size: ${APP_OUTBOX_BATCH_SIZE:100}
+    max-attempts: ${APP_OUTBOX_MAX_ATTEMPTS:10}
+    confirm-timeout: ${APP_OUTBOX_CONFIRM_TIMEOUT:PT5S}

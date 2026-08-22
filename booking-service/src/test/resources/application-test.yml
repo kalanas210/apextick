@@ -5,3 +5,13 @@ spring:
     show-sql: false
   liquibase:
     contexts: demo
+
+app:
+  hold:
+    duration: PT5M
+    max-seats: 8
+  outbox:
+    poll-interval: PT0.2S
+    batch-size: 100
+    max-attempts: 5
+    confirm-timeout: PT5S
