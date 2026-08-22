@@ -47,13 +47,14 @@ body::before {
   position: fixed;
   inset: 0;
   z-index: 0;
-  background-image: url("../img/stadium.jpg");
+  background-image: url("../img/premier-league.jpg");
   background-size: cover;
-  background-position: center 35%;
+  background-position: center 40%;
   background-repeat: no-repeat;
-  /* grade it down so white text holds contrast anywhere on the frame */
-  filter: saturate(0.75) contrast(1.05);
-  opacity: 0.55;
+  /* Only a light grade: the photograph is meant to be seen. Contrast for the
+     text comes from the wash below, not from hiding the image. */
+  filter: saturate(0.9) contrast(1.04);
+  opacity: 0.92;
 }
 
 /* Two washes over the photo: a flat knock-down, then a directional fade that
@@ -66,8 +67,11 @@ body::after {
   z-index: 0;
   pointer-events: none;
   background:
-    linear-gradient(to bottom, rgba(11, 11, 12, 0.72), rgba(11, 11, 12, 0.88) 55%, var(--apextick-ink)),
-    radial-gradient(70rem 45rem at 12% -10%, rgba(201, 242, 63, 0.1), transparent 62%);
+    /* darkest where the card sits, clearing towards the edges so the stands
+       and the floodlights stay readable */
+    radial-gradient(48rem 40rem at 50% 52%, rgba(11, 11, 12, 0.86), rgba(11, 11, 12, 0.34) 78%),
+    linear-gradient(to bottom, rgba(11, 11, 12, 0.66), rgba(11, 11, 12, 0.24) 45%, rgba(11, 11, 12, 0.84)),
+    radial-gradient(70rem 45rem at 12% -10%, rgba(201, 242, 63, 0.08), transparent 62%);
 }
 
 /* Everything Keycloak renders sits above the backdrop. */
@@ -94,8 +98,8 @@ body::after {
 /* ------------------------------- the card ------------------------------- */
 
 .pf-v5-c-login__main {
-  background: rgba(19, 19, 22, 0.82);
-  backdrop-filter: blur(18px) saturate(1.1);
+  background: rgba(15, 15, 18, 0.88);
+  backdrop-filter: blur(22px) saturate(1.15);
   border: 1px solid var(--apextick-line-2);
   border-radius: 1rem;
   box-shadow: 0 2rem 5rem rgba(0, 0, 0, 0.6);
@@ -154,7 +158,7 @@ body::after {
   color: var(--apextick-bone);
 }
 
-.apextick-wordmark span {
+.apextick-wordmark > span:not(.apextick-tagline) {
   color: var(--apextick-accent);
 }
 
@@ -166,7 +170,7 @@ body::after {
   font-weight: 500;
   letter-spacing: 0.28em;
   text-transform: uppercase;
-  color: var(--apextick-faint);
+  color: rgba(244, 242, 236, 0.62);
 }
 
 /* -------------------------------- fields -------------------------------- */
