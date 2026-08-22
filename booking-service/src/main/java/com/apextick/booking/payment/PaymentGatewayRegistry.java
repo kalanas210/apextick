@@ -29,4 +29,9 @@ public class PaymentGatewayRegistry {
     public PaymentProvider defaultProvider() {
         return defaultProvider;
     }
+
+    /** Providers with a registered gateway bean, in bean-discovery order. */
+    public List<PaymentProvider> providers() {
+        return gateways.stream().map(PaymentGateway::provider).toList();
+    }
 }

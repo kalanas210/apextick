@@ -84,6 +84,12 @@ app:
     sweeper-interval: ${APP_ORDER_SWEEPER_INTERVAL:PT30S}
   payment:
     provider: ${APP_PAYMENT_PROVIDER:mock}
+    stripe:
+      secret-key: ${STRIPE_SECRET_KEY:}
+      publishable-key: ${STRIPE_PUBLISHABLE_KEY:}
+      webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+      # Comma-separated allow-list (e.g. usd,gbp,inr); empty accepts every currency.
+      supported-currencies: ${STRIPE_SUPPORTED_CURRENCIES:}
   rate-limit:
     enabled: ${APP_RATE_LIMIT_ENABLED:true}
     hold:
