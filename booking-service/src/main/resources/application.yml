@@ -78,3 +78,7 @@ app:
     batch-size: ${APP_OUTBOX_BATCH_SIZE:100}
     max-attempts: ${APP_OUTBOX_MAX_ATTEMPTS:10}
     confirm-timeout: ${APP_OUTBOX_CONFIRM_TIMEOUT:PT5S}
+  order:
+    fee-percent: ${APP_ORDER_FEE_PERCENT:5}
+    payment-window: ${APP_ORDER_PAYMENT_WINDOW:PT10M}
+    sweeper-interval: ${APP_ORDER_SWEEPER_INTERVAL:PT30S}

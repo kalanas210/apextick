@@ -18,3 +18,7 @@ app:
     batch-size: 100
     max-attempts: 5
     confirm-timeout: PT5S
+  order:
+    fee-percent: 5
+    payment-window: PT10M
+    sweeper-interval: PT30S
