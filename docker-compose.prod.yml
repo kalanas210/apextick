@@ -168,6 +168,8 @@ services:
       - booking-service
     environment:
       SERVER_IP: ${SERVER_IP}
+      # set to wso2am:8280 to route /api through the API gateway
+      API_UPSTREAM: ${API_UPSTREAM:-booking-service:8081}
     ports:
       - "80:80"
       - "443:443"

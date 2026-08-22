@@ -259,6 +259,7 @@ apextick/
 ├── keycloak/import/        # auto-imported apextick realm (client, roles, demo user)
 ├── infra/                  # Prometheus + Grafana provisioning, Terraform (AWS)
 ├── caddy/                  # TLS edge reverse proxy
+├── wso2/                   # API Manager config + the published API contract
 ├── docker-compose.yml      # Full local stack + optional `observability` profile
 ├── docker-compose.prod.yml # Deployment stack: GHCR images behind Caddy
 └── .env.example            # Template for required environment variables
@@ -276,6 +277,8 @@ apextick/
 | MinIO console (ticket PDFs) | http://localhost:9001 |
 | Grafana *(observability profile)* | http://localhost:3001 |
 | Prometheus *(observability profile)* | http://localhost:9090 |
+| WSO2 gateway *(wso2 profile)* | http://localhost:8280/api |
+| WSO2 portals *(wso2 profile)* | https://localhost:9443/publisher |
 | PostgreSQL | localhost:5440 |
 | Redis | localhost:6379 |
 
@@ -303,9 +306,25 @@ docker compose -f docker-compose.prod.yml --profile observability up -d
 Reach them over an SSH tunnel (`ssh -L 3001:localhost:3001 -L 9090:localhost:9090 …`)
 rather than opening them to the internet.
 
-## Roadmap
+## API gateway
 
-- WSO2 API Manager in front of the services (opt-in compose profile)
+**WSO2 API Manager 4.5.0** can sit in front of the booking service as an opt-in
+profile, so unauthenticated traffic and seat-hold bursts are shed at the edge
+rather than in the service:
+
+```bash
+docker compose --profile wso2 up -d
+scripts/wso2/refresh-openapi.sh && scripts/wso2/setup.sh
+scripts/wso2/smoke-test.sh
+```
+
+The gateway's whole configuration — the API contract, a 10-req/s throttling
+policy on the hold operations, and Keycloak registered as the key manager — is
+applied by script through WSO2's REST APIs, so it lives in git rather than in a
+browser session. Edge authentication is verified working; subscription validation
+for Keycloak-issued tokens has a documented connector limitation, so the gateway
+is **not** in the default request path. See [docs/wso2.md](docs/wso2.md) for what
+works, what does not, and exactly why.
 
 ---
 

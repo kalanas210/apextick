@@ -151,6 +151,36 @@ services:
       - "3000:3000"
     restart: unless-stopped
 
+  # --- API gateway (opt-in): docker compose --profile wso2 up ---
+  # Needs ~4 GB of free memory. Portals live on 9443 and are never published in
+  # production; the gateway itself answers on 8280 (http) / 8243 (https).
+  # Configure it after startup with scripts/wso2/setup.sh.
+  wso2am:
+    image: wso2/wso2am:4.5.0
+    container_name: apextick-wso2am
+    profiles: ["wso2"]
+    depends_on:
+      keycloak:
+        condition: service_started
+    environment:
+      WSO2_ADMIN_PASSWORD: ${WSO2_ADMIN_PASSWORD:-admin}
+      JVM_MEM_OPTS: ${WSO2_JVM_MEM_OPTS:--Xms1g -Xmx2g}
+    mem_limit: ${WSO2_MEM_LIMIT:-4g}
+    ports:
+      - "9443:9443"   # publisher / devportal / admin (keep private in prod)
+      - "8280:8280"   # gateway, http
+      - "8243:8243"   # gateway, https
+    volumes:
+      - ./wso2/conf/deployment.toml:/home/wso2carbon/wso2am-4.5.0/repository/conf/deployment.toml:ro
+      - apextick_wso2:/home/wso2carbon/wso2am-4.5.0/repository/database
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sk https://localhost:9443/services/Version >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 240s
+    restart: unless-stopped
+
   # --- Observability (opt-in): docker compose --profile observability up ---
   prometheus:
     image: prom/prometheus:v2.55.1
@@ -184,5 +214,6 @@ services:
 volumes:
   apextick_pgdata:
   apextick_minio:
+  apextick_wso2:
   apextick_prometheus:
   apextick_grafana:
