@@ -70,5 +70,19 @@
   "loginTheme": "apextick",
   "loginWithEmailAllowed": true,
   "resetPasswordAllowed": true,
-  "rememberMe": true
+  "rememberMe": true,
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": false,
+  "editUsernameAllowed": false,
+  "verifyEmail": false,
+  "smtpServer": {
+    "host": "mailpit",
+    "port": "1025",
+    "from": "no-reply@apextick.local",
+    "fromDisplayName": "ApexTick",
+    "replyTo": "no-reply@apextick.local",
+    "ssl": "false",
+    "starttls": "false",
+    "auth": "false"
+  }
 }

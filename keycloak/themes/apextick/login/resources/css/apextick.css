@@ -27,23 +27,56 @@
 
 /* ----------------------------- the canvas ------------------------------ */
 
-body.login-pf,
-.login-pf body,
+html.login-pf,
 body {
   background: var(--apextick-ink);
   color: var(--apextick-bone);
   font-family: var(--apextick-body);
+  min-height: 100vh;
 }
 
-/* A slow accent wash behind the card, echoing the site's hero treatment. */
-body.login-pf::before {
+/*
+ * The same treatment the marketing site gives its hero: a full-bleed graded
+ * photograph, pushed back far enough that the form stays the loudest thing on
+ * the page. The image ships with the theme rather than being pulled from a CDN
+ * — an authentication screen should not be making third-party requests.
+ */
+html.login-pf::before,
+body::before {
   content: "";
   position: fixed;
   inset: 0;
+  z-index: 0;
+  background-image: url("../img/stadium.jpg");
+  background-size: cover;
+  background-position: center 35%;
+  background-repeat: no-repeat;
+  /* grade it down so white text holds contrast anywhere on the frame */
+  filter: saturate(0.75) contrast(1.05);
+  opacity: 0.55;
+}
+
+/* Two washes over the photo: a flat knock-down, then a directional fade that
+   anchors the composition and keeps the card edge readable. */
+html.login-pf::after,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(60rem 40rem at 15% -10%, rgba(201, 242, 63, 0.09), transparent 60%),
-    radial-gradient(50rem 36rem at 100% 110%, rgba(70, 177, 255, 0.07), transparent 60%);
+    linear-gradient(to bottom, rgba(11, 11, 12, 0.72), rgba(11, 11, 12, 0.88) 55%, var(--apextick-ink)),
+    radial-gradient(70rem 45rem at 12% -10%, rgba(201, 242, 63, 0.1), transparent 62%);
+}
+
+/* Everything Keycloak renders sits above the backdrop. */
+.pf-v5-c-login,
+.pf-v5-c-background-image,
+#kc-header,
+.login-pf-page {
+  position: relative;
+  z-index: 1;
 }
 
 .pf-v5-c-login,
@@ -51,14 +84,32 @@ body.login-pf::before {
   background: transparent;
 }
 
+/* PatternFly ships its own background image element; ours replaces it. */
+.pf-v5-c-background-image,
+.pf-v5-c-background-image::before {
+  background: none;
+  display: none;
+}
+
 /* ------------------------------- the card ------------------------------- */
 
 .pf-v5-c-login__main {
-  background: var(--apextick-ink-2);
-  border: 1px solid var(--apextick-line);
+  background: rgba(19, 19, 22, 0.82);
+  backdrop-filter: blur(18px) saturate(1.1);
+  border: 1px solid var(--apextick-line-2);
   border-radius: 1rem;
-  box-shadow: 0 1.5rem 4rem rgba(0, 0, 0, 0.55);
+  box-shadow: 0 2rem 5rem rgba(0, 0, 0, 0.6);
   overflow: hidden;
+}
+
+/* PatternFly paints a blue accent bar across the top of the card. */
+.pf-v5-c-login__main::before,
+.pf-v5-c-login__main-header::before {
+  display: none;
+}
+
+.pf-v5-c-login__main {
+  border-top: 1px solid var(--apextick-accent);
 }
 
 .pf-v5-c-login__main-header,
