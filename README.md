@@ -180,7 +180,15 @@ npm ci
 npm run dev
 ```
 
-Open **http://localhost:3000**, log in, and book a seat.
+Open **http://localhost:3000**, log in, and book a seat. Sign-in, the seat map,
+holds, checkout and tickets all run against the live API.
+
+The frontend finds the API automatically (same-origin behind Caddy, `:8081` locally).
+If that port is taken, point it somewhere else:
+
+```bash
+NEXT_PUBLIC_API_URL=http://localhost:18081 npm run dev
+```
 
 ## Payments
 

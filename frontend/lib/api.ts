@@ -4,13 +4,15 @@ import type { ProblemDetail } from './types';
 /**
  * Behind Caddy (https) the API is same-origin; in local development the
  * booking service answers on :8081 alongside `next dev` on :3000.
+ * `NEXT_PUBLIC_API_URL` overrides both, for hosts where those ports are taken.
  */
 const baseURL =
-    typeof window !== 'undefined'
+    process.env.NEXT_PUBLIC_API_URL ||
+    (typeof window !== 'undefined'
         ? (window.location.protocol === 'https:'
             ? window.location.origin
             : `http://${window.location.hostname}:8081`)
-        : '';
+        : '');
 
 export const api = axios.create({ baseURL });
 

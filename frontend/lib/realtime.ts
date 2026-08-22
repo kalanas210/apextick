@@ -20,7 +20,9 @@ interface SeatStatusMessage {
 function websocketUrl(): string {
     const { protocol, hostname, origin } = window.location;
     // Behind Caddy the API is same-origin; locally it answers on :8081.
-    const httpBase = protocol === 'https:' ? origin : `http://${hostname}:8081`;
+    const httpBase =
+        process.env.NEXT_PUBLIC_API_URL ||
+        (protocol === 'https:' ? origin : `http://${hostname}:8081`);
     return `${httpBase.replace(/^http/, 'ws')}/api/ws`;
 }
 
