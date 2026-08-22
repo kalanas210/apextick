@@ -103,6 +103,17 @@ app:
       webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
       # Comma-separated allow-list (e.g. usd,gbp,inr); empty accepts every currency.
       supported-currencies: ${STRIPE_SUPPORTED_CURRENCIES:}
+  storage:
+    s3:
+      # false keeps ticket PDFs in memory, so the service runs with no object store
+      enabled: ${S3_ENABLED:false}
+      bucket: ${S3_BUCKET:apextick-tickets}
+      region: ${S3_REGION:us-east-1}
+      # blank targets real AWS; set it to a MinIO URL locally
+      endpoint: ${S3_ENDPOINT:}
+      access-key: ${S3_ACCESS_KEY:}
+      secret-key: ${S3_SECRET_KEY:}
+      path-style: ${S3_PATH_STYLE:true}
   rate-limit:
     enabled: ${APP_RATE_LIMIT_ENABLED:true}
     hold:

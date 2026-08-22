@@ -24,6 +24,7 @@ import com.apextick.booking.web.ConflictException;
 import com.apextick.booking.web.ErrorCodes;
 import com.apextick.booking.web.NotFoundException;
 import com.apextick.booking.web.PageResponse;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -56,19 +57,21 @@ public class OrderService {
     private final TicketRepository tickets;
     private final DomainEventPublisher domainEvents;
     private final RealtimePublisher realtime;
+    private final ApplicationEventPublisher appEvents;
     private final StringRedisTemplate redis;
     private final BigDecimal feePercent;
     private final Duration paymentWindow;
 
     public OrderService(OrderRepository orders, EventRepository events, SeatRepository seats,
                         TicketRepository tickets, DomainEventPublisher domainEvents, RealtimePublisher realtime,
-                        StringRedisTemplate redis, AppProperties props) {
+                        ApplicationEventPublisher appEvents, StringRedisTemplate redis, AppProperties props) {
         this.orders = orders;
         this.events = events;
         this.seats = seats;
         this.tickets = tickets;
         this.domainEvents = domainEvents;
         this.realtime = realtime;
+        this.appEvents = appEvents;
         this.redis = redis;
         this.feePercent = props.order().feePercent();
         this.paymentWindow = props.order().paymentWindow();
@@ -252,6 +255,8 @@ public class OrderService {
         payload.put("payment", pay);
         payload.put("paidAt", now);
         domainEvents.publish(EventTypes.BOOKING_CONFIRMED, "order", order.getId().toString(), payload);
+        // renders ticket PDFs after this transaction commits, off the payment path
+        appEvents.publishEvent(new OrderConfirmedEvent(order.getId()));
 
         List<SeatStatusChange> changes = seatIds.stream()
                 .map(sid -> new SeatStatusChange(sid, SeatStatus.BOOKED.name(), null)).toList();
