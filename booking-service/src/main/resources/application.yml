@@ -53,14 +53,27 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       probes:
         enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      # emit histogram buckets so Grafana can compute p95/p99 latency for API calls
+      percentiles-histogram:
+        http.server.requests: true
 
 server:
   port: 8081
+  tomcat:
+    threads:
+      max: ${TOMCAT_MAX_THREADS:200}
+    # absorb flash-sale connection bursts instead of refusing SYNs at the OS backlog
+    accept-count: ${TOMCAT_ACCEPT_COUNT:1000}
+    max-connections: ${TOMCAT_MAX_CONNECTIONS:10000}
 
 app:
   cors:
