@@ -81,6 +81,10 @@ jobs:
         working-directory: frontend
         run: npm ci --ignore-scripts
 
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
       - name: Build
         working-directory: frontend
         run: npm run build
