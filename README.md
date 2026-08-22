@@ -99,7 +99,7 @@ There are no `synchronized` blocks, no application-level mutexes, and no distrib
 | **Live seat map** | WebSocket / STOMP (`/api/ws`) with Redis pub/sub fan-out, so every browser sees a seat flip in real time — across multiple service instances. |
 | **Orders** | Idempotent order creation (`Idempotency-Key`), a payment window, and a sweeper that expires unpaid orders and releases their seats. |
 | **Payments** | Pluggable `PaymentGateway` — **mock** (offline, deterministic test cards) and **Stripe** (PaymentIntents + signed webhook + refund). Switch with `APP_PAYMENT_PROVIDER`. |
-| **Tickets** | On payment, a QR-tokened ticket is issued per seat; admins verify tickets at the gate. |
+| **Tickets** | On payment a QR-tokened ticket is issued per seat, rendered to a PDF and cached in S3/MinIO (off the payment path, regenerated on demand); admins verify tickets at the gate. |
 | **Transactional outbox** | Domain events are written in the same transaction as the state change and published to RabbitMQ only after commit — no phantom events on rollback. |
 | **Async notifications** | An independent service consumes booking events (idempotently, with a DLQ) and sends templated email via Mailpit/SMTP. |
 | **Admin API** | Events & layout management, live event stats, orders, seat release, ticket verification — all `ROLE_ADMIN`. |
@@ -254,12 +254,13 @@ cd booking-service
 apextick/
 ├── booking-service/        # Spring Boot — seats, holds, orders, payments, tickets, admin
 ├── notification-service/   # Spring Boot — independent RabbitMQ consumer, own DB, email
-├── frontend/               # Next.js — seat map UI with OIDC login
+├── frontend/               # Next.js — live seat map, checkout, orders, tickets
 ├── load-test/              # k6 authenticated flash-sale + correctness test
 ├── keycloak/import/        # auto-imported apextick realm (client, roles, demo user)
 ├── infra/                  # Prometheus + Grafana provisioning, Terraform (AWS)
 ├── caddy/                  # TLS edge reverse proxy
-├── docker-compose.yml      # Full stack + optional `observability` profile
+├── docker-compose.yml      # Full local stack + optional `observability` profile
+├── docker-compose.prod.yml # Deployment stack: GHCR images behind Caddy
 └── .env.example            # Template for required environment variables
 ```
 
@@ -272,15 +273,38 @@ apextick/
 | Keycloak | http://localhost:8180 |
 | RabbitMQ management | http://localhost:15672 |
 | Mailpit (email inbox) | http://localhost:8025 |
+| MinIO console (ticket PDFs) | http://localhost:9001 |
 | Grafana *(observability profile)* | http://localhost:3001 |
 | Prometheus *(observability profile)* | http://localhost:9090 |
 | PostgreSQL | localhost:5440 |
 | Redis | localhost:6379 |
 
+## Deployment
+
+CI builds the three service images and pushes them to GHCR once the test run for
+that commit is green; the production stack pulls those tags.
+
+```bash
+cp .env.example .env            # set SERVER_IP, passwords, Stripe keys
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Caddy is the only thing published (80/443). It terminates TLS with an
+automatically-provisioned certificate for `https://<SERVER_IP>.nip.io` and routes
+by path — `/api` to the booking service, `/realms` to Keycloak, everything else to
+the frontend — so the app, API and Keycloak ports stay closed at the security group.
+
+Prometheus and Grafana are an opt-in profile bound to loopback:
+
+```bash
+docker compose -f docker-compose.prod.yml --profile observability up -d
+```
+
+Reach them over an SSH tunnel (`ssh -L 3001:localhost:3001 -L 9090:localhost:9090 …`)
+rather than opening them to the internet.
+
 ## Roadmap
 
-- Ticket PDF generation with embedded QR, stored in S3/MinIO and attached to emails
-- Frontend checkout with Stripe Elements + account/tickets pages
 - WSO2 API Manager in front of the services (opt-in compose profile)
 
 ---
