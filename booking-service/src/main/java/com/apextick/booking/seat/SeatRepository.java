@@ -1,5 +1,6 @@
 package com.apextick.booking.seat;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -16,6 +17,11 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
     @Query("select s from Seat s join fetch s.section sec join fetch sec.tier "
             + "where s.eventId = :eventId order by s.id")
     List<Seat> findAllForEventWithLayout(@Param("eventId") Long eventId);
+
+    @Query("select s from Seat s join fetch s.section sec join fetch sec.tier where s.id in :ids order by s.id")
+    List<Seat> findByIdsWithLayout(@Param("ids") Collection<Long> ids);
+
+    // ---- single-seat native ops (legacy endpoint, concurrency test, expiry listener) ----
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
@@ -35,6 +41,60 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
     @Query(value = "UPDATE seats SET status = 'AVAILABLE', held_by = NULL, held_until = NULL "
             + "WHERE id = :seatId AND status = 'HELD'", nativeQuery = true)
     int releaseSeat(@Param("seatId") Long seatId);
+
+    // ---- multi-seat atomic hold (single UPDATE statement = deadlock-safe, all-or-nothing via tx) ----
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update Seat s
+               set s.status = com.apextick.booking.seat.SeatStatus.HELD,
+                   s.heldBy = :sub, s.heldUntil = :until, s.version = s.version + 1
+             where s.eventId = :eventId and s.id in :ids
+               and s.status = com.apextick.booking.seat.SeatStatus.AVAILABLE
+            """)
+    int holdSeatsAtomically(@Param("eventId") Long eventId, @Param("ids") Collection<Long> ids,
+                            @Param("sub") String sub, @Param("until") Instant until);
+
+    @Query("select s.id from Seat s where s.eventId = :eventId and s.id in :ids "
+            + "and s.status = com.apextick.booking.seat.SeatStatus.HELD and s.heldBy = :sub")
+    List<Long> findHeldSeatIds(@Param("eventId") Long eventId, @Param("ids") Collection<Long> ids,
+                               @Param("sub") String sub);
+
+    @Query("select s from Seat s join fetch s.section sec join fetch sec.tier "
+            + "where s.eventId = :eventId and s.status = com.apextick.booking.seat.SeatStatus.HELD "
+            + "and s.heldBy = :sub order by s.id")
+    List<Seat> findMyHolds(@Param("eventId") Long eventId, @Param("sub") String sub);
+
+    @Query("select s.id from Seat s where s.eventId = :eventId "
+            + "and s.status = com.apextick.booking.seat.SeatStatus.HELD and s.heldBy = :sub")
+    List<Long> findMyHeldSeatIds(@Param("eventId") Long eventId, @Param("sub") String sub);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update Seat s
+               set s.status = com.apextick.booking.seat.SeatStatus.AVAILABLE,
+                   s.heldBy = null, s.heldUntil = null, s.version = s.version + 1
+             where s.eventId = :eventId and s.status = com.apextick.booking.seat.SeatStatus.HELD
+               and s.heldBy = :sub
+            """)
+    int releaseMyHolds(@Param("eventId") Long eventId, @Param("sub") String sub);
+
+    // ---- sweeper (fallback for lost Redis expiries) ----
+
+    @Query("select s from Seat s where s.status = com.apextick.booking.seat.SeatStatus.HELD "
+            + "and s.heldUntil < :cutoff order by s.id")
+    List<Seat> findExpiredHolds(@Param("cutoff") Instant cutoff, Pageable pageable);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update Seat s
+               set s.status = com.apextick.booking.seat.SeatStatus.AVAILABLE,
+                   s.heldBy = null, s.heldUntil = null, s.version = s.version + 1
+             where s.id in :ids and s.status = com.apextick.booking.seat.SeatStatus.HELD
+            """)
+    int releaseSeats(@Param("ids") Collection<Long> ids);
+
+    // ---- counts (catalog) ----
 
     long countByEventId(Long eventId);
 

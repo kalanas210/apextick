@@ -8,7 +8,7 @@ import java.time.Duration;
 @ConfigurationProperties("app")
 public record AppProperties(Hold hold, Outbox outbox) {
 
-    public record Hold(Duration duration, int maxSeats) {
+    public record Hold(Duration duration, int maxSeats, Duration expiryTolerance, int sweeperBatch) {
     }
 
     public record Outbox(Duration pollInterval, int batchSize, int maxAttempts, Duration confirmTimeout) {

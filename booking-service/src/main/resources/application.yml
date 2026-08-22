@@ -70,6 +70,9 @@ app:
   hold:
     duration: ${APP_HOLD_DURATION:PT5M}
     max-seats: ${APP_HOLD_MAX_SEATS:8}
+    expiry-tolerance: ${APP_HOLD_EXPIRY_TOLERANCE:PT2S}
+    sweeper-interval: ${APP_HOLD_SWEEPER_INTERVAL:PT30S}
+    sweeper-batch: ${APP_HOLD_SWEEPER_BATCH:500}
   outbox:
     poll-interval: ${APP_OUTBOX_POLL_INTERVAL:PT1S}
     batch-size: ${APP_OUTBOX_BATCH_SIZE:100}

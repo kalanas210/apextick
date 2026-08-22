@@ -10,6 +10,9 @@ app:
   hold:
     duration: PT5M
     max-seats: 8
+    expiry-tolerance: PT2S
+    sweeper-interval: PT30S
+    sweeper-batch: 500
   outbox:
     poll-interval: PT0.2S
     batch-size: 100
