@@ -4,7 +4,9 @@ WORKDIR /app
 # Copy only the manifests first, so this layer is cached and re-runs only
 # when dependencies change — not on every code edit.
 COPY package.json package-lock.json ./
-RUN npm ci
+# --ignore-scripts: dependencies never get to run lifecycle hooks during the
+# build. Nothing here needs them, and it keeps a hostile package inert.
+RUN npm ci --ignore-scripts
 
 # ===== Stage 2: build the app =====
 FROM node:22-alpine AS build

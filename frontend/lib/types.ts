@@ -135,7 +135,7 @@ export interface Payment {
 }
 
 export interface PaymentConfig {
-    provider: 'mock' | 'stripe' | 'payhere';
+    provider: 'mock' | 'stripe';
     enabledProviders: string[];
     stripePublishableKey: string | null;
 }

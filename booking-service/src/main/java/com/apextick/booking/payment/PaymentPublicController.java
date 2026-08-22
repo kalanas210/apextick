@@ -46,7 +46,7 @@ public class PaymentPublicController {
             publishableKey = stripe.publishableKey();
         }
         return new PaymentConfigResponse(
-                registry.defaultProvider().name().toLowerCase(Locale.ROOT), enabled, publishableKey, null);
+                registry.defaultProvider().name().toLowerCase(Locale.ROOT), enabled, publishableKey);
     }
 
     @PostMapping("/stripe/webhook")

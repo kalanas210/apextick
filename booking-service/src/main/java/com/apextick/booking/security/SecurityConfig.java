@@ -33,8 +33,7 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/api/ws/**").permitAll()
-                        .requestMatchers(HttpMethod.POST,
-                                "/api/payments/stripe/webhook", "/api/payments/payhere/notify").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/payments/stripe/webhook").permitAll()
                         .requestMatchers(HttpMethod.GET,
                                 "/api/series/**", "/api/events/**", "/api/payments/config").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")

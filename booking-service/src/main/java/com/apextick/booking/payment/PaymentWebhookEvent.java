@@ -12,7 +12,7 @@ import lombok.Setter;
 
 import java.time.Instant;
 
-/** Dedupe log for provider callbacks (Stripe/PayHere), used from Step 10. */
+/** Dedupe log for provider webhook deliveries, so a re-send is never applied twice. */
 @Entity
 @Table(name = "payment_webhook_events")
 @Getter

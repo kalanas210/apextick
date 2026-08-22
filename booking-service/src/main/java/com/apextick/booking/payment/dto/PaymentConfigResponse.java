@@ -7,5 +7,5 @@ import java.util.List;
  * and the Stripe publishable key the browser needs to initialise Stripe.js.
  */
 public record PaymentConfigResponse(
-        String provider, List<String> enabledProviders, String stripePublishableKey, Boolean payhereSandbox) {
+        String provider, List<String> enabledProviders, String stripePublishableKey) {
 }

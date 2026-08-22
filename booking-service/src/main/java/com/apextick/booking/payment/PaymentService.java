@@ -81,7 +81,7 @@ public class PaymentService {
     }
 
     /**
-     * Process a verified provider callback (Stripe webhook / PayHere notify). Idempotent: each
+     * Process a verified provider callback (the Stripe webhook). Idempotent: each
      * external event is recorded once via the {@code payment_webhook_events} unique key, so
      * re-deliveries are ignored. A charge that succeeded after its seats were lost is refunded and
      * the order cancelled, mirroring the synchronous pay path.
@@ -265,6 +265,6 @@ public class PaymentService {
         return new PaymentResponse(
                 p.getId().toString(), order.getId().toString(), p.getProvider().name(), p.getStatus().name(),
                 p.getCardBrand(), p.getCardLast4(), p.getFailureCode(), p.getFailureMessage(),
-                p.getClientSecret(), null, null, orderService.toResponse(order));
+                p.getClientSecret(), null, orderService.toResponse(order));
     }
 }

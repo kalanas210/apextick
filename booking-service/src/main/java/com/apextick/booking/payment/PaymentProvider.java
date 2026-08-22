@@ -1,5 +1,5 @@
 package com.apextick.booking.payment;
 
 public enum PaymentProvider {
-    MOCK, STRIPE, PAYHERE
+    MOCK, STRIPE
 }

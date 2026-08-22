@@ -98,7 +98,7 @@ There are no `synchronized` blocks, no application-level mutexes, and no distrib
 | **Self-expiring holds** | Each hold is a Redis key with a TTL; a keyspace-expiry notification releases the seat. A DB sweeper is the fallback for lost notifications. |
 | **Live seat map** | WebSocket / STOMP (`/api/ws`) with Redis pub/sub fan-out, so every browser sees a seat flip in real time — across multiple service instances. |
 | **Orders** | Idempotent order creation (`Idempotency-Key`), a payment window, and a sweeper that expires unpaid orders and releases their seats. |
-| **Payments** | Pluggable `PaymentGateway` — **mock** (offline, deterministic test cards), **Stripe** (PaymentIntents + signed webhook + refund), PayHere scaffolded. Switch with `APP_PAYMENT_PROVIDER`. |
+| **Payments** | Pluggable `PaymentGateway` — **mock** (offline, deterministic test cards) and **Stripe** (PaymentIntents + signed webhook + refund). Switch with `APP_PAYMENT_PROVIDER`. |
 | **Tickets** | On payment, a QR-tokened ticket is issued per seat; admins verify tickets at the gate. |
 | **Transactional outbox** | Domain events are written in the same transaction as the state change and published to RabbitMQ only after commit — no phantom events on rollback. |
 | **Async notifications** | An independent service consumes booking events (idempotently, with a DLQ) and sends templated email via Mailpit/SMTP. |
@@ -281,7 +281,6 @@ apextick/
 
 - Ticket PDF generation with embedded QR, stored in S3/MinIO and attached to emails
 - Frontend checkout with Stripe Elements + account/tickets pages
-- PayHere sandbox adapter (enum and config are already scaffolded)
 - WSO2 API Manager in front of the services (opt-in compose profile)
 
 ---
