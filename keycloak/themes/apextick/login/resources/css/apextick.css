@@ -1,0 +1,262 @@
+/*
+ * ApexTick login theme.
+ *
+ * Layered on top of Keycloak's v2 (PatternFly 5) login theme: this file only
+ * restyles, it never changes structure. The palette and type are the same
+ * tokens the web app uses, so signing in does not feel like leaving the site.
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter+Tight:wght@400;500;600&display=swap");
+
+:root {
+  --apextick-ink: #0b0b0c;
+  --apextick-ink-2: #131316;
+  --apextick-ink-3: #1a1a1f;
+  --apextick-bone: #f4f2ec;
+  --apextick-muted: #9a958a;
+  --apextick-faint: #8a857b;
+  --apextick-line: rgba(244, 242, 236, 0.1);
+  --apextick-line-2: rgba(244, 242, 236, 0.18);
+  --apextick-accent: #c9f23f;
+  --apextick-accent-ink: #0b0b0c;
+  --apextick-danger: #ff6b6b;
+
+  --apextick-display: "Bricolage Grotesque", "Inter Tight", system-ui, sans-serif;
+  --apextick-body: "Inter Tight", system-ui, -apple-system, sans-serif;
+}
+
+/* ----------------------------- the canvas ------------------------------ */
+
+body.login-pf,
+.login-pf body,
+body {
+  background: var(--apextick-ink);
+  color: var(--apextick-bone);
+  font-family: var(--apextick-body);
+}
+
+/* A slow accent wash behind the card, echoing the site's hero treatment. */
+body.login-pf::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(60rem 40rem at 15% -10%, rgba(201, 242, 63, 0.09), transparent 60%),
+    radial-gradient(50rem 36rem at 100% 110%, rgba(70, 177, 255, 0.07), transparent 60%);
+}
+
+.pf-v5-c-login,
+.pf-v5-c-login__container {
+  background: transparent;
+}
+
+/* ------------------------------- the card ------------------------------- */
+
+.pf-v5-c-login__main {
+  background: var(--apextick-ink-2);
+  border: 1px solid var(--apextick-line);
+  border-radius: 1rem;
+  box-shadow: 0 1.5rem 4rem rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.pf-v5-c-login__main-header,
+.pf-v5-c-login__main-body,
+.pf-v5-c-login__main-footer {
+  background: transparent;
+}
+
+.pf-v5-c-login__main-header {
+  padding-bottom: 0.25rem;
+}
+
+/* Headings: the display face, tightened, matching the site's h1 treatment. */
+.pf-v5-c-login__main-header h1,
+.pf-v5-c-title,
+#kc-page-title {
+  font-family: var(--apextick-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--apextick-bone);
+  text-wrap: balance;
+}
+
+/* ------------------------------- branding ------------------------------- */
+
+/*
+ * The wordmark is the realm's own displayNameHtml (see keycloak/import),
+ * which Keycloak renders into #kc-header-wrapper. Styling that is the
+ * supported route — no template override, no pseudo-element tricks.
+ */
+#kc-header,
+.login-pf-page-header {
+  margin-bottom: 1.25rem;
+  text-align: center;
+}
+
+.apextick-wordmark {
+  font-family: var(--apextick-display);
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--apextick-bone);
+}
+
+.apextick-wordmark span {
+  color: var(--apextick-accent);
+}
+
+.apextick-tagline {
+  display: block;
+  margin-top: 0.35rem;
+  font-family: var(--apextick-body);
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--apextick-faint);
+}
+
+/* -------------------------------- fields -------------------------------- */
+
+.pf-v5-c-form__label-text,
+.pf-v5-c-form__label {
+  color: var(--apextick-muted);
+  font-family: var(--apextick-body);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.pf-v5-c-form-control {
+  --pf-v5-c-form-control--BackgroundColor: var(--apextick-ink);
+  --pf-v5-c-form-control--BorderColor: var(--apextick-line-2);
+  --pf-v5-c-form-control--BorderBottomColor: var(--apextick-line-2);
+  --pf-v5-c-form-control--Color: var(--apextick-bone);
+  --pf-v5-c-form-control--hover--BorderBottomColor: var(--apextick-bone);
+  --pf-v5-c-form-control--focus--BorderBottomColor: var(--apextick-accent);
+  border-radius: 0.5rem;
+  color: var(--apextick-bone);
+}
+
+.pf-v5-c-form-control input,
+.pf-v5-c-form-control > input {
+  background: transparent;
+  color: var(--apextick-bone);
+}
+
+.pf-v5-c-form-control:focus-within {
+  outline: 2px solid var(--apextick-accent);
+  outline-offset: 1px;
+}
+
+/* Chrome's yellow autofill would break the dark card. */
+.pf-v5-c-form-control input:-webkit-autofill,
+.pf-v5-c-form-control input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--apextick-bone);
+  -webkit-box-shadow: 0 0 0 100rem var(--apextick-ink-3) inset;
+}
+
+/* ------------------------------- buttons -------------------------------- */
+
+.pf-v5-c-button.pf-m-primary {
+  background: var(--apextick-accent);
+  color: var(--apextick-accent-ink);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-family: var(--apextick-body);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  min-height: 2.9rem;
+  transition: filter 0.25s ease;
+}
+
+.pf-v5-c-button.pf-m-primary:hover,
+.pf-v5-c-button.pf-m-primary:focus {
+  background: var(--apextick-accent);
+  color: var(--apextick-accent-ink);
+  filter: brightness(1.06);
+}
+
+.pf-v5-c-button.pf-m-secondary,
+.pf-v5-c-button.pf-m-control {
+  background: transparent;
+  color: var(--apextick-bone);
+  border: 1px solid var(--apextick-line-2);
+  border-radius: 999px;
+}
+
+.pf-v5-c-button.pf-m-secondary:hover,
+.pf-v5-c-button.pf-m-control:hover {
+  border-color: var(--apextick-bone);
+  background: rgba(244, 242, 236, 0.04);
+}
+
+.pf-v5-c-button.pf-m-link,
+a {
+  color: var(--apextick-accent);
+}
+
+a:hover {
+  color: var(--apextick-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ------------------------------ checkboxes ------------------------------ */
+
+.pf-v5-c-check__label,
+.pf-v5-c-login__main-footer-band-item,
+.pf-v5-c-login__main-footer-band {
+  color: var(--apextick-muted);
+}
+
+.pf-v5-c-check__input {
+  accent-color: var(--apextick-accent);
+}
+
+/* ------------------------------- messages ------------------------------- */
+
+.pf-v5-c-alert {
+  background: var(--apextick-ink-3);
+  border: 1px solid var(--apextick-line-2);
+  border-radius: 0.6rem;
+  color: var(--apextick-bone);
+}
+
+.pf-v5-c-alert.pf-m-danger,
+.pf-v5-c-alert.pf-m-error {
+  border-color: rgba(255, 107, 107, 0.4);
+  color: var(--apextick-danger);
+}
+
+.pf-v5-c-alert.pf-m-success {
+  border-color: rgba(201, 242, 63, 0.35);
+}
+
+.pf-v5-c-alert__title {
+  color: inherit;
+  font-family: var(--apextick-body);
+}
+
+.pf-m-error .pf-v5-c-helper-text__item-text,
+.kc-feedback-text {
+  color: var(--apextick-danger);
+}
+
+/* -------------------------------- footer -------------------------------- */
+
+#kc-info,
+#kc-info-wrapper,
+.pf-v5-c-login__main-footer-band {
+  color: var(--apextick-faint);
+  font-size: 0.82rem;
+}
+
+/* Keep focus rings visible and on-brand for keyboard users. */
+:focus-visible {
+  outline: 2px solid var(--apextick-accent);
+  outline-offset: 2px;
+}

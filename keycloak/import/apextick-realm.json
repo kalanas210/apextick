@@ -64,5 +64,11 @@
         ]
       }
     }
-  ]
+  ],
+  "displayName": "ApexTick",
+  "displayNameHtml": "<span class=\"apextick-wordmark\">Apex<span>Tick</span><span class=\"apextick-tagline\">Tickets for the big nights</span></span>",
+  "loginTheme": "apextick",
+  "loginWithEmailAllowed": true,
+  "resetPasswordAllowed": true,
+  "rememberMe": true
 }

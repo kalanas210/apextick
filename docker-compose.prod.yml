@@ -39,6 +39,8 @@ services:
       KC_HOSTNAME: https://${SERVER_IP}.nip.io
     volumes:
       - ./keycloak/import:/opt/keycloak/data/import
+      # branded login screens; Keycloak reads themes from this directory
+      - ./keycloak/themes:/opt/keycloak/themes:ro
     restart: unless-stopped
 
   rabbitmq:

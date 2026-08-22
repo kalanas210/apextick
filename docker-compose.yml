@@ -29,6 +29,8 @@ services:
       - "8180:8080"
     volumes:
       - ./keycloak/import:/opt/keycloak/data/import
+      # branded login screens; Keycloak reads themes from this directory
+      - ./keycloak/themes:/opt/keycloak/themes:ro
 
   rabbitmq:
     image: rabbitmq:4-management
