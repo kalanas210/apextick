@@ -1,11 +1,15 @@
 package com.apextick.booking.hold;
 
 import com.apextick.booking.config.AppProperties;
+import com.apextick.booking.outbox.AfterCommit;
 import com.apextick.booking.outbox.DomainEventPublisher;
 import com.apextick.booking.outbox.EventTypes;
 import com.apextick.booking.outbox.payload.SeatReleasedPayload;
+import com.apextick.booking.realtime.RealtimePublisher;
+import com.apextick.booking.realtime.dto.SeatStatusChange;
 import com.apextick.booking.seat.Seat;
 import com.apextick.booking.seat.SeatRepository;
+import com.apextick.booking.seat.SeatStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
@@ -15,6 +19,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /** Fallback reconciliation: releases HELD seats whose TTL elapsed but whose Redis expiry was missed. */
 @Component
@@ -24,11 +30,14 @@ public class HoldSweeper {
 
     private final SeatRepository seats;
     private final DomainEventPublisher events;
+    private final RealtimePublisher realtime;
     private final AppProperties props;
 
-    public HoldSweeper(SeatRepository seats, DomainEventPublisher events, AppProperties props) {
+    public HoldSweeper(SeatRepository seats, DomainEventPublisher events,
+                       RealtimePublisher realtime, AppProperties props) {
         this.seats = seats;
         this.events = events;
+        this.realtime = realtime;
         this.props = props;
     }
 
@@ -46,6 +55,11 @@ public class HoldSweeper {
             events.publish(EventTypes.SEAT_RELEASED, "seat", String.valueOf(s.getId()),
                     new SeatReleasedPayload(s.getId(), s.getEventId(), "EXPIRED"));
         }
+        Map<Long, List<SeatStatusChange>> byEvent = expired.stream().collect(Collectors.groupingBy(
+                Seat::getEventId,
+                Collectors.mapping(s -> new SeatStatusChange(s.getId(), SeatStatus.AVAILABLE.name(), null),
+                        Collectors.toList())));
+        AfterCommit.run(() -> byEvent.forEach(realtime::seatStatusChanged));
         log.info("Hold sweeper released {} expired seats", released);
         return released;
     }

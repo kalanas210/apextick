@@ -9,9 +9,12 @@ import com.apextick.booking.outbox.DomainEventPublisher;
 import com.apextick.booking.outbox.EventTypes;
 import com.apextick.booking.outbox.payload.SeatHeldPayload;
 import com.apextick.booking.outbox.payload.SeatReleasedPayload;
+import com.apextick.booking.realtime.RealtimePublisher;
+import com.apextick.booking.realtime.dto.SeatStatusChange;
 import com.apextick.booking.security.CurrentUser;
 import com.apextick.booking.seat.Seat;
 import com.apextick.booking.seat.SeatRepository;
+import com.apextick.booking.seat.SeatStatus;
 import com.apextick.booking.seat.SeatUnavailableException;
 import com.apextick.booking.seat.dto.SeatResponse;
 import com.apextick.booking.web.ConflictException;
@@ -37,15 +40,17 @@ public class HoldService {
     private final EventLookup eventLookup;
     private final StringRedisTemplate redis;
     private final DomainEventPublisher events;
+    private final RealtimePublisher realtime;
     private final Duration holdDuration;
     private final int maxSeats;
 
     public HoldService(SeatRepository seats, EventLookup eventLookup, StringRedisTemplate redis,
-                       DomainEventPublisher events, AppProperties props) {
+                       DomainEventPublisher events, RealtimePublisher realtime, AppProperties props) {
         this.seats = seats;
         this.eventLookup = eventLookup;
         this.redis = redis;
         this.events = events;
+        this.realtime = realtime;
         this.holdDuration = props.hold().duration();
         this.maxSeats = props.hold().maxSeats();
     }
@@ -73,7 +78,6 @@ public class HoldService {
         if (updated != ids.size()) {
             List<Long> held = seats.findHeldSeatIds(event.getId(), ids, user.sub());
             List<Long> conflicts = ids.stream().filter(id -> !held.contains(id)).toList();
-            // throwing rolls back the partial holds -> all-or-nothing
             throw new SeatUnavailableException(conflicts.isEmpty() ? ids : conflicts);
         }
 
@@ -83,10 +87,16 @@ public class HoldService {
             events.publish(EventTypes.SEAT_HELD, "seat", String.valueOf(s.getId()),
                     new SeatHeldPayload(s.getId(), s.getSeatNumber(), sub, heldUntil));
         }
-        AfterCommit.run(() -> ids.forEach(id -> redis.opsForValue().set(KEY + id, sub, holdDuration)));
+        Long eventId = event.getId();
+        List<SeatStatusChange> changes = ids.stream()
+                .map(id -> new SeatStatusChange(id, SeatStatus.HELD.name(), heldUntil)).toList();
+        AfterCommit.run(() -> {
+            ids.forEach(id -> redis.opsForValue().set(KEY + id, sub, holdDuration));
+            realtime.seatStatusChanged(eventId, changes);
+        });
 
         List<SeatResponse> dtos = heldSeats.stream().map(s -> SeatResponse.from(s, sub)).toList();
-        return new HoldResponse(event.getId(), ids, heldUntil, holdDuration.toSeconds(), dtos);
+        return new HoldResponse(eventId, ids, heldUntil, holdDuration.toSeconds(), dtos);
     }
 
     @Transactional(readOnly = true)
@@ -115,7 +125,13 @@ public class HoldService {
             events.publish(EventTypes.SEAT_RELEASED, "seat", String.valueOf(id),
                     new SeatReleasedPayload(id, event.getId(), "USER_RELEASED"));
         }
-        AfterCommit.run(() -> ids.forEach(id -> redis.delete(KEY + id)));
+        Long eventId = event.getId();
+        List<SeatStatusChange> changes = ids.stream()
+                .map(id -> new SeatStatusChange(id, SeatStatus.AVAILABLE.name(), null)).toList();
+        AfterCommit.run(() -> {
+            ids.forEach(id -> redis.delete(KEY + id));
+            realtime.seatStatusChanged(eventId, changes);
+        });
         return ids.size();
     }
 
@@ -131,6 +147,8 @@ public class HoldService {
         if (released > 0) {
             events.publish(EventTypes.SEAT_RELEASED, "seat", String.valueOf(seatId),
                     new SeatReleasedPayload(seatId, eventId, "EXPIRED"));
+            AfterCommit.run(() -> realtime.seatStatusChanged(eventId,
+                    List.of(new SeatStatusChange(seatId, SeatStatus.AVAILABLE.name(), null))));
             return true;
         }
         return false;
