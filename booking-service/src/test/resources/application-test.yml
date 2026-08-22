@@ -24,3 +24,11 @@ app:
     sweeper-interval: PT30S
   payment:
     provider: mock
+  rate-limit:
+    enabled: false
+    hold:
+      limit: 30
+      window: PT1M
+    order:
+      limit: 10
+      window: PT1M

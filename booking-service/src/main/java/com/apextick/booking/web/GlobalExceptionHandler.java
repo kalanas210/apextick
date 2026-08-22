@@ -2,6 +2,7 @@ package com.apextick.booking.web;
 
 import com.apextick.booking.seat.SeatUnavailableException;
 import com.apextick.booking.security.CorrelationIdFilter;
+import com.apextick.booking.security.ratelimit.RateLimitExceededException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -54,6 +55,15 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(AccessDeniedException.class)
     ProblemDetail handleAccessDenied(AccessDeniedException ex) {
         return problem(HttpStatus.FORBIDDEN, "Access is denied", ErrorCodes.FORBIDDEN, Map.of());
+    }
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    ResponseEntity<ProblemDetail> handleRateLimited(RateLimitExceededException ex) {
+        ProblemDetail body = problem(HttpStatus.TOO_MANY_REQUESTS, "Too many requests",
+                ErrorCodes.RATE_LIMITED, Map.of("retryAfterSeconds", ex.getRetryAfterSeconds()));
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", String.valueOf(ex.getRetryAfterSeconds()))
+                .body(body);
     }
 
     @ExceptionHandler(Exception.class)

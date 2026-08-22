@@ -84,3 +84,11 @@ app:
     sweeper-interval: ${APP_ORDER_SWEEPER_INTERVAL:PT30S}
   payment:
     provider: ${APP_PAYMENT_PROVIDER:mock}
+  rate-limit:
+    enabled: ${APP_RATE_LIMIT_ENABLED:true}
+    hold:
+      limit: ${APP_RATE_LIMIT_HOLD_LIMIT:30}
+      window: ${APP_RATE_LIMIT_HOLD_WINDOW:PT1M}
+    order:
+      limit: ${APP_RATE_LIMIT_ORDER_LIMIT:10}
+      window: ${APP_RATE_LIMIT_ORDER_WINDOW:PT1M}
