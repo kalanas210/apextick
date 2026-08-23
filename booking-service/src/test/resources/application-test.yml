@@ -1,0 +1,34 @@
+# Test profile: infrastructure comes from Testcontainers (@ServiceConnection),
+# so only behavioural overrides live here.
+spring:
+  jpa:
+    show-sql: false
+  liquibase:
+    contexts: demo
+
+app:
+  hold:
+    duration: PT5M
+    max-seats: 8
+    expiry-tolerance: PT2S
+    sweeper-interval: PT30S
+    sweeper-batch: 500
+  outbox:
+    poll-interval: PT0.2S
+    batch-size: 100
+    max-attempts: 5
+    confirm-timeout: PT5S
+  order:
+    fee-percent: 5
+    payment-window: PT10M
+    sweeper-interval: PT30S
+  payment:
+    provider: mock
+  rate-limit:
+    enabled: false
+    hold:
+      limit: 30
+      window: PT1M
+    order:
+      limit: 10
+      window: PT1M

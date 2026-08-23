@@ -1,6 +1,5 @@
 package com.apextick.booking.hold;
 
-import com.apextick.booking.seat.SeatService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.connection.Message;
@@ -9,28 +8,28 @@ import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
 
+/** Releases a seat when its Redis TTL key expires (primary hold-expiry trigger). */
 @Component
 public class HoldExpiryListener implements MessageListener {
 
     private static final Logger log = LoggerFactory.getLogger(HoldExpiryListener.class);
     private static final String KEY_PREFIX = "seat-hold:";
 
-    private final SeatService seatService;
+    private final HoldService holdService;
 
-    public HoldExpiryListener(SeatService seatService) {
-        this.seatService = seatService;
+    public HoldExpiryListener(HoldService holdService) {
+        this.holdService = holdService;
     }
 
     @Override
     public void onMessage(Message message, byte[] pattern) {
         String expiredKey = new String(message.getBody(), StandardCharsets.UTF_8);
         if (!expiredKey.startsWith(KEY_PREFIX)) {
-            return; // some other key expired — ignore it
+            return;
         }
         Long seatId = Long.valueOf(expiredKey.substring(KEY_PREFIX.length()));
-        int released = seatService.releaseExpiredHold(seatId);
-        if (released > 0) {
-            log.info("Hold expired — seat {} released back to AVAILABLE", seatId);
+        if (holdService.releaseExpired(seatId)) {
+            log.info("Hold expired - seat {} released back to AVAILABLE", seatId);
         }
     }
 }

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { AuthShell } from "@/components/auth/auth-shell";
-import { SignInForm } from "@/components/auth/signin-form";
+import { KeycloakSignIn } from "@/components/auth/keycloak-signin";
 import { IMG } from "@/data/images";
 
 export const metadata: Metadata = {
@@ -20,7 +20,7 @@ export default function SignInPage() {
       quote="The best seats go to the ones who show up."
       quoteCaption="ICC T20 World Cup 2026"
     >
-      <SignInForm />
+      <KeycloakSignIn action="signin" />
     </AuthShell>
   );
 }

@@ -5,3 +5,21 @@ databaseChangeLog:
   - include:
       file: 002-seed-demo-data.yaml
       relativeToChangelogFile: true
+  - include:
+      file: 003-catalog-schema.sql
+      relativeToChangelogFile: true
+  - include:
+      file: 004-migrate-legacy-events.sql
+      relativeToChangelogFile: true
+  - include:
+      file: 005-seed-catalog.sql
+      relativeToChangelogFile: true
+  - include:
+      file: 006-outbox.sql
+      relativeToChangelogFile: true
+  - include:
+      file: 007-orders.sql
+      relativeToChangelogFile: true
+  - include:
+      file: 008-payments-tickets.sql
+      relativeToChangelogFile: true

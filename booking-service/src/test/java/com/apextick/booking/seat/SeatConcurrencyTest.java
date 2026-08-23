@@ -1,44 +1,75 @@
 package com.apextick.booking.seat;
 
-import com.apextick.booking.IntegrationTestConfig;
-import com.apextick.booking.event.Event;
-import com.apextick.booking.event.EventRepository;
+import com.apextick.booking.catalog.Event;
+import com.apextick.booking.catalog.EventRepository;
+import com.apextick.booking.catalog.PriceTier;
+import com.apextick.booking.catalog.PriceTierRepository;
+import com.apextick.booking.catalog.Section;
+import com.apextick.booking.catalog.SectionRepository;
+import com.apextick.booking.catalog.Sport;
+import com.apextick.booking.support.IntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 
+import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.concurrent.*;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest
-@Import(IntegrationTestConfig.class)
+@IntegrationTest
 class SeatConcurrencyTest {
 
     @Autowired SeatService seatService;
     @Autowired SeatRepository seatRepository;
     @Autowired EventRepository eventRepository;
+    @Autowired PriceTierRepository priceTierRepository;
+    @Autowired SectionRepository sectionRepository;
 
     Long seatId;
 
     @BeforeEach
     void seedOneAvailableSeat() {
-        seatRepository.deleteAll();
-        eventRepository.deleteAll();
-
         Event event = new Event();
         event.setName("Cup Final");
         event.setVenue("R. Premadasa Stadium");
         event.setStartsAt(Instant.now().plusSeconds(86_400));
+        event.setSlug("concurrency-" + System.nanoTime());
+        event.setSport(Sport.CRICKET);
         event = eventRepository.save(event);
+
+        PriceTier tier = new PriceTier();
+        tier.setEvent(event);
+        tier.setCode("standard");
+        tier.setName("Standard");
+        tier.setPrice(new BigDecimal("1000.00"));
+        tier.setPerks(List.of());
+        tier.setSortOrder(0);
+        tier = priceTierRepository.save(tier);
+
+        Section section = new Section();
+        section.setEvent(event);
+        section.setCode("main");
+        section.setName("Main Stand");
+        section.setTier(tier);
+        section.setSide("n");
+        section.setRows(1);
+        section.setSeatsPerRow(1);
+        section.setSortOrder(0);
+        section = sectionRepository.save(section);
 
         Seat seat = new Seat();
         seat.setEventId(event.getId());
+        seat.setSection(section);
         seat.setSeatNumber("A12");
+        seat.setRowIdx(0);
+        seat.setColIdx(0);
         seat = seatRepository.save(seat);
 
         seatId = seat.getId();

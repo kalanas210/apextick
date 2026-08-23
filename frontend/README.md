@@ -64,4 +64,12 @@ lib/                 formatting, color, seat generation, class helpers
 
 ## Data
 
-All fixtures, teams, prices, and seating are sample data in `data/events.ts`. Team crests are typographic monograms generated in code, not official logos. Seat availability is produced from a deterministic hash so it is stable between renders. The seat selection and checkout are a demonstration only and take no payment.
+Fixture copy — names, imagery, blurbs, and the marketing pages built on them — comes
+from `data/events.ts`. Team crests are typographic monograms generated in code, not
+official logos.
+
+Everything in the booking flow is live against the booking service: the seat map
+reads real availability (and streams changes over STOMP), holds and orders hit the
+API, and checkout takes a real payment through Stripe or the backend's offline mock
+gateway. Sign-in is Keycloak (authorization code + PKCE), so this app never handles
+a password.

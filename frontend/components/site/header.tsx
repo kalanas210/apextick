@@ -11,6 +11,7 @@ import {
 } from "framer-motion";
 import { cn } from "@/lib/cn";
 import { Logo } from "./logo";
+import { AccountMenu } from "./account-menu";
 import { Button } from "@/components/ui/button";
 
 const NAV = [
@@ -122,12 +123,7 @@ export function Header() {
           </nav>
 
           <div className="hidden items-center gap-2.5 md:flex">
-            <Link
-              href="/signin"
-              className="rounded-full px-3.5 py-2 text-[0.82rem] text-muted transition-colors hover:text-bone"
-            >
-              Sign in
-            </Link>
+            <AccountMenu />
             <Button href="/events" size="sm" magnetic arrow>
               Get tickets
             </Button>
@@ -196,13 +192,7 @@ export function Header() {
                 <Button href="/events" size="md" arrow className="flex-1">
                   Get tickets
                 </Button>
-                <Link
-                  href="/signin"
-                  onClick={() => setOpen(false)}
-                  className="grid h-11 place-items-center rounded-full border border-line-2 px-5 text-sm text-muted transition-colors hover:border-bone hover:text-bone"
-                >
-                  Sign in
-                </Link>
+                <AccountMenu className="grid h-11 place-items-center rounded-full border border-line-2 px-5" />
               </div>
             </nav>
           </motion.div>

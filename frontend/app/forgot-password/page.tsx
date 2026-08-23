@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { AuthShell } from "@/components/auth/auth-shell";
-import { ForgotForm } from "@/components/auth/forgot-form";
+import { KeycloakSignIn } from "@/components/auth/keycloak-signin";
 import { IMG } from "@/data/images";
 
 export const metadata: Metadata = {
@@ -19,7 +19,7 @@ export default function ForgotPasswordPage() {
       quote="Happens to everyone. Let us get you back in."
       quoteCaption="ApexTick"
     >
-      <ForgotForm />
+      <KeycloakSignIn action="reset" />
     </AuthShell>
   );
 }

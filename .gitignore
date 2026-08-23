@@ -32,3 +32,6 @@ load-test/results/
 # NOTE: the PolinRider malware (2026-06) appended its own artifact names here
 # (branch_structure.json, temp_auto_push.bat, temp_interactive_push.bat) to hide them.
 # They are intentionally NOT ignored so that their reappearance shows up in `git status`.
+
+# WSO2 setup scratch (setup.sh uses mktemp, but be defensive)
+apextick-api.json

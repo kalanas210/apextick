@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head><meta charset="UTF-8"/><title>Your ApexTick tickets</title></head>
+<body style="font-family: Arial, Helvetica, sans-serif; color: #1a1a1a;">
+<h2>You're in.</h2>
+<p>Order <strong th:text="${booking.orderNumber}">APX-XXXX</strong> is confirmed.</p>
+<h3 th:text="${booking.event.name}">Event</h3>
+<p>
+  <span th:text="${booking.event.venue}">Venue</span>,
+  <span th:text="${booking.event.city}">City</span>
+</p>
+<table cellpadding="6" style="border-collapse: collapse;">
+  <thead>
+    <tr style="text-align:left; border-bottom:1px solid #ccc;">
+      <th>Seat</th><th>Section</th><th>Tier</th><th>Price</th><th>Ticket</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr th:each="item : ${booking.items}" style="border-bottom:1px solid #eee;">
+      <td th:text="${item.label}">A1</td>
+      <td th:text="${item.sectionName}">North</td>
+      <td th:text="${item.tierName}">Gold</td>
+      <td th:text="${item.price}">0</td>
+      <td th:text="${item.qrToken}">token</td>
+    </tr>
+  </tbody>
+</table>
+<p>Total: <strong th:text="${booking.currency} + ' ' + ${booking.total}">USD 0</strong></p>
+<p>View your tickets any time at <a th:href="${ticketsUrl}" th:text="${ticketsUrl}">tickets</a>.</p>
+</body>
+</html>

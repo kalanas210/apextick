@@ -6,10 +6,12 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_MULTIPLE_DATABASES: apextick_notifications
     ports:
       - "5440:5432"
     volumes:
       - apextick_pgdata:/var/lib/postgresql
+      - ./infra/postgres/init-multi-db.sh:/docker-entrypoint-initdb.d/10-init-multi-db.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -27,6 +29,8 @@ services:
       - "8180:8080"
     volumes:
       - ./keycloak/import:/opt/keycloak/data/import
+      # branded login screens; Keycloak reads themes from this directory
+      - ./keycloak/themes:/opt/keycloak/themes:ro
 
   rabbitmq:
     image: rabbitmq:4-management
@@ -63,6 +67,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      minio:
+        condition: service_started
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -72,21 +78,72 @@ services:
       SPRING_RABBITMQ_HOST: rabbitmq
       SPRING_DATA_REDIS_HOST: redis
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/apextick/protocol/openid-connect/certs
+      APP_PAYMENT_PROVIDER: ${APP_PAYMENT_PROVIDER:-mock}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_SUPPORTED_CURRENCIES: ${STRIPE_SUPPORTED_CURRENCIES:-}
+      S3_ENABLED: ${S3_ENABLED:-true}
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      S3_BUCKET: ${S3_BUCKET:-apextick-tickets}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
     ports:
       - "8081:8081"
     restart: unless-stopped
   
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: apextick-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console
+    volumes:
+      - apextick_minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    container_name: apextick-mailpit
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # web UI
+    restart: unless-stopped
+
   notification-service:
     build: ./notification-service
     container_name: apextick-notification
     depends_on:
+      postgres:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/apextick_notifications
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       SPRING_RABBITMQ_HOST: rabbitmq
       SPRING_RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      SPRING_MAIL_HOST: mailpit
+      SPRING_MAIL_PORT: 1025
+      APP_WEB_URL: ${APP_WEB_URL:-http://localhost:3000}
     restart: unless-stopped
 
   frontend:
@@ -96,5 +153,69 @@ services:
       - "3000:3000"
     restart: unless-stopped
 
+  # --- API gateway (opt-in): docker compose --profile wso2 up ---
+  # Needs ~4 GB of free memory. Portals live on 9443 and are never published in
+  # production; the gateway itself answers on 8280 (http) / 8243 (https).
+  # Configure it after startup with scripts/wso2/setup.sh.
+  wso2am:
+    image: wso2/wso2am:4.5.0
+    container_name: apextick-wso2am
+    profiles: ["wso2"]
+    depends_on:
+      keycloak:
+        condition: service_started
+    environment:
+      WSO2_ADMIN_PASSWORD: ${WSO2_ADMIN_PASSWORD:-admin}
+      JVM_MEM_OPTS: ${WSO2_JVM_MEM_OPTS:--Xms1g -Xmx2g}
+    mem_limit: ${WSO2_MEM_LIMIT:-4g}
+    ports:
+      - "9443:9443"   # publisher / devportal / admin (keep private in prod)
+      - "8280:8280"   # gateway, http
+      - "8243:8243"   # gateway, https
+    volumes:
+      - ./wso2/conf/deployment.toml:/home/wso2carbon/wso2am-4.5.0/repository/conf/deployment.toml:ro
+      - apextick_wso2:/home/wso2carbon/wso2am-4.5.0/repository/database
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sk https://localhost:9443/services/Version >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 240s
+    restart: unless-stopped
+
+  # --- Observability (opt-in): docker compose --profile observability up ---
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: apextick-prometheus
+    profiles: ["observability"]
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - apextick_prometheus:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: apextick-grafana
+    profiles: ["observability"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - apextick_grafana:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
 volumes:
   apextick_pgdata:
+  apextick_minio:
+  apextick_wso2:
+  apextick_prometheus:
+  apextick_grafana:

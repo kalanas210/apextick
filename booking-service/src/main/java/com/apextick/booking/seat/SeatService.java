@@ -1,8 +1,10 @@
 package com.apextick.booking.seat;
 
-import com.apextick.booking.messaging.RabbitConfig;
-import com.apextick.booking.messaging.SeatHeldEvent;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import com.apextick.booking.config.AppProperties;
+import com.apextick.booking.outbox.AfterCommit;
+import com.apextick.booking.outbox.DomainEventPublisher;
+import com.apextick.booking.outbox.EventTypes;
+import com.apextick.booking.outbox.payload.SeatHeldPayload;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,23 +16,26 @@ import java.util.List;
 @Service
 public class SeatService {
 
-    private static final Duration HOLD_DURATION = Duration.ofSeconds(30);
+    private static final String HOLD_KEY_PREFIX = "seat-hold:";
 
     private final SeatRepository seatRepository;
-    private final RabbitTemplate rabbitTemplate;
     private final StringRedisTemplate redisTemplate;
+    private final DomainEventPublisher events;
+    private final Duration holdDuration;
 
     public SeatService(SeatRepository seatRepository,
-                       RabbitTemplate rabbitTemplate ,
-                       StringRedisTemplate redisTemplate) {
+                       StringRedisTemplate redisTemplate,
+                       DomainEventPublisher events,
+                       AppProperties props) {
         this.seatRepository = seatRepository;
-        this.rabbitTemplate = rabbitTemplate;
         this.redisTemplate = redisTemplate;
+        this.events = events;
+        this.holdDuration = props.hold().duration();
     }
 
     @Transactional
     public Seat holdSeat(Long seatId, String userId) {
-        Instant heldUntil = Instant.now().plus(HOLD_DURATION);
+        Instant heldUntil = Instant.now().plus(holdDuration);
 
         int updated = seatRepository.holdSeat(seatId, userId, heldUntil);
         if (updated == 0) {
@@ -39,14 +44,14 @@ public class SeatService {
 
         Seat seat = seatRepository.findById(seatId).orElseThrow();
 
-        // Redis TTL key — Redis deletes it when the hold expires
-        redisTemplate.opsForValue().set("seat-hold:" + seatId, userId, HOLD_DURATION);
+        // Record the event in the transactional outbox — published to RabbitMQ after commit
+        // by OutboxPublisher, so a rollback never emits a phantom event.
+        events.publish(EventTypes.SEAT_HELD, "seat", String.valueOf(seatId),
+                new SeatHeldPayload(seat.getId(), seat.getSeatNumber(), seat.getHeldBy(), seat.getHeldUntil()));
 
-        // publish the event — fire and forget
-        SeatHeldEvent event = new SeatHeldEvent(
-                seat.getId(), seat.getSeatNumber(), seat.getHeldBy(), seat.getHeldUntil());
-        rabbitTemplate.convertAndSend(
-                RabbitConfig.EXCHANGE, RabbitConfig.SEAT_HELD_ROUTING_KEY, event);
+        // Redis TTL key drives hold expiry; write it only after the DB commit succeeds.
+        AfterCommit.run(() ->
+                redisTemplate.opsForValue().set(HOLD_KEY_PREFIX + seatId, userId, holdDuration));
 
         return seat;
     }

@@ -1,0 +1,50 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: notification-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5440/apextick_notifications}
+    username: ${POSTGRES_USER:apextick}
+    password: ${POSTGRES_PASSWORD:apextick}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+  rabbitmq:
+    host: ${SPRING_RABBITMQ_HOST:localhost}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:apextick}
+    password: ${RABBITMQ_PASSWORD:apextick}
+    listener:
+      simple:
+        acknowledge-mode: auto
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          initial-interval: 500ms
+          max-attempts: 4
+          multiplier: 2.0
+          max-interval: 5s
+  mail:
+    host: ${SPRING_MAIL_HOST:localhost}
+    port: ${SPRING_MAIL_PORT:1025}
+    properties:
+      mail.smtp.auth: false
+      mail.smtp.starttls.enable: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+app:
+  mail:
+    from: ${MAIL_FROM:no-reply@apextick.local}
+  public-base-url: ${APP_WEB_URL:http://localhost:3000}
+  notifications:
+    seat-held-email: ${APP_NOTIFICATIONS_SEAT_HELD_EMAIL:false}

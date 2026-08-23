@@ -1,0 +1,2386 @@
+{
+  "components": {
+    "schemas": {
+      "AdminSeatResponse": {
+        "properties": {
+          "heldBy": {
+            "type": "string"
+          },
+          "heldUntil": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "label": {
+            "type": "string"
+          },
+          "sectionId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "AVAILABLE",
+              "HELD",
+              "BOOKED"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "CreateOrderRequest": {
+        "properties": {
+          "eventId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "seatIds": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "eventId",
+          "seatIds"
+        ],
+        "type": "object"
+      },
+      "CurrentUser": {
+        "properties": {
+          "admin": {
+            "type": "boolean"
+          },
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "sub": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "EventDetailResponse": {
+        "properties": {
+          "availableSeats": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "away": {
+            "$ref": "#/components/schemas/TeamResponse"
+          },
+          "blurb": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "currencySymbol": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "fromPrice": {
+            "type": "number"
+          },
+          "home": {
+            "$ref": "#/components/schemas/TeamResponse"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "image": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "salesEndAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "salesStartAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/SectionResponse"
+            },
+            "type": "array"
+          },
+          "series": {
+            "$ref": "#/components/schemas/SeriesResponse"
+          },
+          "seriesId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "seriesSlug": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "sport": {
+            "type": "string"
+          },
+          "stadium": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "startsAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tiers": {
+            "items": {
+              "$ref": "#/components/schemas/PriceTierResponse"
+            },
+            "type": "array"
+          },
+          "time": {
+            "type": "string"
+          },
+          "timeZone": {
+            "type": "string"
+          },
+          "totalSeats": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "EventStatsResponse": {
+        "properties": {
+          "available": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "booked": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "byTier": {
+            "items": {
+              "$ref": "#/components/schemas/TierStat"
+            },
+            "type": "array"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "eventId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "held": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "revenue": {
+            "type": "number"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "EventSummaryResponse": {
+        "properties": {
+          "availableSeats": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "away": {
+            "$ref": "#/components/schemas/TeamResponse"
+          },
+          "blurb": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "currencySymbol": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "fromPrice": {
+            "type": "number"
+          },
+          "home": {
+            "$ref": "#/components/schemas/TeamResponse"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "image": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "salesEndAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "salesStartAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "seriesId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "seriesSlug": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "sport": {
+            "type": "string"
+          },
+          "stadium": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "startsAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "time": {
+            "type": "string"
+          },
+          "timeZone": {
+            "type": "string"
+          },
+          "totalSeats": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "EventUpsertRequest": {
+        "properties": {
+          "awayTeamId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "blurb": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "currency": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "homeTeamId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "image": {
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "salesEndAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "salesStartAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "seriesId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "slug": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "sport": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "startsAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "timeZone": {
+            "type": "string"
+          },
+          "venue": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "currency",
+          "name",
+          "slug",
+          "sport",
+          "startsAt",
+          "venue"
+        ],
+        "type": "object"
+      },
+      "HoldRequest": {
+        "properties": {
+          "seatIds": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "seatIds"
+        ],
+        "type": "object"
+      },
+      "HoldResponse": {
+        "properties": {
+          "eventId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "heldUntil": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "holdSeconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "seatIds": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "seats": {
+            "items": {
+              "$ref": "#/components/schemas/SeatResponse"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "HoldSeatResponse": {
+        "properties": {
+          "heldUntil": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "seatId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "LayoutRequest": {
+        "properties": {
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/SectionSpec"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "tiers": {
+            "items": {
+              "$ref": "#/components/schemas/TierSpec"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "sections",
+          "tiers"
+        ],
+        "type": "object"
+      },
+      "LayoutResult": {
+        "properties": {
+          "eventId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "seatsCreated": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "sectionsCreated": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "tiersCreated": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "OrderItemResponse": {
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "label": {
+            "type": "string"
+          },
+          "seatId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sectionName": {
+            "type": "string"
+          },
+          "ticketId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "tierCode": {
+            "type": "string"
+          },
+          "tierName": {
+            "type": "string"
+          },
+          "unitPrice": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "OrderResponse": {
+        "properties": {
+          "cancelReason": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "eventId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "eventName": {
+            "type": "string"
+          },
+          "eventSlug": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "fee": {
+            "type": "number"
+          },
+          "id": {
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OrderItemResponse"
+            },
+            "type": "array"
+          },
+          "orderNumber": {
+            "type": "string"
+          },
+          "paidAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "startsAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "subtotal": {
+            "type": "number"
+          },
+          "ticketIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "total": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "PageResponseEventSummaryResponse": {
+        "properties": {
+          "content": {
+            "items": {
+              "$ref": "#/components/schemas/EventSummaryResponse"
+            },
+            "type": "array"
+          },
+          "last": {
+            "type": "boolean"
+          },
+          "page": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "size": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "totalElements": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "totalPages": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "PageResponseOrderResponse": {
+        "properties": {
+          "content": {
+            "items": {
+              "$ref": "#/components/schemas/OrderResponse"
+            },
+            "type": "array"
+          },
+          "last": {
+            "type": "boolean"
+          },
+          "page": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "size": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "totalElements": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "totalPages": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "Pageable": {
+        "properties": {
+          "page": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "size": {
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "sort": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "PayRequest": {
+        "properties": {
+          "cancelUrl": {
+            "type": "string"
+          },
+          "card": {
+            "$ref": "#/components/schemas/PaymentCard"
+          },
+          "paymentMethodId": {
+            "type": "string"
+          },
+          "returnUrl": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PaymentCard": {
+        "properties": {
+          "cvc": {
+            "type": "string"
+          },
+          "expMonth": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "expYear": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "holder": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PaymentConfigResponse": {
+        "properties": {
+          "enabledProviders": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "stripePublishableKey": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PaymentResponse": {
+        "properties": {
+          "cardBrand": {
+            "type": "string"
+          },
+          "cardLast4": {
+            "type": "string"
+          },
+          "clientSecret": {
+            "type": "string"
+          },
+          "failureCode": {
+            "type": "string"
+          },
+          "failureMessage": {
+            "type": "string"
+          },
+          "order": {
+            "$ref": "#/components/schemas/OrderResponse"
+          },
+          "orderId": {
+            "type": "string"
+          },
+          "paymentId": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "publishableKey": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PriceTierResponse": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "perks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "price": {
+            "type": "number"
+          },
+          "remaining": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "SeatResponse": {
+        "properties": {
+          "col": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "heldUntil": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "label": {
+            "type": "string"
+          },
+          "mine": {
+            "type": "boolean"
+          },
+          "price": {
+            "type": "number"
+          },
+          "row": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "sectionCode": {
+            "type": "string"
+          },
+          "sectionId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "AVAILABLE",
+              "HELD",
+              "BOOKED"
+            ],
+            "type": "string"
+          },
+          "tierCode": {
+            "type": "string"
+          },
+          "tierId": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "SectionResponse": {
+        "properties": {
+          "available": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "code": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "rows": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "seatsPerRow": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "side": {
+            "type": "string"
+          },
+          "tierCode": {
+            "type": "string"
+          },
+          "tierId": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "SectionSpec": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "rows": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "seatsPerRow": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "side": {
+            "type": "string"
+          },
+          "sortOrder": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "tierCode": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SeriesResponse": {
+        "properties": {
+          "blurb": {
+            "type": "string"
+          },
+          "cities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "currencySymbol": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "image": {
+            "type": "string"
+          },
+          "kicker": {
+            "type": "string"
+          },
+          "mobileHeroImage": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "scale": {
+            "type": "string"
+          },
+          "shortName": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "sport": {
+            "type": "string"
+          },
+          "story": {
+            "type": "string"
+          },
+          "tint": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TeamResponse": {
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "flag": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "logo": {
+            "type": "string"
+          },
+          "monogram": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "short": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TicketResponse": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "issuedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "orderId": {
+            "type": "string"
+          },
+          "pdfUrl": {
+            "type": "string"
+          },
+          "qrToken": {
+            "type": "string"
+          },
+          "seatId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "seatLabel": {
+            "type": "string"
+          },
+          "sectionName": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tierName": {
+            "type": "string"
+          },
+          "usedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TierSpec": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "perks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "price": {
+            "type": "number"
+          },
+          "sortOrder": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "TierStat": {
+        "properties": {
+          "available": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "booked": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tierCode": {
+            "type": "string"
+          },
+          "tierId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "VerifyRequest": {
+        "properties": {
+          "qrToken": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "qrToken"
+        ],
+        "type": "object"
+      },
+      "VerifyResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "ticket": {
+            "$ref": "#/components/schemas/TicketResponse"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "REST API for browsing events and holding/booking seats.",
+    "title": "ApexTick Booking & Inventory API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/admin/events": {
+      "post": {
+        "operationId": "create_1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventDetailResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "Admin: Events"
+        ]
+      }
+    },
+    "/admin/events/{id}": {
+      "delete": {
+        "operationId": "delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "Admin: Events"
+        ]
+      },
+      "put": {
+        "operationId": "update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventDetailResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "Admin: Events"
+        ]
+      }
+    },
+    "/admin/events/{id}/layout": {
+      "post": {
+        "operationId": "layout",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LayoutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/LayoutResult"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "Admin: Events"
+        ]
+      }
+    },
+    "/admin/events/{id}/stats": {
+      "get": {
+        "operationId": "stats",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventStatsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "Admin: Stats"
+        ]
+      }
+    },
+    "/admin/events/{id}/status": {
+      "patch": {
+        "operationId": "setStatus",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventDetailResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "Admin: Events"
+        ]
+      }
+    },
+    "/admin/orders": {
+      "get": {
+        "operationId": "list_2",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageable",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Pageable"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResponseOrderResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "Admin: Orders"
+        ]
+      }
+    },
+    "/admin/seats": {
+      "get": {
+        "operationId": "byEvent",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "eventId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AdminSeatResponse"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "Admin: Seats"
+        ]
+      }
+    },
+    "/admin/seats/{id}/release": {
+      "post": {
+        "operationId": "release_1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSeatResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "Admin: Seats"
+        ]
+      }
+    },
+    "/admin/tickets/verify": {
+      "post": {
+        "operationId": "verify",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "admin",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "Admin: Tickets"
+        ]
+      }
+    },
+    "/events": {
+      "get": {
+        "operationId": "list_1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sport",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "seriesId",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "series",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "month",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "city",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "soonest",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResponseEventSummaryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Browse events with filters and pagination",
+        "tags": [
+          "Events"
+        ]
+      }
+    },
+    "/events/{idOrSlug}": {
+      "get": {
+        "operationId": "detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "idOrSlug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventDetailResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Event detail with tiers and sections",
+        "tags": [
+          "Events"
+        ]
+      }
+    },
+    "/events/{idOrSlug}/holds": {
+      "delete": {
+        "operationId": "release",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "idOrSlug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "summary": "Release all of the caller's holds for this event",
+        "tags": [
+          "Holds"
+        ]
+      },
+      "post": {
+        "operationId": "hold_1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "idOrSlug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HoldRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/HoldResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Hold up to N seats for the caller (all-or-nothing)",
+        "tags": [
+          "Holds"
+        ]
+      }
+    },
+    "/events/{idOrSlug}/holds/me": {
+      "get": {
+        "operationId": "mine_1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "idOrSlug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/HoldResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "The caller's current holds for this event",
+        "tags": [
+          "Holds"
+        ]
+      }
+    },
+    "/events/{idOrSlug}/seats": {
+      "get": {
+        "operationId": "seats",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "idOrSlug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SeatResponse"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Seats for an event; sets mine=true for the caller's holds",
+        "tags": [
+          "Events"
+        ]
+      }
+    },
+    "/me": {
+      "get": {
+        "operationId": "me",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentUser"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "The authenticated user's profile and roles",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
+    "/orders": {
+      "post": {
+        "operationId": "create",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Create an order from the caller's held seats (idempotent)",
+        "tags": [
+          "Orders"
+        ]
+      }
+    },
+    "/orders/me": {
+      "get": {
+        "operationId": "mine",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageable",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Pageable"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResponseOrderResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "The caller's orders",
+        "tags": [
+          "Orders"
+        ]
+      }
+    },
+    "/orders/{id}": {
+      "get": {
+        "operationId": "get_1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Order detail",
+        "tags": [
+          "Orders"
+        ]
+      }
+    },
+    "/orders/{id}/cancel": {
+      "post": {
+        "operationId": "cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Cancel a pending order and release its seats",
+        "tags": [
+          "Orders"
+        ]
+      }
+    },
+    "/orders/{id}/pay": {
+      "post": {
+        "operationId": "pay",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Pay for an order via the configured gateway",
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
+    "/orders/{id}/payments": {
+      "get": {
+        "operationId": "list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PaymentResponse"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Payment attempts for an order",
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
+    "/orders/{orderId}/tickets": {
+      "get": {
+        "operationId": "forOrder",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orderId",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TicketResponse"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Tickets issued for an order",
+        "tags": [
+          "Tickets"
+        ]
+      }
+    },
+    "/payments/config": {
+      "get": {
+        "operationId": "config",
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentConfigResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Active payment provider + Stripe publishable key for the checkout UI",
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
+    "/payments/stripe/webhook": {
+      "post": {
+        "operationId": "stripeWebhook",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Stripe-Signature",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Stripe webhook (signature-verified)",
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
+    "/seats/{seatId}/hold": {
+      "post": {
+        "operationId": "hold",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "seatId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/HoldSeatResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "seat-controller"
+        ]
+      }
+    },
+    "/series": {
+      "get": {
+        "operationId": "all",
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SeriesResponse"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "All series",
+        "tags": [
+          "Series"
+        ]
+      }
+    },
+    "/series/{slug}": {
+      "get": {
+        "operationId": "one",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "A single series by slug",
+        "tags": [
+          "Series"
+        ]
+      }
+    },
+    "/tickets/{id}": {
+      "get": {
+        "operationId": "get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "A single ticket",
+        "tags": [
+          "Tickets"
+        ]
+      }
+    },
+    "/tickets/{id}/pdf": {
+      "get": {
+        "operationId": "pdf",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "format": "byte",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Download a ticket as a PDF with its QR code",
+        "tags": [
+          "Tickets"
+        ]
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ]
+}

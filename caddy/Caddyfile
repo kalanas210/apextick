@@ -23,8 +23,16 @@
 	}
 
 	# --- Booking API ---
-	handle /api/* {
+	# The STOMP handshake stays on a direct route: it is a long-lived upgraded
+	# connection, not a request the API gateway has anything useful to say about.
+	handle /api/ws* {
 		reverse_proxy booking-service:8081
+	}
+
+	# Everything else can go through WSO2 when the wso2 profile is up — set
+	# API_UPSTREAM=wso2am:8280 — and falls back to the service directly.
+	handle /api/* {
+		reverse_proxy {$API_UPSTREAM:booking-service:8081}
 	}
 
 	# --- Everything else -> Next.js frontend (/, /_next, /favicon.ico, ...) ---

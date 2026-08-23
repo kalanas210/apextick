@@ -5,7 +5,7 @@ import { fixtures, getFixture, getSeries } from "@/data/events";
 import { formatDate } from "@/lib/format";
 import { Crest } from "@/components/ui/crest";
 import { StatusPill } from "@/components/ui/tag";
-import { SeatMap } from "@/components/seatmap/seat-map";
+import { LiveSeatMap } from "@/components/seatmap/live-seat-map";
 import { Pin, Clock } from "@/components/ui/icons";
 
 export function generateStaticParams() {
@@ -89,9 +89,13 @@ export default async function SeatsPage({
         </div>
       </header>
 
+      {/* The page chrome above is static marketing copy; the map itself is live
+          against the booking API — real availability, real holds, real orders. */}
       <div className="mt-12">
-        <SeatMap
-          fixture={fixture}
+        <LiveSeatMap
+          slug={fixture.slug}
+          home={fixture.home.short}
+          away={fixture.away.short}
           initialTier={tier}
           initialSection={section}
         />
