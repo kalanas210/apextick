@@ -152,8 +152,15 @@ services:
       SPRING_RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
-      SPRING_MAIL_HOST: mailpit
-      SPRING_MAIL_PORT: 1025
+      # Defaults to Mailpit so development never mails real inboxes; set SMTP_*
+      # in .env to send through a real provider instead.
+      SPRING_MAIL_HOST: ${SMTP_HOST:-mailpit}
+      SPRING_MAIL_PORT: ${SMTP_PORT:-1025}
+      SPRING_MAIL_USERNAME: ${SMTP_USER:-}
+      SPRING_MAIL_PASSWORD: ${SMTP_PASSWORD:-}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH: ${SMTP_AUTH:-false}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: ${SMTP_STARTTLS:-false}
+      MAIL_FROM: ${SMTP_FROM:-no-reply@apextick.local}
       APP_WEB_URL: ${APP_WEB_URL:-http://localhost:3000}
     restart: unless-stopped
 

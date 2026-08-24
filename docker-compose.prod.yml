@@ -160,6 +160,13 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
       SPRING_MAIL_HOST: ${SMTP_HOST:-mailpit}
       SPRING_MAIL_PORT: ${SMTP_PORT:-1025}
+      # Mailpit accepts anything; a real provider needs credentials and STARTTLS.
+      SPRING_MAIL_USERNAME: ${SMTP_USER:-}
+      SPRING_MAIL_PASSWORD: ${SMTP_PASSWORD:-}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH: ${SMTP_AUTH:-false}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: ${SMTP_STARTTLS:-false}
+      # Gmail rewrites a From that is not the authenticated account, so keep them equal.
+      MAIL_FROM: ${SMTP_FROM:-no-reply@apextick.local}
       APP_WEB_URL: https://${SERVER_IP}.nip.io
     restart: unless-stopped
 
