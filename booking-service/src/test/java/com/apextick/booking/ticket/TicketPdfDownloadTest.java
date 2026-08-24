@@ -18,9 +18,16 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -41,6 +48,8 @@ class TicketPdfDownloadTest {
     @Autowired OrderService orderService;
     @Autowired EventRepository eventRepository;
     @Autowired SeatRepository seatRepository;
+    @Autowired TicketPdfService pdfService;
+    @Autowired TicketRepository ticketRepository;
 
     private final ObjectMapper json = new ObjectMapper();
 
@@ -102,6 +111,53 @@ class TicketPdfDownloadTest {
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray();
 
         assertThat(second).isEqualTo(first);
+    }
+
+    /**
+     * The eager pre-render and a download can reach one ticket at the same moment. They used
+     * to both render -- OpenPDF stamps a creation date and a file id, so the two PDFs differed
+     * byte for byte -- and both wrote the same key, leaving a customer holding bytes the other
+     * had already overwritten. Clearing the key reopens that window on demand, rather than
+     * waiting for a loaded CI runner to open it by accident.
+     */
+    @Test
+    void concurrent_first_downloads_all_see_the_same_pdf() throws Exception {
+        Booked booked = bookOneSeat("pdf-race", "pdfrace");
+        UUID ticketId = UUID.fromString(booked.ticketId());
+        CurrentUser owner = new CurrentUser("pdf-race", "pdfrace", "pdfrace@apextick.local",
+                "PDF Buyer", Set.of("user"));
+
+        Ticket ticket = ticketRepository.findById(ticketId).orElseThrow();
+        ticket.setS3Key(null);
+        ticketRepository.save(ticket);
+
+        int contenders = 8;
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(contenders);
+        Set<String> renderings = ConcurrentHashMap.newKeySet();
+        AtomicInteger served = new AtomicInteger();
+
+        try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (int i = 0; i < contenders; i++) {
+                pool.submit(() -> {
+                    try {
+                        start.await();
+                        renderings.add(Base64.getEncoder()
+                                .encodeToString(pdfService.pdfFor(ticketId, owner)));
+                        served.incrementAndGet();
+                    } catch (Exception ignored) {
+                        // a caller that blew up simply never counts as served
+                    } finally {
+                        done.countDown();
+                    }
+                });
+            }
+            start.countDown();
+            assertThat(done.await(30, TimeUnit.SECONDS)).isTrue();
+        }
+
+        assertThat(served).hasValue(contenders);
+        assertThat(renderings).hasSize(1);
     }
 
     @Test
