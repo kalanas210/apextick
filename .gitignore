@@ -10,8 +10,6 @@ out/
 *.tsbuildinfo
 
 # Environment & secrets
-.env
-.env.*
 !.env.example
 
 # IDE
@@ -35,3 +33,4 @@ load-test/results/
 
 # WSO2 setup scratch (setup.sh uses mktemp, but be defensive)
 apextick-api.json
+config.bat
