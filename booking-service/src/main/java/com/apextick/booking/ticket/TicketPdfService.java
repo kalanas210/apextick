@@ -6,6 +6,8 @@ import com.apextick.booking.order.OrderItem;
 import com.apextick.booking.security.CurrentUser;
 import com.apextick.booking.storage.TicketStorage;
 import com.apextick.booking.web.NotFoundException;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,11 +29,14 @@ public class TicketPdfService {
     private final TicketRepository tickets;
     private final TicketStorage storage;
     private final TicketPdfRenderer renderer;
+    private final EntityManager entityManager;
 
-    public TicketPdfService(TicketRepository tickets, TicketStorage storage, TicketPdfRenderer renderer) {
+    public TicketPdfService(TicketRepository tickets, TicketStorage storage, TicketPdfRenderer renderer,
+                            EntityManager entityManager) {
         this.tickets = tickets;
         this.storage = storage;
         this.renderer = renderer;
+        this.entityManager = entityManager;
     }
 
     /** Ticket PDF for a download request, enforcing ownership (admins may fetch any). */
@@ -51,7 +56,19 @@ public class TicketPdfService {
         tickets.findByOrderId(orderId).forEach(this::pdfOf);
     }
 
+    /**
+     * Returns the stored PDF, rendering and storing one on a miss.
+     *
+     * <p>The eager pre-render and a download can reach the same ticket at once, and the
+     * renderer is not byte-stable: OpenPDF stamps a creation date and a file id into every
+     * document it writes. Unlocked, both callers would render, both would write the same
+     * key, and whoever finished first would have handed the customer bytes the other then
+     * overwrote. Locking the row keeps one renderer per ticket; the loser waits and reads
+     * back what was stored. The refresh is what makes that safe -- it reloads the row that
+     * the winner just committed, instead of trusting the copy already in this session.
+     */
     private byte[] pdfOf(Ticket ticket) {
+        entityManager.refresh(ticket, LockModeType.PESSIMISTIC_WRITE);
         if (ticket.getS3Key() != null) {
             Optional<byte[]> cached = storage.get(ticket.getS3Key());
             if (cached.isPresent()) {
