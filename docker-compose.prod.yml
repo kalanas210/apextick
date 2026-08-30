@@ -168,9 +168,38 @@ services:
     container_name: apextick-frontend
     restart: unless-stopped
 
+  # API gateway. Sits between Caddy and booking-service: rejects bad/missing
+  # tokens and unsubscribed callers at the edge, and sheds seat-hold bursts
+  # via the ApexTickHoldBurst policy, before booking-service ever sees them.
+  # See docs/wso2.md for the setup this depends on and its known limitations.
+  wso2am:
+    image: wso2/wso2am:4.5.0
+    container_name: apextick-wso2am
+    depends_on:
+      keycloak:
+        condition: service_started
+    environment:
+      WSO2_ADMIN_PASSWORD: ${WSO2_ADMIN_PASSWORD}
+      JVM_MEM_OPTS: ${WSO2_JVM_MEM_OPTS:--Xms1g -Xmx2g}
+    mem_limit: ${WSO2_MEM_LIMIT:-3g}
+    ports:
+      # Publisher / DevPortal / Admin -- loopback only, reach over an SSH
+      # tunnel like the observability profile below, never the public IP.
+      - "127.0.0.1:9443:9443"
+    volumes:
+      - ./wso2/conf/deployment.toml:/home/wso2carbon/wso2am-4.5.0/repository/conf/deployment.toml:ro
+      - apextick_wso2:/home/wso2carbon/wso2am-4.5.0/repository/database
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sk https://localhost:9443/services/Version >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 240s
+    restart: unless-stopped
+
   # TLS-terminating reverse proxy. Serves one HTTPS origin
   # (https://<SERVER_IP>.nip.io) and routes by path:
-  #   /realms,/resources,/admin,/js -> keycloak   /api -> booking   else -> frontend
+  #   /realms,/resources,/admin,/js -> keycloak   /api -> wso2am   else -> frontend
   # Caddy auto-provisions a browser-trusted cert via ACME (ports 80/443).
   caddy:
     image: caddy:2-alpine
@@ -179,10 +208,11 @@ services:
       - frontend
       - keycloak
       - booking-service
+      - wso2am
     environment:
       SERVER_IP: ${SERVER_IP}
-      # set to wso2am:8280 to route /api through the API gateway
-      API_UPSTREAM: ${API_UPSTREAM:-booking-service:8081}
+      # set back to booking-service:8081 to bypass the gateway
+      API_UPSTREAM: ${API_UPSTREAM:-wso2am:8280}
     ports:
       - "80:80"
       - "443:443"
@@ -229,6 +259,7 @@ services:
 volumes:
   apextick_pgdata:
   apextick_minio:
+  apextick_wso2:
   apextick_prometheus:
   apextick_grafana:
   caddy_data:

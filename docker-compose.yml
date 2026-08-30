@@ -89,6 +89,14 @@ services:
       SPRING_RABBITMQ_HOST: rabbitmq
       SPRING_DATA_REDIS_HOST: redis
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/apextick/protocol/openid-connect/certs
+      # Signature verification always goes to the fixed internal URL above, but
+      # Spring Security separately checks the token's `iss` claim as a literal
+      # string against this. It has to match whatever host the browser used to
+      # reach Keycloak (see frontend/app/providers.tsx) -- localhost by
+      # default; override to exercise the app through the WSO2 gateway
+      # locally, since that container can't resolve "localhost" as the host
+      # machine (see docs/wso2.md).
+      JWT_ISSUER_URI: ${JWT_ISSUER_URI:-http://localhost:8180/realms/apextick}
       APP_PAYMENT_PROVIDER: ${APP_PAYMENT_PROVIDER:-mock}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
@@ -183,6 +191,16 @@ services:
       - "9443:9443"   # publisher / devportal / admin (keep private in prod)
       - "8280:8280"   # gateway, http
       - "8243:8243"   # gateway, https
+    # The Keycloak self-validation connector dials the token's own `iss` URL
+    # directly rather than only the pre-registered JWKS endpoint. A browser on
+    # the host gets tokens issued against whatever hostname it used to reach
+    # Keycloak (see frontend/app/providers.tsx) -- for local dev that's
+    # published-port host access, which "localhost" can't mean from inside
+    # this container. host.docker.internal is the one hostname both the host
+    # browser and this container can resolve to the same machine; see
+    # docs/wso2.md for how to exercise the gateway locally because of this.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./wso2/conf/deployment.toml:/home/wso2carbon/wso2am-4.5.0/repository/conf/deployment.toml:ro
       - apextick_wso2:/home/wso2carbon/wso2am-4.5.0/repository/database
