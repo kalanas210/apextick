@@ -12,6 +12,7 @@
       "directAccessGrantsEnabled": true,
       "redirectUris": [
         "http://localhost:3000/*",
+        "http://host.docker.internal:3000/*",
         "http://54.255.121.222:3000/*",
         "https://54.255.121.222.nip.io/*"
       ],

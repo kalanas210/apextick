@@ -12,21 +12,33 @@
 # Environment (all optional):
 #   WSO2_HOST            https://localhost:9443
 #   WSO2_USER/PASSWORD   admin / admin
-#   WSO2_BACKEND         http://booking-service:8081  (as seen from the gateway)
+#   WSO2_BACKEND         http://booking-service:8081/api  (as seen from the gateway --
+#                        every controller in booking-service is mapped under /api, and
+#                        the operation paths below have that prefix stripped so the
+#                        gateway's own /api context doesn't double up client-side; the
+#                        backend URL puts the prefix back for the upstream call)
 #   WSO2_KC_WELLKNOWN    Keycloak discovery URL, gateway-internal
-#   WSO2_KC_ISSUER       the `iss` claim in tokens the browser gets
+#   WSO2_KC_ISSUER       the `iss` claim in tokens the browser gets -- must be a host
+#                        this gateway container can also resolve and reach itself (the
+#                        Keycloak connector dials it directly, not just the JWKS URL
+#                        below). localhost can't mean that from inside a container, so
+#                        this only works for a browser hitting the app via
+#                        http://localhost:3000 when testing outside the gateway; to
+#                        exercise the gateway path locally use host.docker.internal
+#                        instead -- see docs/wso2.md.
 set -euo pipefail
 
 WSO2_HOST="${WSO2_HOST:-https://localhost:9443}"
 WSO2_USER="${WSO2_USER:-admin}"
 WSO2_PASSWORD="${WSO2_PASSWORD:-${WSO2_ADMIN_PASSWORD:-admin}}"
-WSO2_BACKEND="${WSO2_BACKEND:-http://booking-service:8081}"
+WSO2_BACKEND="${WSO2_BACKEND:-http://booking-service:8081/api}"
 WSO2_KC_WELLKNOWN="${WSO2_KC_WELLKNOWN:-http://keycloak:8080/realms/apextick/.well-known/openid-configuration}"
 WSO2_KC_ISSUER="${WSO2_KC_ISSUER:-http://localhost:8180/realms/apextick}"
 WSO2_KC_JWKS="${WSO2_KC_JWKS:-http://keycloak:8080/realms/apextick/protocol/openid-connect/certs}"
 WSO2_KC_BASE="${WSO2_KC_BASE:-http://keycloak:8080/realms/apextick}"
 WSO2_KM_CLIENT_ID="${WSO2_KM_CLIENT_ID:-apextick-wso2-km}"
 WSO2_KM_CLIENT_SECRET="${WSO2_KM_CLIENT_SECRET:-apextick-wso2-km-secret}"
+WSO2_SPA_CLIENT_ID="${WSO2_SPA_CLIENT_ID:-apextick-web}"
 
 API_NAME="ApexTickAPI"
 API_CONTEXT="api"   # no leading slash: Git Bash would rewrite it as a path
@@ -269,6 +281,25 @@ if [ -n "$APP_ID" ]; then
     409) info "already subscribed" ;;
     *)   info "subscription returned $CODE" ;;
   esac
+fi
+
+# --------------------------------------------------------------------------
+step "Mapping the SPA's Keycloak client onto the application"
+# The gateway only accepts a token whose consumer key (the `azp` claim) is
+# subscribed above. apextick-web is a Keycloak client the SPA already logs
+# into directly, not one WSO2 minted itself, so this is a BYOK mapping
+# (map-keys) rather than the usual "generate keys" flow.
+if [ -n "$APP_ID" ]; then
+  CODE=$(api -H 'Content-Type: application/json' \
+    -d '{"consumerKey":"'"$WSO2_SPA_CLIENT_ID"'","consumerSecret":"","keyManager":"Keycloak","keyType":"PRODUCTION"}' \
+    -o /dev/null -w '%{http_code}' "$WSO2_HOST/api/am/devportal/v3/applications/$APP_ID/map-keys")
+  case "$CODE" in
+    200) info "mapped" ;;
+    409) info "already mapped" ;;
+    *)   info "map-keys returned $CODE -- see docs/wso2.md if this is 401/invalid_token" ;;
+  esac
+else
+  info "skipped -- no application to map keys onto"
 fi
 
 printf '\n\033[32mDone.\033[0m Gateway: http://localhost:8280/%s  ·  Publisher: %s/publisher\n' "$API_CONTEXT" "$WSO2_HOST"
