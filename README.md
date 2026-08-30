@@ -43,6 +43,7 @@ graph TB
     User([User])
     Next["Next.js Frontend<br/>React + OIDC"]
     KC["Keycloak<br/>OAuth2 / OIDC"]
+    GW["WSO2 API Manager<br/>edge auth + throttling"]
     API["Booking and Inventory Service<br/>Spring Boot"]
     DB[("PostgreSQL<br/>source of truth")]
     Redis[("Redis<br/>TTL holds + pub/sub")]
@@ -54,7 +55,10 @@ graph TB
 
     User --> Next
     Next -->|login PKCE| KC
-    Next -->|JWT REST + WebSocket| API
+    Next -->|JWT REST| GW
+    Next -->|JWT WebSocket, direct| API
+    GW -->|validate + subscription check| KC
+    GW -->|proxied, authorized only| API
     API -->|validate JWT| KC
     API --> DB
     API --> Redis
@@ -71,7 +75,7 @@ Two independent services share a **message contract, not code**:
 - **Booking & Inventory Service** — the secured REST + WebSocket API. It claims seats atomically, records holds, orders, payments and tickets, publishes domain events through a transactional outbox, and drives hold expiry.
 - **Notification Service** — a fully independent consumer with its **own database**. It reacts to booking events asynchronously and can restart or fail without affecting bookings.
 
-Supporting infrastructure: **PostgreSQL** (source of truth), **Redis** (self-expiring holds + realtime fan-out), **RabbitMQ** (event bus with dead-letter queues), **Keycloak** (OAuth2 / OIDC), **Stripe** (payments), and **Prometheus + Grafana** (observability).
+Supporting infrastructure: **PostgreSQL** (source of truth), **Redis** (self-expiring holds + realtime fan-out), **RabbitMQ** (event bus with dead-letter queues), **Keycloak** (OAuth2 / OIDC), **WSO2 API Manager** (edge authentication, subscription enforcement, and — in production — the front door for every REST call), **Stripe** (payments), and **Prometheus + Grafana** (observability). The WebSocket stays on a direct route to the service; see [API gateway](#api-gateway) for why.
 
 ## How the concurrency works
 
@@ -128,6 +132,7 @@ There are no `synchronized` blocks, no application-level mutexes, and no distrib
 | Cache / TTL / pub-sub | Redis | Self-expiring holds + realtime fan-out |
 | Messaging | RabbitMQ | Reliable event delivery with dead-letter queues |
 | Auth | Keycloak | Standard OAuth2 / OIDC, portable across providers |
+| API Gateway | WSO2 API Manager | Edge auth, subscription enforcement, throttling — a published contract instead of a bare service |
 | Payments | Stripe | PaymentIntents, webhooks, refunds (mock provider for offline demos) |
 | Observability | Micrometer + Prometheus + Grafana | Metrics, scraping, dashboards |
 | Frontend | Next.js (React) | App Router, OIDC login, live seat map |
