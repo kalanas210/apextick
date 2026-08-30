@@ -21,15 +21,18 @@ ok()   { printf '  \033[32mPASS\033[0m %-44s %s\n' "$1" "$2"; pass=$((pass+1)); 
 bad()  { printf '  \033[31mFAIL\033[0m %-44s %s\n' "$1" "$2"; fail=$((fail+1)); }
 note() { printf '  \033[33mNOTE\033[0m %-44s %s\n' "$1" "$2"; }
 
-# status + WSO2 error code for one request
+# status + WSO2 error code for one request. A single curl call: two requests
+# for what should be one observation let the gateway's per-request state
+# (token cache, throttle counters) shift between them and made this flaky.
 probe() {
   local url="$1"; shift
-  local code body
-  code=$(curl -s -o /dev/null -w '%{http_code}' "$@" "$url")
-  body=$(curl -s "$@" "$url" | python -c "import json,sys
+  local raw code wsocode
+  raw=$(curl -s "$@" -w '\n%{http_code}' "$url")
+  code=$(printf '%s' "$raw" | tail -1)
+  wsocode=$(printf '%s' "$raw" | sed '$d' | python3 -c "import json,sys
 try: print(json.load(sys.stdin).get('code',''))
 except Exception: print('')" 2>/dev/null)
-  printf '%s %s' "$code" "$body"
+  printf '%s %s' "$code" "$wsocode"
 }
 
 echo "Gateway: $GATEWAY"
@@ -37,7 +40,7 @@ echo "Gateway: $GATEWAY"
 TOKEN=$(curl -s "$KEYCLOAK/realms/$REALM/protocol/openid-connect/token" \
   -d grant_type=password -d "client_id=$CLIENT_ID" \
   -d "username=$USERNAME" -d "password=$PASSWORD" \
-  | python -c "import json,sys;print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null)
+  | python3 -c "import json,sys;print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null)
 [ -n "$TOKEN" ] || { echo "ERROR: could not get a Keycloak token" >&2; exit 1; }
 
 URL="$GATEWAY/events/$EVENT_SLUG"
@@ -86,7 +89,7 @@ if [ "${SUBSCRIBED:-0}" != "1" ]; then
   note "skipped" "throttling only kicks in after subscription validation"
 else
   SEAT=$(curl -s -H "Authorization: Bearer $TOKEN" "$GATEWAY/events/$EVENT_SLUG/seats" \
-    | python -c "import json,sys;s=json.load(sys.stdin);print(next((x['id'] for x in s if x['status']=='AVAILABLE'),''))" 2>/dev/null)
+    | python3 -c "import json,sys;s=json.load(sys.stdin);print(next((x['id'] for x in s if x['status']=='AVAILABLE'),''))" 2>/dev/null)
   if [ -z "$SEAT" ]; then
     note "skipped" "no AVAILABLE seat to hammer — reset the demo data"
   else

@@ -12,21 +12,33 @@
 # Environment (all optional):
 #   WSO2_HOST            https://localhost:9443
 #   WSO2_USER/PASSWORD   admin / admin
-#   WSO2_BACKEND         http://booking-service:8081  (as seen from the gateway)
+#   WSO2_BACKEND         http://booking-service:8081/api  (as seen from the gateway --
+#                        every controller in booking-service is mapped under /api, and
+#                        the operation paths below have that prefix stripped so the
+#                        gateway's own /api context doesn't double up client-side; the
+#                        backend URL puts the prefix back for the upstream call)
 #   WSO2_KC_WELLKNOWN    Keycloak discovery URL, gateway-internal
-#   WSO2_KC_ISSUER       the `iss` claim in tokens the browser gets
+#   WSO2_KC_ISSUER       the `iss` claim in tokens the browser gets -- must be a host
+#                        this gateway container can also resolve and reach itself (the
+#                        Keycloak connector dials it directly, not just the JWKS URL
+#                        below). localhost can't mean that from inside a container, so
+#                        this only works for a browser hitting the app via
+#                        http://localhost:3000 when testing outside the gateway; to
+#                        exercise the gateway path locally use host.docker.internal
+#                        instead -- see docs/wso2.md.
 set -euo pipefail
 
 WSO2_HOST="${WSO2_HOST:-https://localhost:9443}"
 WSO2_USER="${WSO2_USER:-admin}"
 WSO2_PASSWORD="${WSO2_PASSWORD:-${WSO2_ADMIN_PASSWORD:-admin}}"
-WSO2_BACKEND="${WSO2_BACKEND:-http://booking-service:8081}"
+WSO2_BACKEND="${WSO2_BACKEND:-http://booking-service:8081/api}"
 WSO2_KC_WELLKNOWN="${WSO2_KC_WELLKNOWN:-http://keycloak:8080/realms/apextick/.well-known/openid-configuration}"
 WSO2_KC_ISSUER="${WSO2_KC_ISSUER:-http://localhost:8180/realms/apextick}"
 WSO2_KC_JWKS="${WSO2_KC_JWKS:-http://keycloak:8080/realms/apextick/protocol/openid-connect/certs}"
 WSO2_KC_BASE="${WSO2_KC_BASE:-http://keycloak:8080/realms/apextick}"
 WSO2_KM_CLIENT_ID="${WSO2_KM_CLIENT_ID:-apextick-wso2-km}"
 WSO2_KM_CLIENT_SECRET="${WSO2_KM_CLIENT_SECRET:-apextick-wso2-km-secret}"
+WSO2_SPA_CLIENT_ID="${WSO2_SPA_CLIENT_ID:-apextick-web}"
 
 API_NAME="ApexTickAPI"
 API_CONTEXT="api"   # no leading slash: Git Bash would rewrite it as a path
@@ -67,8 +79,8 @@ DCR=$("${CURL[@]}" -u "$WSO2_USER:$WSO2_PASSWORD" \
   -d '{"callbackUrl":"http://localhost","clientName":"apextick_setup","owner":"'"$WSO2_USER"'","grantType":"password refresh_token","saasApp":true}' \
   "$WSO2_HOST/client-registration/v0.17/register")
 
-CLIENT_ID=$(printf '%s' "$DCR" | python -c "import json,sys;print(json.load(sys.stdin).get('clientId',''))" 2>/dev/null || true)
-CLIENT_SECRET=$(printf '%s' "$DCR" | python -c "import json,sys;print(json.load(sys.stdin).get('clientSecret',''))" 2>/dev/null || true)
+CLIENT_ID=$(printf '%s' "$DCR" | python3 -c "import json,sys;print(json.load(sys.stdin).get('clientId',''))" 2>/dev/null || true)
+CLIENT_SECRET=$(printf '%s' "$DCR" | python3 -c "import json,sys;print(json.load(sys.stdin).get('clientSecret',''))" 2>/dev/null || true)
 [ -n "$CLIENT_ID" ] || die "client registration failed: $DCR"
 info "client id ${CLIENT_ID:0:8}…"
 
@@ -76,7 +88,7 @@ SCOPES="apim:api_view apim:api_create apim:api_publish apim:api_manage apim:subs
 TOKEN=$("${CURL[@]}" -u "$CLIENT_ID:$CLIENT_SECRET" \
   -d "grant_type=password&username=$WSO2_USER&password=$WSO2_PASSWORD&scope=$(printf '%s' "$SCOPES" | sed 's/ /%20/g')" \
   "$WSO2_HOST/oauth2/token" \
-  | python -c "import json,sys;print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)
+  | python3 -c "import json,sys;print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)
 [ -n "$TOKEN" ] || die "could not obtain an admin token"
 AUTH=(-H "Authorization: Bearer $TOKEN")
 info "token acquired"
@@ -88,12 +100,12 @@ step "Registering Keycloak as a key manager"
 # Lets the gateway accept the very same access tokens the SPA already holds,
 # instead of issuing a second set of credentials nobody else understands.
 KM_EXISTS=$(api "$WSO2_HOST/api/am/admin/v4/key-managers" \
-  | python -c "import json,sys;d=json.load(sys.stdin);print(next((k['id'] for k in d.get('list',[]) if k.get('name')=='Keycloak'),''))" 2>/dev/null || true)
+  | python3 -c "import json,sys;d=json.load(sys.stdin);print(next((k['id'] for k in d.get('list',[]) if k.get('name')=='Keycloak'),''))" 2>/dev/null || true)
 
 if [ -n "$KM_EXISTS" ]; then
   info "already registered ($KM_EXISTS)"
 else
-  KM_BODY=$(python - "$WSO2_KC_WELLKNOWN" "$WSO2_KC_ISSUER" "$WSO2_KC_JWKS" \
+  KM_BODY=$(python3 - "$WSO2_KC_WELLKNOWN" "$WSO2_KC_ISSUER" "$WSO2_KC_JWKS" \
                      "$WSO2_KC_BASE" "$WSO2_KM_CLIENT_ID" "$WSO2_KM_CLIENT_SECRET" <<'PY'
 import json, sys
 
@@ -154,7 +166,7 @@ step "Creating the burst-throttling policy"
 # The point of putting a gateway in front of a flash sale: shed the burst at the
 # edge so the booking service never sees it.
 POLICY_EXISTS=$(api "$WSO2_HOST/api/am/admin/v4/throttling/policies/advanced" \
-  | python -c "import json,sys;d=json.load(sys.stdin);print(next((p['policyId'] for p in d.get('list',[]) if p.get('policyName')=='$POLICY_NAME'),''))" 2>/dev/null || true)
+  | python3 -c "import json,sys;d=json.load(sys.stdin);print(next((p['policyId'] for p in d.get('list',[]) if p.get('policyName')=='$POLICY_NAME'),''))" 2>/dev/null || true)
 
 if [ -n "$POLICY_EXISTS" ]; then
   info "already exists ($POLICY_EXISTS)"
@@ -168,9 +180,9 @@ fi
 # --------------------------------------------------------------------------
 step "Importing the API definition"
 API_ID=$(api "$WSO2_HOST/api/am/publisher/v4/apis?query=name:$API_NAME" \
-  | python -c "import json,sys;d=json.load(sys.stdin);print(next((a['id'] for a in d.get('list',[]) if a.get('name')=='$API_NAME'),''))" 2>/dev/null || true)
+  | python3 -c "import json,sys;d=json.load(sys.stdin);print(next((a['id'] for a in d.get('list',[]) if a.get('name')=='$API_NAME'),''))" 2>/dev/null || true)
 
-ADDITIONAL=$(python - "$API_NAME" "$API_CONTEXT" "$API_VERSION" "$WSO2_BACKEND" <<'PY'
+ADDITIONAL=$(python3 - "$API_NAME" "$API_CONTEXT" "$API_VERSION" "$WSO2_BACKEND" <<'PY'
 import json, sys
 name, context, version, backend = sys.argv[1:5]
 context = "/" + context.lstrip("/")
@@ -198,7 +210,7 @@ else
   IMPORT=$(api -H 'Content-Type: multipart/form-data' \
     -F "file=@$OPENAPI" -F "additionalProperties=$ADDITIONAL" \
     "$WSO2_HOST/api/am/publisher/v4/apis/import-openapi")
-  API_ID=$(printf '%s' "$IMPORT" | python -c "import json,sys;print(json.load(sys.stdin).get('id',''))" 2>/dev/null || true)
+  API_ID=$(printf '%s' "$IMPORT" | python3 -c "import json,sys;print(json.load(sys.stdin).get('id',''))" 2>/dev/null || true)
   [ -n "$API_ID" ] || die "import failed: $(printf '%s' "$IMPORT" | head -c 500)"
   info "imported as $API_ID"
 fi
@@ -206,7 +218,7 @@ fi
 # --------------------------------------------------------------------------
 step "Applying the burst policy to the seat-hold operations"
 api "$WSO2_HOST/api/am/publisher/v4/apis/$API_ID" > "$API_TMP"
-python - "$API_TMP" "$POLICY_NAME" <<'PY'
+python3 - "$API_TMP" "$POLICY_NAME" <<'PY'
 import json, sys
 path, policy = sys.argv[1], sys.argv[2]
 api = json.load(open(path))
@@ -229,7 +241,7 @@ step "Deploying a revision to the gateway"
 REV=$(api -H 'Content-Type: application/json' \
   -d '{"description":"configured by scripts/wso2/setup.sh"}' \
   "$WSO2_HOST/api/am/publisher/v4/apis/$API_ID/revisions" \
-  | python -c "import json,sys;print(json.load(sys.stdin).get('id',''))" 2>/dev/null || true)
+  | python3 -c "import json,sys;print(json.load(sys.stdin).get('id',''))" 2>/dev/null || true)
 
 if [ -n "$REV" ]; then
   CODE=$(api -H 'Content-Type: application/json' \
@@ -250,13 +262,13 @@ info "lifecycle change returned $CODE"
 # --------------------------------------------------------------------------
 step "Subscribing a DevPortal application"
 APP_ID=$(api "$WSO2_HOST/api/am/devportal/v3/applications" \
-  | python -c "import json,sys;d=json.load(sys.stdin);print(next((a['applicationId'] for a in d.get('list',[]) if a.get('name')=='$APP_NAME'),''))" 2>/dev/null || true)
+  | python3 -c "import json,sys;d=json.load(sys.stdin);print(next((a['applicationId'] for a in d.get('list',[]) if a.get('name')=='$APP_NAME'),''))" 2>/dev/null || true)
 
 if [ -z "$APP_ID" ]; then
   APP_ID=$(api -H 'Content-Type: application/json' \
     -d '{"name":"'"$APP_NAME"'","throttlingPolicy":"Unlimited","description":"ApexTick web client"}' \
     "$WSO2_HOST/api/am/devportal/v3/applications" \
-    | python -c "import json,sys;print(json.load(sys.stdin).get('applicationId',''))" 2>/dev/null || true)
+    | python3 -c "import json,sys;print(json.load(sys.stdin).get('applicationId',''))" 2>/dev/null || true)
 fi
 [ -n "$APP_ID" ] && info "application $APP_ID" || info "could not create the application"
 
@@ -269,6 +281,25 @@ if [ -n "$APP_ID" ]; then
     409) info "already subscribed" ;;
     *)   info "subscription returned $CODE" ;;
   esac
+fi
+
+# --------------------------------------------------------------------------
+step "Mapping the SPA's Keycloak client onto the application"
+# The gateway only accepts a token whose consumer key (the `azp` claim) is
+# subscribed above. apextick-web is a Keycloak client the SPA already logs
+# into directly, not one WSO2 minted itself, so this is a BYOK mapping
+# (map-keys) rather than the usual "generate keys" flow.
+if [ -n "$APP_ID" ]; then
+  CODE=$(api -H 'Content-Type: application/json' \
+    -d '{"consumerKey":"'"$WSO2_SPA_CLIENT_ID"'","consumerSecret":"","keyManager":"Keycloak","keyType":"PRODUCTION"}' \
+    -o /dev/null -w '%{http_code}' "$WSO2_HOST/api/am/devportal/v3/applications/$APP_ID/map-keys")
+  case "$CODE" in
+    200) info "mapped" ;;
+    409) info "already mapped" ;;
+    *)   info "map-keys returned $CODE -- see docs/wso2.md if this is 401/invalid_token" ;;
+  esac
+else
+  info "skipped -- no application to map keys onto"
 fi
 
 printf '\n\033[32mDone.\033[0m Gateway: http://localhost:8280/%s  ·  Publisher: %s/publisher\n' "$API_CONTEXT" "$WSO2_HOST"

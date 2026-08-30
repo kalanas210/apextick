@@ -22,7 +22,7 @@ if ! curl -fsS "${BOOKING_URL}/v3/api-docs" -o "${OUT}.tmp"; then
   exit 1
 fi
 
-python "$NORMALISE" "${OUT}.tmp" "$OUT"
+python3 "$NORMALISE" "${OUT}.tmp" "$OUT"
 rm -f "${OUT}.tmp"
 
 echo "Wrote $OUT"

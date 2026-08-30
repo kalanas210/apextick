@@ -89,9 +89,9 @@ websub_event_receiver_https_endpoint = "https://localhost:8021"
 [apim.sync_runtime_artifacts.gateway]
 gateway_labels =["Default"]
 
-#[apim.cache.gateway_token]
-#enable = true
-#expiry_time = "900s"
+[apim.cache.gateway_token]
+enable = false
+expiry_time = "900s"
 
 #[apim.cache.resource]
 #enable = true
@@ -154,9 +154,9 @@ enable_lightweight_apikey_generation = true
 #claims_extractor_impl = "org.wso2.carbon.apimgt.impl.token.ExtendedDefaultClaimsRetriever"
 #use_sha256_hash = false
 
-#[apim.oauth_config]
-#enable_outbound_auth_header = false
-#auth_header = "Authorization"
+[apim.oauth_config]
+enable_outbound_auth_header = true
+auth_header = "Authorization"
 #revoke_endpoint = "https://localhost:${https.nio.port}/revoke"
 #enable_token_encryption = false
 #enable_token_hashing = false

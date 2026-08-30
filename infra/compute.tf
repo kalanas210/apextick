@@ -22,7 +22,7 @@ resource "aws_key_pair" "main" {
 # The server
 resource "aws_instance" "app" {
   ami                         = data.aws_ami.ubuntu.id
-  instance_type               = "t3.medium"
+  instance_type               = "t3.large"
   subnet_id                   = aws_subnet.public.id
   vpc_security_group_ids      = [aws_security_group.ec2.id]
   key_name                    = aws_key_pair.main.key_name
@@ -34,6 +34,18 @@ resource "aws_instance" "app" {
   }
 
   tags = { Name = "apextick-server" }
+
+  lifecycle {
+    # data.aws_ami.ubuntu tracks whatever Canonical most recently published,
+    # which drifts constantly -- without this, every `terraform plan` wants to
+    # destroy and recreate the instance (AMI changes can't apply in-place) the
+    # moment a newer Ubuntu 24.04 build ships, wiping every docker volume on
+    # its disk (Postgres/Keycloak/MinIO/... -- nothing here is on separate,
+    # persistent storage). The AMI this instance actually boots from stays
+    # pinned to whatever it was created with; bump it deliberately (remove
+    # this line for one apply) if a rebuild is ever genuinely wanted.
+    ignore_changes = [ami]
+  }
 }
 
 # A static (Elastic) IP pinned to the instance, so the public IP no longer
