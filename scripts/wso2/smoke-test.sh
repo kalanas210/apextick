@@ -21,15 +21,18 @@ ok()   { printf '  \033[32mPASS\033[0m %-44s %s\n' "$1" "$2"; pass=$((pass+1)); 
 bad()  { printf '  \033[31mFAIL\033[0m %-44s %s\n' "$1" "$2"; fail=$((fail+1)); }
 note() { printf '  \033[33mNOTE\033[0m %-44s %s\n' "$1" "$2"; }
 
-# status + WSO2 error code for one request
+# status + WSO2 error code for one request. A single curl call: two requests
+# for what should be one observation let the gateway's per-request state
+# (token cache, throttle counters) shift between them and made this flaky.
 probe() {
   local url="$1"; shift
-  local code body
-  code=$(curl -s -o /dev/null -w '%{http_code}' "$@" "$url")
-  body=$(curl -s "$@" "$url" | python -c "import json,sys
+  local raw code wsocode
+  raw=$(curl -s "$@" -w '\n%{http_code}' "$url")
+  code=$(printf '%s' "$raw" | tail -1)
+  wsocode=$(printf '%s' "$raw" | sed '$d' | python -c "import json,sys
 try: print(json.load(sys.stdin).get('code',''))
 except Exception: print('')" 2>/dev/null)
-  printf '%s %s' "$code" "$body"
+  printf '%s %s' "$code" "$wsocode"
 }
 
 echo "Gateway: $GATEWAY"

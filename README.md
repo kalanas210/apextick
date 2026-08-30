@@ -294,8 +294,9 @@ docker compose -f docker-compose.prod.yml up -d
 
 Caddy is the only thing published (80/443). It terminates TLS with an
 automatically-provisioned certificate for `https://<SERVER_IP>.nip.io` and routes
-by path — `/api` to the booking service, `/realms` to Keycloak, everything else to
-the frontend — so the app, API and Keycloak ports stay closed at the security group.
+by path — `/api` to the WSO2 gateway (which then reaches the booking service),
+`/realms` to Keycloak, everything else to the frontend — so the app, API and
+Keycloak ports stay closed at the security group.
 
 Prometheus and Grafana are an opt-in profile bound to loopback:
 
@@ -308,9 +309,9 @@ rather than opening them to the internet.
 
 ## API gateway
 
-**WSO2 API Manager 4.5.0** can sit in front of the booking service as an opt-in
-profile, so unauthenticated traffic and seat-hold bursts are shed at the edge
-rather than in the service:
+**WSO2 API Manager 4.5.0** sits in front of the booking service — in
+production it's the default request path; locally it's an opt-in profile
+(needs ~4 GB of memory):
 
 ```bash
 docker compose --profile wso2 up -d
@@ -318,13 +319,16 @@ scripts/wso2/refresh-openapi.sh && scripts/wso2/setup.sh
 scripts/wso2/smoke-test.sh
 ```
 
-The gateway's whole configuration — the API contract, a 10-req/s throttling
-policy on the hold operations, and Keycloak registered as the key manager — is
-applied by script through WSO2's REST APIs, so it lives in git rather than in a
-browser session. Edge authentication is verified working; subscription validation
-for Keycloak-issued tokens has a documented connector limitation, so the gateway
-is **not** in the default request path. See [docs/wso2.md](docs/wso2.md) for what
-works, what does not, and exactly why.
+The gateway's whole configuration — the API contract, a throttling policy on
+the hold operations, Keycloak registered as the key manager, and the SPA's
+client mapped onto the subscribed application — is applied by script through
+WSO2's REST APIs, so it lives in git rather than in a browser session, and
+needs no manual follow-up. Edge authentication, subscription validation and
+backend routing are all verified working end-to-end, including under real
+concurrent load; request throttling is not yet — a product-level issue in
+WSO2's own policy compiler, not this repo's config. See
+[docs/wso2.md](docs/wso2.md) for the full fix history and exactly what's
+still open.
 
 ---
 
