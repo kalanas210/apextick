@@ -29,7 +29,7 @@ probe() {
   local raw code wsocode
   raw=$(curl -s "$@" -w '\n%{http_code}' "$url")
   code=$(printf '%s' "$raw" | tail -1)
-  wsocode=$(printf '%s' "$raw" | sed '$d' | python -c "import json,sys
+  wsocode=$(printf '%s' "$raw" | sed '$d' | python3 -c "import json,sys
 try: print(json.load(sys.stdin).get('code',''))
 except Exception: print('')" 2>/dev/null)
   printf '%s %s' "$code" "$wsocode"
@@ -40,7 +40,7 @@ echo "Gateway: $GATEWAY"
 TOKEN=$(curl -s "$KEYCLOAK/realms/$REALM/protocol/openid-connect/token" \
   -d grant_type=password -d "client_id=$CLIENT_ID" \
   -d "username=$USERNAME" -d "password=$PASSWORD" \
-  | python -c "import json,sys;print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null)
+  | python3 -c "import json,sys;print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null)
 [ -n "$TOKEN" ] || { echo "ERROR: could not get a Keycloak token" >&2; exit 1; }
 
 URL="$GATEWAY/events/$EVENT_SLUG"
@@ -89,7 +89,7 @@ if [ "${SUBSCRIBED:-0}" != "1" ]; then
   note "skipped" "throttling only kicks in after subscription validation"
 else
   SEAT=$(curl -s -H "Authorization: Bearer $TOKEN" "$GATEWAY/events/$EVENT_SLUG/seats" \
-    | python -c "import json,sys;s=json.load(sys.stdin);print(next((x['id'] for x in s if x['status']=='AVAILABLE'),''))" 2>/dev/null)
+    | python3 -c "import json,sys;s=json.load(sys.stdin);print(next((x['id'] for x in s if x['status']=='AVAILABLE'),''))" 2>/dev/null)
   if [ -z "$SEAT" ]; then
     note "skipped" "no AVAILABLE seat to hammer — reset the demo data"
   else
