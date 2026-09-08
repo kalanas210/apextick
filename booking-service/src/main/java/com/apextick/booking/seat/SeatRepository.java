@@ -14,6 +14,10 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
 
     List<Seat> findByEventIdOrderByIdAsc(Long eventId);
 
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from Seat s where s.eventId = :eventId")
+    int deleteByEventId(@Param("eventId") Long eventId);
+
     @Query("select s from Seat s join fetch s.section sec join fetch sec.tier "
             + "where s.eventId = :eventId order by s.id")
     List<Seat> findAllForEventWithLayout(@Param("eventId") Long eventId);

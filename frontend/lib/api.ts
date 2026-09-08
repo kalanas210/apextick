@@ -48,3 +48,34 @@ export function apiErrorCode(error: unknown): string | undefined {
         ? (error.response?.data as ProblemDetail | undefined)?.code
         : undefined;
 }
+
+/** HTTP status of a failed request, for branching on 401 vs 403 vs 404. */
+export function apiStatus(error: unknown): number | undefined {
+    return axios.isAxiosError(error) ? error.response?.status : undefined;
+}
+
+/** The whole problem detail, for the members that only some errors carry. */
+export function apiProblem(error: unknown): ProblemDetail | undefined {
+    return axios.isAxiosError(error) ? (error.response?.data as ProblemDetail | undefined) : undefined;
+}
+
+/**
+ * Validation failures as a field -> message map, ready to hang off form inputs.
+ * The API sends a list; forms want it keyed.
+ */
+export function apiFieldErrors(error: unknown): Record<string, string> {
+    const errors = apiProblem(error)?.fieldErrors ?? [];
+    return Object.fromEntries(errors.map((e) => [e.field, e.message]));
+}
+
+/**
+ * Retry predicate for React Query. The client default retries everything once,
+ * which doubles up 401/403/404 -- answers that will not change on a second ask.
+ */
+export function retryOn5xx(failureCount: number, error: unknown): boolean {
+    const status = apiStatus(error);
+    if (status !== undefined && status < 500) {
+        return false;
+    }
+    return failureCount < 1;
+}

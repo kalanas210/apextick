@@ -4,11 +4,12 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { Header } from "./header";
 
-const AUTH_PREFIXES = ["/signin", "/register", "/forgot-password"];
+const BARE_PREFIXES = ["/signin", "/register", "/forgot-password", "/admin"];
 
 /**
  * Decides the page chrome. Auth routes get a clean, focused canvas with no
- * marketing header or footer; everything else gets the full site chrome.
+ * marketing header or footer, and the admin panel brings its own sidebar;
+ * everything else gets the full site chrome.
  */
 export function Chrome({
   children,
@@ -18,9 +19,9 @@ export function Chrome({
   footer: ReactNode;
 }) {
   const pathname = usePathname();
-  const isAuth = AUTH_PREFIXES.some((p) => pathname.startsWith(p));
+  const bare = BARE_PREFIXES.some((p) => pathname.startsWith(p));
 
-  if (isAuth) {
+  if (bare) {
     return (
       <main id="main" tabIndex={-1} className="outline-none">
         {children}

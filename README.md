@@ -106,6 +106,7 @@ There are no `synchronized` blocks, no application-level mutexes, and no distrib
 | **Tickets** | On payment a QR-tokened ticket is issued per seat, rendered to a PDF and cached in S3/MinIO (off the payment path, regenerated on demand); admins verify tickets at the gate. |
 | **Transactional outbox** | Domain events are written in the same transaction as the state change and published to RabbitMQ only after commit — no phantom events on rollback. |
 | **Async notifications** | An independent service consumes booking events (idempotently, with a DLQ) and sends templated email via Mailpit/SMTP. |
+| **Admin panel** | A `/admin` area behind the `admin` realm role: event CRUD, a one-shot seating-layout builder with a live seat/revenue preview, live event stats, an orders console, seat release, and a gate scanner that reads QR codes with the browser's own `BarcodeDetector`. |
 | **Admin API** | Events & layout management, live event stats, orders, seat release, ticket verification — all `ROLE_ADMIN`. |
 | **Rate limiting** | Redis fixed-window limits on hold/order/pay, returning `429` + `Retry-After`. |
 | **Observability** | Micrometer → Prometheus, with a provisioned Grafana dashboard. |
@@ -119,7 +120,7 @@ There are no `synchronized` blocks, no application-level mutexes, and no distrib
 - **PCI-conscious payments** — the Stripe adapter never sees a raw card number: it creates a PaymentIntent and returns a `client_secret` for the browser to confirm, treating the signed `payment_intent.succeeded` webhook as the source of truth. Webhooks are idempotent, and a charge that lands after its seats were lost is automatically refunded.
 - **Stateless JWT security** — Keycloak issues OIDC tokens the API validates statelessly; roles map from `realm_access.roles` to `ROLE_*`. Auth keeps working containerized by fetching signing keys over the internal network while validating the public issuer.
 - **One-command infrastructure** — the whole backend, its dependencies, the Keycloak realm, and an optional observability stack start with `docker compose up`. Every secret is externalized to a git-ignored `.env`.
-- **Verified** — 51 tests, most of them full-stack **Testcontainers** integration tests covering concurrency, expiry, the outbox, orders, payments, webhooks, admin, security and rate-limiting.
+- **Verified** — 71 tests, most of them full-stack **Testcontainers** integration tests covering concurrency, expiry, the outbox, orders, payments, webhooks, admin, security and rate-limiting.
 
 ## Tech stack
 
@@ -195,6 +196,38 @@ If that port is taken, point it somewhere else:
 NEXT_PUBLIC_API_URL=http://localhost:18081 npm run dev
 ```
 
+### 5. (Optional) Open the admin panel
+
+**http://localhost:3000/admin** — event CRUD, the seating-layout builder, live
+stats, the orders console, seat release, and the gate scanner.
+
+It is gated on the `admin` realm role. The realm **defines** that role but
+grants it to nobody: the seeded `kalana` account is a plain customer, and its
+password is published here, so making it an administrator would hand
+`/api/admin/**` to anyone who can read this file. Grant the role deliberately,
+to whoever should hold it:
+
+```bash
+scripts/grant-admin.sh                 # grants to kalana
+scripts/grant-admin.sh someone-else
+```
+
+The script patches the realm through Keycloak's Admin API, so it works on a
+stack that is already running — which matters, because Keycloak reads
+`keycloak/import/apextick-realm.json` only when the realm does not yet exist in
+its database, and recreating the container to force a re-import would drop every
+account registered since.
+
+Realm roles are baked into the access token when it is issued, so sign out and
+back in afterwards.
+
+On a deployment anyone else can reach, change the demo password too — it is a
+seed for local development, not a credential.
+
+The gate scanner reads QR codes through the browser's native `BarcodeDetector`
+(Chromium, on a secure origin — HTTPS or `localhost`); everywhere else it falls
+back to pasting the token, which is also how it is demoed without a camera.
+
 ## Payments
 
 The active gateway is chosen by `APP_PAYMENT_PROVIDER` (`mock` by default):
@@ -251,7 +284,7 @@ cd booking-service
 ./mvnw verify   # needs Docker for Testcontainers
 ```
 
-51 tests run, most of them full-stack Testcontainers integration tests: seat concurrency (1 winner / 199 losers), multi-seat all-or-nothing holds, Redis-driven expiry, the hold sweeper, the transactional outbox, the order/payment flow, Stripe signature verification and mapping, seats-lost compensation, the admin API, security, and rate limiting.
+71 tests run, most of them full-stack Testcontainers integration tests: seat concurrency (1 winner / 199 losers), multi-seat all-or-nothing holds, Redis-driven expiry, the hold sweeper, the transactional outbox, the order/payment flow, Stripe signature verification and mapping, seats-lost compensation, the admin API, security, and rate limiting.
 
 ## Project structure
 
@@ -259,9 +292,10 @@ cd booking-service
 apextick/
 ├── booking-service/        # Spring Boot — seats, holds, orders, payments, tickets, admin
 ├── notification-service/   # Spring Boot — independent RabbitMQ consumer, own DB, email
-├── frontend/               # Next.js — live seat map, checkout, orders, tickets
+├── frontend/               # Next.js — live seat map, checkout, orders, tickets, /admin panel
 ├── load-test/              # k6 authenticated flash-sale + correctness test
 ├── keycloak/import/        # auto-imported apextick realm (client, roles, demo user)
+├── scripts/                # WSO2 gateway setup, grant-admin.sh
 ├── infra/                  # Prometheus + Grafana provisioning, Terraform (AWS)
 ├── caddy/                  # TLS edge reverse proxy
 ├── wso2/                   # API Manager config + the published API contract
