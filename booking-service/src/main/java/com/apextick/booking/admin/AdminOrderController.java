@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Arrays;
 import java.util.Locale;
 
 @RestController
@@ -46,6 +47,13 @@ public class AdminOrderController {
      * turns into a 400 -- a typo in a query string is not a server error.
      */
     private OrderStatus parseStatus(String status) {
-        return OrderStatus.valueOf(status.trim().toUpperCase(Locale.ROOT));
+        try {
+            return OrderStatus.valueOf(status.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            // valueOf's own message names the Java enum class, which has no business
+            // in an API response. Say what is actually allowed instead.
+            throw new IllegalArgumentException("Unknown order status: " + status
+                    + ". Expected one of " + Arrays.toString(OrderStatus.values()));
+        }
     }
 }

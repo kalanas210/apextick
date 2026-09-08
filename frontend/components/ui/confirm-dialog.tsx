@@ -47,13 +47,13 @@ export function ConfirmDialog({
   return (
     <dialog
       ref={ref}
-      // Escape fires `cancel`; routing it through onCancel keeps React's state
-      // the source of truth rather than letting the DOM close behind its back.
-      onCancel={(e) => {
-        e.preventDefault();
-        if (!busy) onCancel();
-      }}
-      className="max-w-md rounded-2xl border border-line bg-ink-2 p-0 text-bone backdrop:bg-ink/70 backdrop:backdrop-blur-sm"
+      // Escape closes the dialog natively; `close` is where React finds out, so
+      // the DOM and the state that drives it cannot end up disagreeing. Cancelling
+      // while busy immediately reopens, rather than abandoning work in flight.
+      onClose={() => (busy ? ref.current?.showModal() : onCancel())}
+      // m-auto restores the centring that <dialog> has by default and Tailwind's
+      // preflight takes away when it zeroes every element's margin.
+      className="m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl border border-line bg-ink-2 p-0 text-bone backdrop:bg-ink/70 backdrop:backdrop-blur-sm"
     >
       <div className="p-7">
         <h2 className="font-display text-lg font-semibold tracking-tight">{title}</h2>

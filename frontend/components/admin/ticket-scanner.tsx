@@ -298,7 +298,9 @@ export function TicketScanner() {
         </div>
 
         <aside className="lg:col-span-5">
-          <div className="space-y-6 lg:sticky lg:top-8">
+          {/* Capped and scrollable: a sticky column taller than the viewport
+              would strand whatever sits at its bottom. */}
+            <div className="space-y-6 lg:sticky lg:top-8 lg:max-h-[calc(100vh-4rem)] lg:overflow-y-auto lg:pr-1 [scrollbar-width:thin]">
             <div aria-live="assertive">
               {outcome ? <Result outcome={outcome} /> : (
                 <div className="rounded-2xl border border-line bg-ink-2 p-8 text-center">

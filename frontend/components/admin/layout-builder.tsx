@@ -523,7 +523,9 @@ function Builder({ id, currency, eventName }: { id: number; currency: Currency; 
         </div>
 
         <aside className="lg:col-span-5">
-          <div className="lg:sticky lg:top-8">
+          {/* Capped and scrollable: a sticky column taller than the viewport
+              would strand whatever sits at its bottom. */}
+            <div className="lg:sticky lg:top-8 lg:max-h-[calc(100vh-4rem)] lg:overflow-y-auto lg:pr-1 [scrollbar-width:thin]">
             <div className="rounded-2xl border border-line bg-ink-2 p-6">
               <h2 className="kicker">Preview</h2>
               <p className="tnum mt-3 font-display text-[2rem] leading-none tracking-tight text-bone">
