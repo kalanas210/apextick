@@ -55,7 +55,10 @@ export function EventEditor({ id }: { id: number }) {
   const save = (body: EventUpsert) => {
     setFieldErrors({});
     clear();
-    update.mutate(body, {
+    // PUT is a full replace, so the status has to be in the body -- but it is the
+    // status strip's to own, not the form's. Taking the server's current value
+    // keeps a save from undoing a status change made since the page loaded.
+    update.mutate({ ...body, status: event.status }, {
       onSuccess: () => show("success", "Saved."),
       onError: (err) => {
         setFieldErrors(apiFieldErrors(err));

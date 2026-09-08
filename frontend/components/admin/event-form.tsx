@@ -306,16 +306,22 @@ export function EventForm({
         <Field label="Stage" error={errors.stage} hint="e.g. Super 8, Matchweek 12">
           {(a) => <Input {...a} value={form.stage} onChange={(e) => set("stage", e.target.value)} />}
         </Field>
-        <Field label="Status" error={errors.status}>
-          {(a) => (
-            <Select
-              {...a}
-              value={form.status}
-              onChange={(e) => set("status", e.target.value)}
-              options={EVENT_STATUSES.map((s) => ({ value: s, label: EVENT_LABEL[s] }))}
-            />
-          )}
-        </Field>
+        {/* Only when creating. In edit mode the sidebar's status strip is the
+            control, and a second copy here would go stale the moment it is used:
+            this form seeds its state once, so saving any field afterwards would
+            put the status back to whatever it was when the page loaded. */}
+        {mode === "create" && (
+          <Field label="Status" error={errors.status}>
+            {(a) => (
+              <Select
+                {...a}
+                value={form.status}
+                onChange={(e) => set("status", e.target.value)}
+                options={EVENT_STATUSES.map((s) => ({ value: s, label: EVENT_LABEL[s] }))}
+              />
+            )}
+          </Field>
+        )}
         <Field label="Hero image URL" error={errors.image} className="sm:col-span-2">
           {(a) => (
             <Input
