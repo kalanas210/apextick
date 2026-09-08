@@ -12,6 +12,7 @@
       "directAccessGrantsEnabled": true,
       "redirectUris": [
         "http://localhost:3000/*",
+        "http://localhost:3005/*",
         "http://host.docker.internal:3000/*",
         "http://54.255.121.222:3000/*",
         "https://54.255.121.222.nip.io/*"
@@ -312,6 +313,14 @@
       ]
     }
   ],
+  "roles": {
+    "realm": [
+      {
+        "name": "admin",
+        "description": "ApexTick administrator: full access to /api/admin/**"
+      }
+    ]
+  },
   "users": [
     {
       "username": "kalana",
@@ -326,6 +335,10 @@
           "value": "12345",
           "temporary": false
         }
+      ],
+      "realmRoles": [
+        "default-roles-apextick",
+        "admin"
       ]
     },
     {
