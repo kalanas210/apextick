@@ -337,8 +337,7 @@
         }
       ],
       "realmRoles": [
-        "default-roles-apextick",
-        "admin"
+        "default-roles-apextick"
       ]
     },
     {

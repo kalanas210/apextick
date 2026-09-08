@@ -201,23 +201,28 @@ NEXT_PUBLIC_API_URL=http://localhost:18081 npm run dev
 **http://localhost:3000/admin** — event CRUD, the seating-layout builder, live
 stats, the orders console, seat release, and the gate scanner.
 
-It is gated on the `admin` realm role, which the seeded realm grants to
-`kalana`. Keycloak only reads `keycloak/import/apextick-realm.json` when the
-realm does not yet exist in its database, so a Keycloak that has been running
-since before this was added needs one of:
+It is gated on the `admin` realm role. The realm **defines** that role but
+grants it to nobody: the seeded `kalana` account is a plain customer, and its
+password is published here, so making it an administrator would hand
+`/api/admin/**` to anyone who can read this file. Grant the role deliberately,
+to whoever should hold it:
 
 ```bash
-# Local: no volume is mounted on Keycloak's data directory, so recreating
-# re-imports the realm. This drops any accounts registered since.
-docker compose rm -sf keycloak && docker compose up -d keycloak
-
-# Anywhere with data worth keeping: patch the live realm instead.
 scripts/grant-admin.sh                 # grants to kalana
 scripts/grant-admin.sh someone-else
 ```
 
+The script patches the realm through Keycloak's Admin API, so it works on a
+stack that is already running — which matters, because Keycloak reads
+`keycloak/import/apextick-realm.json` only when the realm does not yet exist in
+its database, and recreating the container to force a re-import would drop every
+account registered since.
+
 Realm roles are baked into the access token when it is issued, so sign out and
 back in afterwards.
+
+On a deployment anyone else can reach, change the demo password too — it is a
+seed for local development, not a credential.
 
 The gate scanner reads QR codes through the browser's native `BarcodeDetector`
 (Chromium, on a secure origin — HTTPS or `localhost`); everywhere else it falls
@@ -279,7 +284,7 @@ cd booking-service
 ./mvnw verify   # needs Docker for Testcontainers
 ```
 
-51 tests run, most of them full-stack Testcontainers integration tests: seat concurrency (1 winner / 199 losers), multi-seat all-or-nothing holds, Redis-driven expiry, the hold sweeper, the transactional outbox, the order/payment flow, Stripe signature verification and mapping, seats-lost compensation, the admin API, security, and rate limiting.
+71 tests run, most of them full-stack Testcontainers integration tests: seat concurrency (1 winner / 199 losers), multi-seat all-or-nothing holds, Redis-driven expiry, the hold sweeper, the transactional outbox, the order/payment flow, Stripe signature verification and mapping, seats-lost compensation, the admin API, security, and rate limiting.
 
 ## Project structure
 

@@ -20,6 +20,16 @@
 #   KEYCLOAK_ADMIN_PASSWORD
 set -euo pipefail
 
+# Fall back to the repo's .env for Keycloak's bootstrap credentials. Compose reads
+# the same file, so it is by definition what the running container was started
+# with -- hardcoded defaults here would only be right for a stack nobody configured.
+ENV_FILE="$(dirname "$0")/../.env"
+if [ -f "$ENV_FILE" ]; then
+  from_env() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -n1 | tr -d '\r"'; }
+  : "${KEYCLOAK_ADMIN:=$(from_env KEYCLOAK_ADMIN)}"
+  : "${KEYCLOAK_ADMIN_PASSWORD:=$(from_env KEYCLOAK_ADMIN_PASSWORD)}"
+fi
+
 USERNAME="${1:-kalana}"
 CONTAINER="${KEYCLOAK_CONTAINER:-apextick-keycloak}"
 URL="${KEYCLOAK_URL:-http://localhost:8080}"
