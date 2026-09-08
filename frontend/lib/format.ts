@@ -52,3 +52,58 @@ const STATUS_COPY: Record<string, string> = {
 export function statusLabel(status: string): string {
   return STATUS_COPY[status] ?? "On sale";
 }
+
+/**
+ * An absolute instant, rendered in UTC and labelled as such. Admin screens
+ * compare timestamps across events in different time zones, so a single frame
+ * of reference beats each row silently using the reader's own offset.
+ */
+export function formatInstant(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "UTC",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(d) + " UTC";
+}
+
+/** "4 minutes ago" — for the one question a gate asks about an already-used ticket. */
+export function relativeTime(iso: string | null | undefined, now = Date.now()): string {
+  if (!iso) return "";
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const seconds = Math.round((then - now) / 1000);
+  const units: [Intl.RelativeTimeFormatUnit, number][] = [
+    ["second", 60],
+    ["minute", 60],
+    ["hour", 24],
+    ["day", 7],
+    ["week", 4.35],
+    ["month", 12],
+    ["year", Infinity],
+  ];
+  const rtf = new Intl.RelativeTimeFormat("en-GB", { numeric: "auto" });
+  let value = seconds;
+  for (const [unit, span] of units) {
+    if (Math.abs(value) < span) return rtf.format(Math.round(value), unit);
+    value /= span;
+  }
+  return rtf.format(Math.round(value), "year");
+}
+
+/** Turns an event name into a URL-safe slug, for the create form's auto-fill. */
+export function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
