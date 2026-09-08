@@ -68,6 +68,14 @@ class AdminEventListTest {
     }
 
     @Test
+    void admin_can_look_up_teams_for_the_event_form() throws Exception {
+        mvc.perform(get("/api/admin/teams?sport=cricket").header("Authorization", adminToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(org.hamcrest.Matchers.greaterThan(0)))
+                .andExpect(jsonPath("$[0].short").exists());
+    }
+
+    @Test
     void admin_list_is_forbidden_without_the_role() throws Exception {
         mvc.perform(get("/api/admin/events")
                         .header("Authorization", "Bearer " + TestTokens.user("u-1", "user1", "user1@apextick.local")))
