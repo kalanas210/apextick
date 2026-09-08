@@ -105,7 +105,7 @@ export function AdminHeader({
   description,
   action,
 }: {
-  kicker: string;
+  kicker: ReactNode;
   title: string;
   description?: ReactNode;
   action?: ReactNode;
