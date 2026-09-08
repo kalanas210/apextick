@@ -111,4 +111,34 @@ class AdminErrorHandlingTest {
         mvc.perform(get("/api/events/" + slug))
                 .andExpect(status().isNotFound());
     }
+
+    /**
+     * The time zone is free text, and it is parsed only when the event is later summarised --
+     * so an unparseable one used to be accepted here and then throw on every subsequent read,
+     * including the public catalog. ZoneId signals it with DateTimeException, which is not an
+     * IllegalArgumentException and so did not reach the 400 handler.
+     */
+    @Test
+    void an_unknown_time_zone_is_a_bad_request() throws Exception {
+        Map<String, Object> bad = Map.of(
+                "name", "Zone Fixture", "slug", "error-zone-" + System.nanoTime(), "sport", "football",
+                "startsAt", "2027-05-01T18:00:00Z", "venue", "Test Arena", "currency", "USD",
+                "timeZone", "Sri Lanka");
+
+        mvc.perform(post("/api/admin/events").header("Authorization", adminToken())
+                        .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(bad)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        String slug = "error-zone-ok-" + System.nanoTime();
+        Map<String, Object> good = Map.of(
+                "name", "Zone Fixture", "slug", slug, "sport", "football",
+                "startsAt", "2027-05-01T18:00:00Z", "venue", "Test Arena", "currency", "USD",
+                "timeZone", "Asia/Colombo");
+
+        mvc.perform(post("/api/admin/events").header("Authorization", adminToken())
+                        .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(good)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.timeZone").value("Asia/Colombo"));
+    }
 }

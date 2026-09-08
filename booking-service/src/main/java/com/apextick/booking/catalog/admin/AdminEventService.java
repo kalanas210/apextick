@@ -19,7 +19,9 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.DateTimeException;
 import java.time.Instant;
+import java.time.ZoneId;
 
 @Service
 public class AdminEventService {
@@ -93,7 +95,7 @@ public class AdminEventService {
         e.setSlug(r.slug());
         e.setSport(Sport.fromCode(r.sport()));
         e.setStartsAt(r.startsAt());
-        e.setTimeZone(r.timeZone() == null ? "UTC" : r.timeZone());
+        e.setTimeZone(zoneOrThrow(r.timeZone()));
         e.setVenue(r.venue());
         e.setCity(r.city());
         e.setCountry(r.country());
@@ -110,6 +112,29 @@ public class AdminEventService {
                 : teams.findById(r.homeTeamId()).orElseThrow(() -> new NotFoundException("Team", r.homeTeamId())));
         e.setAwayTeam(r.awayTeamId() == null ? null
                 : teams.findById(r.awayTeamId()).orElseThrow(() -> new NotFoundException("Team", r.awayTeamId())));
+    }
+
+    /**
+     * The time zone is a free-text field, but it is read back as a {@link ZoneId} when an
+     * event is summarised. An unparseable one is not merely this request's problem: stored,
+     * it would throw on every later read of the event, including the public catalog. So it
+     * is rejected here, where the caller can still be told which field was wrong.
+     *
+     * <p>{@code ZoneId.of} signals a bad zone with {@link DateTimeException}, which is not an
+     * {@code IllegalArgumentException} and so would otherwise land on the 500 handler.
+     */
+    private static String zoneOrThrow(String timeZone) {
+        if (timeZone == null || timeZone.isBlank()) {
+            return "UTC";
+        }
+        String tz = timeZone.trim();
+        try {
+            ZoneId.of(tz);
+        } catch (DateTimeException ex) {
+            throw new IllegalArgumentException(
+                    "Unknown time zone '" + tz + "'; expected an IANA zone id such as Asia/Colombo or UTC");
+        }
+        return tz;
     }
 
     private void save(Event e) {
