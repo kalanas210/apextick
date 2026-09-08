@@ -50,8 +50,17 @@ export function TicketScanner() {
   // never goes out is the classic bug here.
   const streamRef = useRef<MediaStream | null>(null);
   const loopRef = useRef<number | null>(null);
+  // Bumped by every start and every stop. getUserMedia resolves long after it is
+  // called -- often behind a permission prompt -- so a start that lands after the
+  // operator has navigated away, or pressed Stop, or started again, has to be able
+  // to tell that its stream is no longer wanted and hang it up itself.
+  const sessionRef = useRef(0);
+  // detect() on a large frame can outlast the interval between ticks; without this
+  // two of them read the same QR code and the ticket is verified twice.
+  const busyRef = useRef(false);
 
   const stopCamera = useCallback(() => {
+    sessionRef.current += 1;
     if (loopRef.current !== null) {
       cancelAnimationFrame(loopRef.current);
       loopRef.current = null;
@@ -121,6 +130,7 @@ export function TicketScanner() {
   );
 
   const startCamera = useCallback(async () => {
+    const session = (sessionRef.current += 1);
     // Three separate things can be missing, and each needs its own sentence:
     // saying "camera unavailable" to all of them helps nobody.
     if (!window.isSecureContext) {
@@ -160,6 +170,12 @@ export function TicketScanner() {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
       });
+      if (session !== sessionRef.current) {
+        // Stopped, restarted, or unmounted while the prompt was up: nobody owns
+        // this stream, so hang it up here or the camera light never goes out.
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -189,14 +205,20 @@ export function TicketScanner() {
       last = time;
       const video = videoRef.current;
       if (!video || video.readyState < 2) return;
+      if (busyRef.current) return;
+      busyRef.current = true;
       try {
         const found = await detector.detect(video);
-        if (found.length > 0) {
+        // Re-check the session: a slow detect can resolve after Stop, and the
+        // ticket behind an already-cancelled scan must not be spent.
+        if (found.length > 0 && session === sessionRef.current) {
           stopCamera();
           submit(found[0].rawValue);
         }
       } catch {
         // A frame that fails to decode is normal; the next one will do.
+      } finally {
+        busyRef.current = false;
       }
     };
     loopRef.current = requestAnimationFrame(tick);

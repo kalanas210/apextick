@@ -38,7 +38,17 @@ export function AdminDashboard() {
       byCurrency.set(o.currency, (byCurrency.get(o.currency) ?? 0) + o.total);
     }
     const top = [...byCurrency.entries()].sort((a, b) => b[1] - a[1])[0];
-    return top ? { amount: top[1], currency: top[0] as Order["currency"] } : null;
+    if (!top) return null;
+    // This folds one page of orders, so past that page the figure is a subtotal.
+    // Saying so is the honest option; presenting it as the confirmed total would
+    // understate real revenue with nothing on screen to say why.
+    const totalPaid = paid.data?.totalElements ?? rows.length;
+    return {
+      amount: top[1],
+      currency: top[0] as Order["currency"],
+      counted: rows.length,
+      partial: totalPaid > rows.length,
+    };
   }, [paid.data]);
 
   return (
@@ -66,7 +76,13 @@ export function AdminDashboard() {
         <Stat
           label="Revenue"
           value={revenue ? formatPrice(revenue.amount, revenue.currency) : "—"}
-          hint={revenue ? `Confirmed, in ${revenue.currency}` : "No paid orders yet"}
+          hint={
+            revenue
+              ? revenue.partial
+                ? `Latest ${revenue.counted} paid orders, in ${revenue.currency}`
+                : `Confirmed, in ${revenue.currency}`
+              : "No paid orders yet"
+          }
           loading={paid.isLoading}
         />
       </section>

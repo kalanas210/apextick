@@ -42,7 +42,10 @@ export function ConfirmDialog({
     } else if (!open && dialog.open) {
       dialog.close();
     }
-  }, [open]);
+    // `busy` is a dependency because closing is refused while it is true: without
+    // a re-run when the work settles, a dialog that was told to close mid-flight
+    // would stay on screen with no state left behind it to close it again.
+  }, [open, busy]);
 
   return (
     <dialog
@@ -59,7 +62,12 @@ export function ConfirmDialog({
         <h2 className="font-display text-lg font-semibold tracking-tight">{title}</h2>
         <div className="mt-2 text-[0.86rem] leading-relaxed text-muted">{description}</div>
         <div className="mt-7 flex justify-end gap-3">
-          <Button onClick={onCancel} size="sm" variant="ghost">
+          <Button
+            onClick={() => !busy && onCancel()}
+            size="sm"
+            variant="ghost"
+            className={cn(busy && "pointer-events-none opacity-60")}
+          >
             {cancelLabel}
           </Button>
           <Button

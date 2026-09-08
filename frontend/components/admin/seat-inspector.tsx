@@ -40,8 +40,16 @@ export function SeatInspector({ id }: { id: number }) {
       queryClient.setQueriesData<AdminSeat[]>({ queryKey: ["admin", "seats", id] }, (current) =>
         current?.map((seat) => {
           const change = changes.find((c) => c.seatId === seat.id);
+          // The broadcast carries no holder, so heldBy has to be derived: leaving
+          // the old one in place would show an available seat still named to
+          // whoever last held it.
           return change
-            ? { ...seat, status: change.status, heldUntil: change.heldUntil }
+            ? {
+                ...seat,
+                status: change.status,
+                heldUntil: change.heldUntil,
+                heldBy: change.status === "HELD" ? seat.heldBy : null,
+              }
             : seat;
         }),
       );
@@ -60,7 +68,11 @@ export function SeatInspector({ id }: { id: number }) {
     [seats, status],
   );
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const shown = filtered.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+  // Live updates shrink the filtered set under the operator -- holds expire and a
+  // "Held" filter empties out. Clamping keeps them on the last real page instead
+  // of an out-of-range one that reads as "no seats in that state".
+  const safePage = Math.min(page, totalPages - 1);
+  const shown = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
 
   const counts = useMemo(() => {
     const all = seats ?? [];
@@ -153,7 +165,7 @@ export function SeatInspector({ id }: { id: number }) {
           }
           footer={
             <Pagination
-              page={page}
+              page={safePage}
               totalPages={totalPages}
               totalElements={filtered.length}
               onPage={setPage}
