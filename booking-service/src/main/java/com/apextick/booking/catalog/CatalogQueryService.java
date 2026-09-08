@@ -15,6 +15,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -62,11 +63,21 @@ public class CatalogQueryService {
 
     @Transactional(readOnly = true)
     public PageResponse<EventSummaryResponse> search(EventFilter filter, int page, int size, String sort) {
+        return search(EventSpecifications.forFilter(filter), page, size, sort);
+    }
+
+    /** Admin variant of {@link #search}: identical shape, but drafts and cancellations are visible. */
+    @Transactional(readOnly = true)
+    public PageResponse<EventSummaryResponse> searchAll(EventFilter filter, int page, int size, String sort) {
+        return search(EventSpecifications.forAdminFilter(filter), page, size, sort);
+    }
+
+    private PageResponse<EventSummaryResponse> search(Specification<Event> spec, int page, int size, String sort) {
         Sort order = "latest".equalsIgnoreCase(sort)
                 ? Sort.by("startsAt").descending()
                 : Sort.by("startsAt").ascending();
         Pageable pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100), order);
-        Page<Event> events = eventRepository.findAll(EventSpecifications.forFilter(filter), pageable);
+        Page<Event> events = eventRepository.findAll(spec, pageable);
         List<Long> ids = events.getContent().stream().map(Event::getId).toList();
 
         Map<Long, SeatRepository.SeatCountView> counts = ids.isEmpty() ? Map.of()
