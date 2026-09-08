@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Map;
 
 @Service
 public class TicketVerificationService {
@@ -28,8 +29,11 @@ public class TicketVerificationService {
         Ticket ticket = tickets.findByQrToken(qrToken)
                 .orElseThrow(() -> new NotFoundException("Ticket for QR token not found"));
         if (ticket.getStatus() == TicketStatus.USED) {
+            // usedAt rides along as a problem-detail member so the gate screen can say
+            // "scanned 4 minutes ago" -- the question actually being asked at a turnstile.
             throw new ConflictException(ErrorCodes.TICKET_ALREADY_USED,
-                    "Ticket was already used at " + ticket.getUsedAt());
+                    "Ticket was already used at " + ticket.getUsedAt(),
+                    ticket.getUsedAt() == null ? Map.of() : Map.of("usedAt", ticket.getUsedAt().toString()));
         }
         if (ticket.getStatus() == TicketStatus.CANCELLED) {
             throw new ConflictException("TICKET_CANCELLED", "Ticket has been cancelled");

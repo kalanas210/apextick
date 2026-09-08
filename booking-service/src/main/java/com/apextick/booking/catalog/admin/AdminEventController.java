@@ -5,6 +5,7 @@ import com.apextick.booking.catalog.EventFilter;
 import com.apextick.booking.catalog.EventStatus;
 import com.apextick.booking.catalog.Sport;
 import com.apextick.booking.catalog.dto.EventDetailResponse;
+import com.apextick.booking.catalog.dto.EventStatusRequest;
 import com.apextick.booking.catalog.dto.EventSummaryResponse;
 import com.apextick.booking.catalog.dto.EventUpsertRequest;
 import com.apextick.booking.catalog.dto.LayoutRequest;
@@ -29,7 +30,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/admin/events")
@@ -86,8 +86,8 @@ public class AdminEventController {
     }
 
     @PatchMapping("/{id}/status")
-    public EventDetailResponse setStatus(@PathVariable Long id, @RequestBody Map<String, String> body) {
-        return adminEvents.setStatus(id, body.get("status"));
+    public EventDetailResponse setStatus(@PathVariable Long id, @Valid @RequestBody EventStatusRequest request) {
+        return adminEvents.setStatus(id, request.status());
     }
 
     @DeleteMapping("/{id}")

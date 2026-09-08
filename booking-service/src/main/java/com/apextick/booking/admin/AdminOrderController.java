@@ -16,6 +16,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Locale;
+
 @RestController
 @RequestMapping("/api/admin/orders")
 @PreAuthorize("hasRole('ADMIN')")
@@ -32,9 +34,18 @@ public class AdminOrderController {
     @Transactional(readOnly = true)
     public PageResponse<OrderResponse> list(@RequestParam(required = false) String status,
                                             @PageableDefault(size = 20) Pageable pageable) {
-        Page<Order> page = status == null
+        Page<Order> page = status == null || status.isBlank()
                 ? orders.findAllByOrderByCreatedAtDesc(pageable)
-                : orders.findByStatusOrderByCreatedAtDesc(OrderStatus.valueOf(status), pageable);
+                : orders.findByStatusOrderByCreatedAtDesc(parseStatus(status), pageable);
         return PageResponse.of(page, OrderResponse::from);
+    }
+
+    /**
+     * Accepts the wire form the client sends back to us ("PAID") as well as a lowercase
+     * one. An unknown value raises IllegalArgumentException, which the global handler
+     * turns into a 400 -- a typo in a query string is not a server error.
+     */
+    private OrderStatus parseStatus(String status) {
+        return OrderStatus.valueOf(status.trim().toUpperCase(Locale.ROOT));
     }
 }
