@@ -101,3 +101,14 @@ jobs:
       - name: Build
         working-directory: frontend
         run: npm run build
+
+  scripts:
+    name: Shell scripts
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      # ShellCheck ships with the runner image. Info-level notes stay advice.
+      - name: ShellCheck
+        run: git ls-files -z '*.sh' 'scripts/git-hooks/*' | xargs -0 shellcheck --severity=warning
