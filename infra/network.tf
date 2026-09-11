@@ -3,7 +3,7 @@ resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
   enable_dns_hostnames = true
   enable_dns_support   = true
-  tags = { Name = "apextick-vpc" }
+  tags                 = { Name = "apextick-vpc" }
 }
 
 # A public subnet inside that VPC
@@ -12,13 +12,13 @@ resource "aws_subnet" "public" {
   cidr_block              = "10.0.1.0/24"
   map_public_ip_on_launch = true
   availability_zone       = "ap-southeast-1a"
-  tags = { Name = "apextick-public-subnet" }
+  tags                    = { Name = "apextick-public-subnet" }
 }
 
 # The door between the VPC and the internet
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
-  tags = { Name = "apextick-igw" }
+  tags   = { Name = "apextick-igw" }
 }
 
 # A route table that sends internet-bound traffic to that door
