@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Shared by setup.sh and smoke-test.sh -- sourced, not run.
 #
 #   env_default NAME...     fills each unset or empty NAME from the repo's .env.
