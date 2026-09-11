@@ -170,11 +170,16 @@ Default demo login: **`kalana` / `12345`**.
 
 Interactive OpenAPI docs (Swagger UI) are served at **http://localhost:8081/swagger-ui.html**. Use **Authorize** to paste a Keycloak access token, then try the secured endpoints from the browser.
 
-Grab a token from the command line via the direct-grant flow:
+Grab a token from the command line with the password grant. The SPA's own
+client (`apextick-web`) is public and only does authorization code + PKCE, so
+this goes through the confidential `apextick-loadtest` client, whose secret is
+`LOADTEST_CLIENT_SECRET` in `.env`:
 
 ```bash
+LOADTEST_CLIENT_SECRET=$(sed -n 's/^LOADTEST_CLIENT_SECRET=//p' .env)
 curl -s http://localhost:8180/realms/apextick/protocol/openid-connect/token \
-  -d grant_type=password -d client_id=apextick-web \
+  -d grant_type=password -d client_id=apextick-loadtest \
+  -d "client_secret=$LOADTEST_CLIENT_SECRET" \
   -d username=kalana -d password=12345 | jq -r .access_token
 ```
 
@@ -268,8 +273,12 @@ The dashboard visualises the flash sale directly from HTTP metrics: seat-hold ou
 
 The k6 script authenticates against Keycloak and drives the real, JWT-secured hold endpoint. It discovers the target event's available seats automatically, so no seat ids are hard-coded.
 
+It logs in with the password grant on the confidential `apextick-loadtest` client, and takes the account and the client secret from the environment — it has no built-in credentials and refuses to start without them:
+
 ```bash
 cd load-test
+export LOADTEST_USER=kalana LOADTEST_PASSWORD=12345
+export LOADTEST_CLIENT_SECRET=$(sed -n 's/^LOADTEST_CLIENT_SECRET=//p' ../.env)
 k6 run booking-load-test.js
 # tune anything via env:
 k6 run -e VUS=200 -e ITERATIONS=5000 -e EVENT_SLUG=india-australia-semi-final booking-load-test.js

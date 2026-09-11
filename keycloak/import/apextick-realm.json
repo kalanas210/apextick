@@ -14,11 +14,12 @@
   "clients": [
     {
       "clientId": "apextick-web",
+      "description": "The browser SPA: authorization code + PKCE only. A public client can't keep a secret, so it doesn't take the password grant either; command-line logins use apextick-loadtest.",
       "protocol": "openid-connect",
       "enabled": true,
       "publicClient": true,
       "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": true,
+      "directAccessGrantsEnabled": false,
       "redirectUris": [
         "http://localhost:3000/*",
         "http://localhost:3005/*",
@@ -47,6 +48,21 @@
       "secret": "${WSO2_KM_CLIENT_SECRET}",
       "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "basic", "email", "wso2-audience"],
       "optionalClientScopes": ["default"]
+    },
+    {
+      "clientId": "apextick-loadtest",
+      "name": "Load and smoke tests",
+      "description": "Confidential and password-grant only, so k6 and scripts/wso2/smoke-test.sh can log a user in from the command line. Same default scopes as apextick-web, so its tokens are accepted by booking-service and the gateway alike.",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "secret": "${LOADTEST_CLIENT_SECRET}",
+      "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "basic", "email", "wso2-audience"]
     }
   ],
   "clientScopes": [

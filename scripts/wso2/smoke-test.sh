@@ -5,16 +5,31 @@
 # limitation (see docs/wso2.md), so the token pass-through case prints the
 # gateway's own error code instead of quietly failing.
 #
-#   scripts/wso2/smoke-test.sh
+#   LOADTEST_USER=... LOADTEST_PASSWORD=... scripts/wso2/smoke-test.sh
+#
+# Required (from the environment, or else the repo's .env) -- the token comes
+# from the password grant on the confidential apextick-loadtest client:
+#   LOADTEST_USER, LOADTEST_PASSWORD, LOADTEST_CLIENT_SECRET
 set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ENV_FILE="$ROOT/.env"
+if [ -f "$ENV_FILE" ]; then
+  from_env() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -n1 | tr -d '\r"'; }
+  : "${LOADTEST_USER:=$(from_env LOADTEST_USER)}"
+  : "${LOADTEST_PASSWORD:=$(from_env LOADTEST_PASSWORD)}"
+  : "${LOADTEST_CLIENT_SECRET:=$(from_env LOADTEST_CLIENT_SECRET)}"
+fi
 
 GATEWAY="${GATEWAY:-http://localhost:8280/api}"
 KEYCLOAK="${KEYCLOAK:-http://localhost:8180}"
 REALM="${REALM:-apextick}"
-CLIENT_ID="${CLIENT_ID:-apextick-web}"
-USERNAME="${LOADTEST_USER:-kalana}"
-PASSWORD="${LOADTEST_PASSWORD:-12345}"
+CLIENT_ID="${CLIENT_ID:-apextick-loadtest}"
 EVENT_SLUG="${EVENT_SLUG:-india-australia-semi-final}"
+
+for var in LOADTEST_USER LOADTEST_PASSWORD LOADTEST_CLIENT_SECRET; do
+  [ -n "${!var:-}" ] || { echo "ERROR: $var is not set (export it, or add it to .env)" >&2; exit 2; }
+done
 
 pass=0; fail=0
 ok()   { printf '  \033[32mPASS\033[0m %-44s %s\n' "$1" "$2"; pass=$((pass+1)); }
@@ -39,9 +54,10 @@ echo "Gateway: $GATEWAY"
 
 TOKEN=$(curl -s "$KEYCLOAK/realms/$REALM/protocol/openid-connect/token" \
   -d grant_type=password -d "client_id=$CLIENT_ID" \
-  -d "username=$USERNAME" -d "password=$PASSWORD" \
+  --data-urlencode "client_secret=$LOADTEST_CLIENT_SECRET" \
+  --data-urlencode "username=$LOADTEST_USER" --data-urlencode "password=$LOADTEST_PASSWORD" \
   | python3 -c "import json,sys;print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null)
-[ -n "$TOKEN" ] || { echo "ERROR: could not get a Keycloak token" >&2; exit 1; }
+[ -n "$TOKEN" ] || { echo "ERROR: could not get a Keycloak token as $LOADTEST_USER via $CLIENT_ID" >&2; exit 1; }
 
 URL="$GATEWAY/events/$EVENT_SLUG"
 

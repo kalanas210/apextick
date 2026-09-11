@@ -31,6 +31,11 @@
 #   WSO2_KM_CLIENT_SECRET  the secret Keycloak imported for apextick-wso2-km. The realm
 #                          file only carries a ${WSO2_KM_CLIENT_SECRET} placeholder, so
 #                          there is no default here to fall back on.
+#
+# Optional, same sources:
+#   LOADTEST_CLIENT_SECRET apextick-loadtest's secret; when set, that client gets its
+#                          own subscribed application so k6 and smoke-test.sh tokens
+#                          pass the gateway's subscription check.
 set -euo pipefail
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
@@ -45,6 +50,7 @@ ENV_FILE="$ROOT/.env"
 if [ -f "$ENV_FILE" ]; then
   from_env() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -n1 | tr -d '\r"'; }
   : "${WSO2_KM_CLIENT_SECRET:=$(from_env WSO2_KM_CLIENT_SECRET)}"
+  : "${LOADTEST_CLIENT_SECRET:=$(from_env LOADTEST_CLIENT_SECRET)}"
 fi
 
 WSO2_HOST="${WSO2_HOST:-https://localhost:9443}"
@@ -58,6 +64,8 @@ WSO2_KC_BASE="${WSO2_KC_BASE:-http://keycloak:8080/realms/apextick}"
 WSO2_KM_CLIENT_ID="${WSO2_KM_CLIENT_ID:-apextick-wso2-km}"
 WSO2_KM_CLIENT_SECRET="${WSO2_KM_CLIENT_SECRET:-}"
 WSO2_SPA_CLIENT_ID="${WSO2_SPA_CLIENT_ID:-apextick-web}"
+WSO2_LOADTEST_CLIENT_ID="${WSO2_LOADTEST_CLIENT_ID:-apextick-loadtest}"
+LOADTEST_CLIENT_SECRET="${LOADTEST_CLIENT_SECRET:-}"
 
 [ -n "$WSO2_KM_CLIENT_SECRET" ] \
   || die "WSO2_KM_CLIENT_SECRET is not set -- add the value Keycloak was started with to .env (see docs/wso2.md)"
@@ -72,6 +80,7 @@ API_CONTEXT="api"   # no leading slash: Git Bash would rewrite it as a path
 API_VERSION="1.0.0"
 POLICY_NAME="ApexTickHoldBurst"
 APP_NAME="ApexTickWeb"
+LOADTEST_APP_NAME="ApexTickLoadTest"
 OPENAPI="$ROOT/wso2/apextick-api/openapi.json"
 
 # WSO2 serves the portals over a self-signed certificate.
@@ -293,46 +302,62 @@ CODE=$(api -o /dev/null -w '%{http_code}' -X POST \
 info "lifecycle change returned $CODE"
 
 # --------------------------------------------------------------------------
-step "Subscribing a DevPortal application"
-APP_ID=$(api "$WSO2_HOST/api/am/devportal/v3/applications" \
-  | python3 -c "import json,sys;d=json.load(sys.stdin);print(next((a['applicationId'] for a in d.get('list',[]) if a.get('name')=='$APP_NAME'),''))" 2>/dev/null || true)
+# The gateway only accepts a token whose consumer key (the `azp` claim) belongs
+# to an application subscribed to the API. The Keycloak clients here are ones
+# people already log in with directly, not ones WSO2 minted itself, so each is
+# attached with a BYOK mapping (map-keys) rather than the usual "generate keys"
+# flow -- one application per client, since an application holds one
+# production key per key manager.
+#   subscribe_client <application> <description> <keycloak client id> [secret]
+subscribe_client() {
+  local app="$1" description="$2" client_id="$3" client_secret="${4:-}"
+  local app_id code body
 
-if [ -z "$APP_ID" ]; then
-  APP_ID=$(api -H 'Content-Type: application/json' \
-    -d '{"name":"'"$APP_NAME"'","throttlingPolicy":"Unlimited","description":"ApexTick web client"}' \
-    "$WSO2_HOST/api/am/devportal/v3/applications" \
-    | python3 -c "import json,sys;print(json.load(sys.stdin).get('applicationId',''))" 2>/dev/null || true)
-fi
-[ -n "$APP_ID" ] && info "application $APP_ID" || info "could not create the application"
+  step "Subscribing $app and mapping $client_id onto it"
+  app_id=$(api "$WSO2_HOST/api/am/devportal/v3/applications" \
+    | python3 -c "import json,sys;d=json.load(sys.stdin);print(next((a['applicationId'] for a in d.get('list',[]) if a.get('name')==sys.argv[1]),''))" "$app" 2>/dev/null || true)
 
-if [ -n "$APP_ID" ]; then
-  CODE=$(api -H 'Content-Type: application/json' \
-    -d '{"applicationId":"'"$APP_ID"'","apiId":"'"$API_ID"'","throttlingPolicy":"Unlimited"}' \
+  if [ -z "$app_id" ]; then
+    body=$(python3 -c "import json,sys;print(json.dumps({'name':sys.argv[1],'throttlingPolicy':'Unlimited','description':sys.argv[2]}))" "$app" "$description")
+    app_id=$(api -H 'Content-Type: application/json' -d "$body" \
+      "$WSO2_HOST/api/am/devportal/v3/applications" \
+      | python3 -c "import json,sys;print(json.load(sys.stdin).get('applicationId',''))" 2>/dev/null || true)
+  fi
+  if [ -z "$app_id" ]; then
+    info "could not create the application -- skipped"
+    return 0
+  fi
+  info "application $app_id"
+
+  code=$(api -H 'Content-Type: application/json' \
+    -d '{"applicationId":"'"$app_id"'","apiId":"'"$API_ID"'","throttlingPolicy":"Unlimited"}' \
     -o /dev/null -w '%{http_code}' "$WSO2_HOST/api/am/devportal/v3/subscriptions")
-  case "$CODE" in
+  case "$code" in
     201) info "subscribed" ;;
     409) info "already subscribed" ;;
-    *)   info "subscription returned $CODE" ;;
+    *)   info "subscription returned $code" ;;
   esac
-fi
 
-# --------------------------------------------------------------------------
-step "Mapping the SPA's Keycloak client onto the application"
-# The gateway only accepts a token whose consumer key (the `azp` claim) is
-# subscribed above. apextick-web is a Keycloak client the SPA already logs
-# into directly, not one WSO2 minted itself, so this is a BYOK mapping
-# (map-keys) rather than the usual "generate keys" flow.
-if [ -n "$APP_ID" ]; then
-  CODE=$(api -H 'Content-Type: application/json' \
-    -d '{"consumerKey":"'"$WSO2_SPA_CLIENT_ID"'","consumerSecret":"","keyManager":"Keycloak","keyType":"PRODUCTION"}' \
-    -o /dev/null -w '%{http_code}' "$WSO2_HOST/api/am/devportal/v3/applications/$APP_ID/map-keys")
-  case "$CODE" in
+  body=$(python3 -c "import json,sys;print(json.dumps({'consumerKey':sys.argv[1],'consumerSecret':sys.argv[2],'keyManager':'Keycloak','keyType':'PRODUCTION'}))" "$client_id" "$client_secret")
+  code=$(api -H 'Content-Type: application/json' -d "$body" \
+    -o /dev/null -w '%{http_code}' "$WSO2_HOST/api/am/devportal/v3/applications/$app_id/map-keys")
+  case "$code" in
     200) info "mapped" ;;
     409) info "already mapped" ;;
-    *)   info "map-keys returned $CODE -- see docs/wso2.md if this is 401/invalid_token" ;;
+    *)   info "map-keys returned $code -- see docs/wso2.md if this is 401/invalid_token" ;;
   esac
+}
+
+# The SPA: a public client, so there is no secret to map.
+subscribe_client "$APP_NAME" "ApexTick web client" "$WSO2_SPA_CLIENT_ID"
+
+# k6 and smoke-test.sh log in through apextick-loadtest, so its tokens carry
+# azp=apextick-loadtest and need a subscription of their own.
+if [ -n "$LOADTEST_CLIENT_SECRET" ]; then
+  subscribe_client "$LOADTEST_APP_NAME" "k6 and smoke-test.sh" "$WSO2_LOADTEST_CLIENT_ID" "$LOADTEST_CLIENT_SECRET"
 else
-  info "skipped -- no application to map keys onto"
+  step "Subscribing $LOADTEST_APP_NAME"
+  info "skipped -- LOADTEST_CLIENT_SECRET is not set, so load-test tokens will get 403/900908 here"
 fi
 
 printf '\n\033[32mDone.\033[0m Gateway: http://localhost:8280/%s  ·  Publisher: %s/publisher\n' "$API_CONTEXT" "$WSO2_HOST"

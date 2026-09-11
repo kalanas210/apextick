@@ -14,20 +14,26 @@ of git. The compose files pass these through from `.env`.
 | Placeholder | Used for | Default in the realm |
 | --- | --- | --- |
 | `WSO2_KM_CLIENT_SECRET` | secret of `apextick-wso2-km`, the service account WSO2 uses to read and manage clients | none -- required |
+| `LOADTEST_CLIENT_SECRET` | secret of `apextick-loadtest`, the only client that accepts the password grant | none -- required |
 | `APP_WEB_URL` | the deployed frontend's origin, allowed as an `apextick-web` redirect URI (prod: `https://<SERVER_IP>.nip.io`) | `http://localhost:3000` |
 | `DEMO_USER_EMAIL` | the seeded `kalana` account's address | `kalana@apextick.local` |
 | `SMTP_*` | outgoing mail | the bundled Mailpit |
 
 A placeholder with no default that is **not** set is not an error: Keycloak
 imports the literal text (the client secret becomes the string
-`${WSO2_KM_CLIENT_SECRET}`, which anyone reading this repo knows). That is why
-`docker-compose.prod.yml` must refuse to start without it, and why
-`scripts/wso2/setup.sh` refuses to use a value that looks like a placeholder.
+`${WSO2_KM_CLIENT_SECRET}`, which anyone reading this repo knows, and it
+works). That is why `docker-compose.prod.yml` must refuse to start without the
+two secrets, and why `scripts/wso2/setup.sh` refuses to use a value that looks
+like a placeholder.
 
 Generate a secret with `openssl rand -hex 32`.
 
 ## Hardening
 
+- The SPA's client, `apextick-web`, is public and takes authorization code +
+  PKCE only. The password grant (for k6, the gateway smoke test, curl) lives on
+  the confidential `apextick-loadtest` client, so guessing passwords at the
+  token endpoint needs a secret first.
 - `sslRequired: external` -- plain HTTP is accepted only from localhost and
   private addresses (local dev, the docker network, Caddy with
   `KC_PROXY_HEADERS`); a public client has to use HTTPS.

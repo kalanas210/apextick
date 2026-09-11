@@ -58,6 +58,15 @@ key-manager registration, which is how a rotated secret reaches the gateway —
 see [keycloak/README.md](../keycloak/README.md) for rotating it on a realm that
 already exists.
 
+`smoke-test.sh` logs a real user in with the password grant on the
+confidential `apextick-loadtest` client. It takes `LOADTEST_USER`,
+`LOADTEST_PASSWORD` and `LOADTEST_CLIENT_SECRET` from the environment or
+`.env`, has no built-in credentials, and stops if any is missing:
+
+```bash
+LOADTEST_USER=kalana LOADTEST_PASSWORD=12345 scripts/wso2/smoke-test.sh
+```
+
 | Surface | URL | Notes |
 | --- | --- | --- |
 | Gateway (http) | http://localhost:8280/api | what clients call |
@@ -92,6 +101,12 @@ The portals are **never published in production** — only loopback
    `apextick-web` is a client the SPA already logs into directly, not one WSO2
    minted for itself. This is the step that used to fail outright (see the fix
    history below) and is now automatic.
+8. **The same for `apextick-loadtest`**, on a second application
+   (`ApexTickLoadTest`), when `LOADTEST_CLIENT_SECRET` is set. k6 and
+   `smoke-test.sh` log in through that confidential client — `apextick-web`
+   no longer accepts the password grant — so their tokens carry
+   `azp=apextick-loadtest` and need a subscription of their own. An
+   application holds one production key per key manager, hence two.
 
 ## Putting it in the request path
 
