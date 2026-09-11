@@ -7,23 +7,59 @@ on:
     workflows: ["CI"]
     types: [completed]
     branches: [main, develop]
+  # Manual re-publish of main or develop; the gate still wants a green CI run.
   workflow_dispatch:
 
-# Only the package registry is writable; the repo itself stays read-only.
-permissions:
-  contents: read
-  packages: write
+# Nothing by default; each job asks for exactly what it needs.
+permissions: {}
 
 concurrency:
-  group: publish-${{ github.event.workflow_run.head_branch || github.ref }}
+  # Every CI run wakes this workflow, pull requests included. Keying on the
+  # triggering event stops a no-op PR run from a branch called develop (a
+  # fork's, or the develop -> main release PR) cancelling the real publish.
+  group: publish-${{ github.event.workflow_run.event || 'push' }}-${{ github.event.workflow_run.head_branch || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
+  gate:
+    name: Publish gate
+    # The workflow_run branch filter matches the head branch of any CI run, so
+    # a fork's PR from its own "main" passes it and would be built with a
+    # write token. Only publish commits pushed to this repository whose CI run
+    # went green, and only main or develop.
+    if: >-
+      (github.event_name == 'workflow_run'
+        && github.event.workflow_run.conclusion == 'success'
+        && github.event.workflow_run.event == 'push'
+        && github.event.workflow_run.head_repository.full_name == github.repository
+        && contains(fromJSON('["main", "develop"]'), github.event.workflow_run.head_branch))
+      || (github.event_name == 'workflow_dispatch'
+        && contains(fromJSON('["refs/heads/main", "refs/heads/develop"]'), github.ref))
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - name: Require a green CI run for a manual publish
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          runs=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&status=success" --jq '.total_count')
+          if [ "$runs" -eq 0 ]; then
+            echo "::error::No successful CI run for a push of $SHA; refusing to publish an untested commit."
+            exit 1
+          fi
+
   images:
     name: ${{ matrix.service }}
-    # Never publish an image built from a commit whose tests failed.
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    needs: gate
     runs-on: ubuntu-latest
+    # Only the package registry is writable; the repo itself stays read-only.
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -39,6 +75,8 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          # Nothing here talks to git again; keep the token out of .git/config.
+          persist-credentials: false
 
       - name: Scan for injected/obfuscated code in config files
         run: bash scripts/ci/check-injected-code.sh
