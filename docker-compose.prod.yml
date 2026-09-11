@@ -49,6 +49,13 @@ services:
       SMTP_SSL: ${SMTP_SSL:-false}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      # Client secrets and the site origin the realm import fills in
+      # (keycloak/README.md). An unset placeholder would import as its own,
+      # publicly known text, so there is no fallback here.
+      WSO2_KM_CLIENT_SECRET: ${WSO2_KM_CLIENT_SECRET:?WSO2_KM_CLIENT_SECRET must be set}
+      LOADTEST_CLIENT_SECRET: ${LOADTEST_CLIENT_SECRET:?LOADTEST_CLIENT_SECRET must be set}
+      APP_WEB_URL: https://${SERVER_IP}.nip.io
+      DEMO_USER_EMAIL: ${DEMO_USER_EMAIL:-kalana@apextick.local}
       # Behind the Caddy reverse proxy: trust X-Forwarded-* and advertise the
       # public HTTPS URL so issuer / auth / redirect URLs are correct.
       KC_PROXY_HEADERS: xforwarded
@@ -179,9 +186,17 @@ services:
       SPRING_RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:?RABBITMQ_USER must be set}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD must be set}
+      # Same SMTP_* as Keycloak; a real provider needs the login and STARTTLS.
       SPRING_MAIL_HOST: ${SMTP_HOST:-mailpit}
       SPRING_MAIL_PORT: ${SMTP_PORT:-1025}
-      MAIL_FROM: ${MAIL_FROM:-no-reply@apextick.local}
+      SPRING_MAIL_USERNAME: ${SMTP_USER:-}
+      SPRING_MAIL_PASSWORD: ${SMTP_PASSWORD:-}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH: ${SMTP_AUTH:-false}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: ${SMTP_STARTTLS:-false}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_ENABLE: ${SMTP_SSL:-false}
+      # Gmail rewrites a From that isn't the authenticated account, so fall
+      # back to SMTP_FROM before the placeholder address.
+      MAIL_FROM: ${MAIL_FROM:-${SMTP_FROM:-no-reply@apextick.local}}
       APP_WEB_URL: https://${SERVER_IP}.nip.io
     restart: unless-stopped
 
