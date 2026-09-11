@@ -133,9 +133,19 @@ public class StripePaymentGateway implements PaymentGateway {
 
     @Override
     public Optional<PaymentResult> verifyCallback(CallbackRequest req) {
+        if (webhookSecret == null || webhookSecret.isBlank()) {
+            // mock mode: the endpoint is still public, but nothing can be verified
+            throw new WebhookVerificationException("Stripe webhooks are not configured");
+        }
         String signature = header(req, "Stripe-Signature");
+        if (signature == null || signature.isBlank()) {
+            throw new WebhookVerificationException("Missing Stripe-Signature header");
+        }
         Event event;
         try {
+            // constructEvent parses the body before it checks the signature, so an
+            // unsigned non-JSON body would surface as a parse error (500); verify first.
+            Webhook.Signature.verifyHeader(req.rawBody(), signature, webhookSecret, Webhook.DEFAULT_TOLERANCE);
             event = Webhook.constructEvent(req.rawBody(), signature, webhookSecret);
         } catch (SignatureVerificationException e) {
             throw new WebhookVerificationException("Invalid Stripe signature");
