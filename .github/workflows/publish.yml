@@ -91,6 +91,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # metadata-action takes the SHA from GITHUB_SHA, which on workflow_run is
+      # the default branch's head rather than the commit built here, so the
+      # sha tag and the revision label are spelled out explicitly.
       - name: Derive image tags
         id: meta
         uses: docker/metadata-action@v5
@@ -99,7 +102,9 @@ jobs:
           tags: |
             type=raw,value=latest,enable=${{ (github.event.workflow_run.head_branch || github.ref_name) == 'main' }}
             type=raw,value=develop,enable=${{ (github.event.workflow_run.head_branch || github.ref_name) == 'develop' }}
-            type=sha,format=long
+            type=raw,value=sha-${{ github.event.workflow_run.head_sha || github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
