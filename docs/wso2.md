@@ -106,11 +106,14 @@ The portals are **never published in production** — only loopback
    minted for itself. This is the step that used to fail outright (see the fix
    history below) and is now automatic.
 8. **The same for `apextick-loadtest`**, on a second application
-   (`ApexTickLoadTest`), when `LOADTEST_CLIENT_SECRET` is set. k6 and
-   `smoke-test.sh` log in through that confidential client — `apextick-web`
-   no longer accepts the password grant — so their tokens carry
-   `azp=apextick-loadtest` and need a subscription of their own. An
-   application holds one production key per key manager, hence two.
+   (`ApexTickLoadTest`). k6 and `smoke-test.sh` log in through that
+   confidential client — `apextick-web` no longer accepts the password grant —
+   so their tokens carry `azp=apextick-loadtest` and need a subscription of
+   their own. An application holds one production key per key manager, hence
+   two. Both are mapped by client id only: the gateway validates tokens and
+   never needs a client's secret, and WSO2's Keycloak connector rejects any
+   non-blank `consumerSecret` as "wrong for the given consumer key" (its client
+   lookup doesn't return Keycloak's secret to compare against).
 
 ## Putting it in the request path
 

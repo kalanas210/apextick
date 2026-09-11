@@ -119,7 +119,7 @@ case "$code:$wsocode" in
     # The signature and issuer checked out — the gateway got far enough to look
     # for a subscription, which is the step that needs the key mapping.
     note "Keycloak token validated, not subscribed" "403 / 900908"
-    note "" "is $CLIENT_ID mapped onto an application? re-run setup.sh with LOADTEST_CLIENT_SECRET set"
+    note "" "is $CLIENT_ID mapped onto a subscribed application? re-run setup.sh"
     SUBSCRIBED=0
     ;;
   *)

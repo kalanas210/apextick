@@ -41,11 +41,6 @@
 #   WSO2_KM_CLIENT_SECRET  the secret Keycloak imported for apextick-wso2-km. The realm
 #                          file only carries a ${WSO2_KM_CLIENT_SECRET} placeholder, so
 #                          there is no default here to fall back on.
-#
-# Optional, same sources:
-#   LOADTEST_CLIENT_SECRET apextick-loadtest's secret; when set, that client gets its
-#                          own subscribed application so k6 and smoke-test.sh tokens
-#                          pass the gateway's subscription check.
 set -euo pipefail
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
@@ -55,7 +50,7 @@ die()  { printf '\033[31mERROR: %s\033[0m\n' "$1" >&2; exit 1; }
 . "$(dirname "$0")/env.sh"
 ROOT="$APEXTICK_ROOT"
 
-env_default WSO2_KM_CLIENT_SECRET LOADTEST_CLIENT_SECRET WSO2_ADMIN_PASSWORD SERVER_IP
+env_default WSO2_KM_CLIENT_SECRET WSO2_ADMIN_PASSWORD SERVER_IP
 resolve_public_origin
 
 if [ -n "$PUBLIC_ORIGIN" ]; then
@@ -78,7 +73,6 @@ WSO2_KM_CLIENT_ID="${WSO2_KM_CLIENT_ID:-apextick-wso2-km}"
 WSO2_KM_CLIENT_SECRET="${WSO2_KM_CLIENT_SECRET:-}"
 WSO2_SPA_CLIENT_ID="${WSO2_SPA_CLIENT_ID:-apextick-web}"
 WSO2_LOADTEST_CLIENT_ID="${WSO2_LOADTEST_CLIENT_ID:-apextick-loadtest}"
-LOADTEST_CLIENT_SECRET="${LOADTEST_CLIENT_SECRET:-}"
 
 [ -n "$WSO2_KM_CLIENT_SECRET" ] \
   || die "WSO2_KM_CLIENT_SECRET is not set -- add the value Keycloak was started with to .env (see docs/wso2.md)"
@@ -337,9 +331,14 @@ info "lifecycle change returned $CODE"
 # attached with a BYOK mapping (map-keys) rather than the usual "generate keys"
 # flow -- one application per client, since an application holds one
 # production key per key manager.
-#   subscribe_client <application> <description> <keycloak client id> [secret]
+#
+# Mapped by client id alone, never with the secret: the gateway validates
+# tokens, it doesn't need a client's credentials, and WSO2's Keycloak connector
+# rejects any non-blank consumerSecret as "wrong for the given consumer key"
+# (its client lookup doesn't return Keycloak's secret to compare against).
+#   subscribe_client <application> <description> <keycloak client id>
 subscribe_client() {
-  local app="$1" description="$2" client_id="$3" client_secret="${4:-}"
+  local app="$1" description="$2" client_id="$3"
   local app_id code body
 
   step "Subscribing $app and mapping $client_id onto it"
@@ -367,7 +366,7 @@ subscribe_client() {
     *)   info "subscription returned $code" ;;
   esac
 
-  body=$(python3 -c "import json,sys;print(json.dumps({'consumerKey':sys.argv[1],'consumerSecret':sys.argv[2],'keyManager':'Keycloak','keyType':'PRODUCTION'}))" "$client_id" "$client_secret")
+  body=$(python3 -c "import json,sys;print(json.dumps({'consumerKey':sys.argv[1],'consumerSecret':'','keyManager':'Keycloak','keyType':'PRODUCTION'}))" "$client_id")
   code=$(api -H 'Content-Type: application/json' -d "$body" \
     -o /dev/null -w '%{http_code}' "$WSO2_HOST/api/am/devportal/v3/applications/$app_id/map-keys")
   case "$code" in
@@ -377,17 +376,11 @@ subscribe_client() {
   esac
 }
 
-# The SPA: a public client, so there is no secret to map.
 subscribe_client "$APP_NAME" "ApexTick web client" "$WSO2_SPA_CLIENT_ID"
 
 # k6 and smoke-test.sh log in through apextick-loadtest, so its tokens carry
 # azp=apextick-loadtest and need a subscription of their own.
-if [ -n "$LOADTEST_CLIENT_SECRET" ]; then
-  subscribe_client "$LOADTEST_APP_NAME" "k6 and smoke-test.sh" "$WSO2_LOADTEST_CLIENT_ID" "$LOADTEST_CLIENT_SECRET"
-else
-  step "Subscribing $LOADTEST_APP_NAME"
-  info "skipped -- LOADTEST_CLIENT_SECRET is not set, so load-test tokens will get 403/900908 here"
-fi
+subscribe_client "$LOADTEST_APP_NAME" "k6 and smoke-test.sh" "$WSO2_LOADTEST_CLIENT_ID"
 
 printf '\n\033[32mDone.\033[0m Gateway: %s  ·  Publisher: %s/publisher\n' "$GATEWAY_URL" "$WSO2_HOST"
 printf 'Verify with: scripts/wso2/smoke-test.sh\n'
