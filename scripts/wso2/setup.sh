@@ -26,7 +26,26 @@
 #                        http://localhost:3000 when testing outside the gateway; to
 #                        exercise the gateway path locally use host.docker.internal
 #                        instead -- see docs/wso2.md.
+#
+# Required (from the environment, or else the repo's .env):
+#   WSO2_KM_CLIENT_SECRET  the secret Keycloak imported for apextick-wso2-km. The realm
+#                          file only carries a ${WSO2_KM_CLIENT_SECRET} placeholder, so
+#                          there is no default here to fall back on.
 set -euo pipefail
+
+step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
+info() { printf '    %s\n' "$1"; }
+die()  { printf '\033[31mERROR: %s\033[0m\n' "$1" >&2; exit 1; }
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+
+# Fall back to the repo's .env, as scripts/grant-admin.sh does: compose reads the
+# same file, so it is what Keycloak and WSO2 were actually started with.
+ENV_FILE="$ROOT/.env"
+if [ -f "$ENV_FILE" ]; then
+  from_env() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -n1 | tr -d '\r"'; }
+  : "${WSO2_KM_CLIENT_SECRET:=$(from_env WSO2_KM_CLIENT_SECRET)}"
+fi
 
 WSO2_HOST="${WSO2_HOST:-https://localhost:9443}"
 WSO2_USER="${WSO2_USER:-admin}"
@@ -37,15 +56,22 @@ WSO2_KC_ISSUER="${WSO2_KC_ISSUER:-http://localhost:8180/realms/apextick}"
 WSO2_KC_JWKS="${WSO2_KC_JWKS:-http://keycloak:8080/realms/apextick/protocol/openid-connect/certs}"
 WSO2_KC_BASE="${WSO2_KC_BASE:-http://keycloak:8080/realms/apextick}"
 WSO2_KM_CLIENT_ID="${WSO2_KM_CLIENT_ID:-apextick-wso2-km}"
-WSO2_KM_CLIENT_SECRET="${WSO2_KM_CLIENT_SECRET:-apextick-wso2-km-secret}"
+WSO2_KM_CLIENT_SECRET="${WSO2_KM_CLIENT_SECRET:-}"
 WSO2_SPA_CLIENT_ID="${WSO2_SPA_CLIENT_ID:-apextick-web}"
+
+[ -n "$WSO2_KM_CLIENT_SECRET" ] \
+  || die "WSO2_KM_CLIENT_SECRET is not set -- add the value Keycloak was started with to .env (see docs/wso2.md)"
+case "$WSO2_KM_CLIENT_SECRET" in
+  # What Keycloak stores when the variable never reached it: a publicly known
+  # secret, and one the gateway must not be configured to rely on.
+  '${'*) die "WSO2_KM_CLIENT_SECRET is the unresolved placeholder '$WSO2_KM_CLIENT_SECRET'" ;;
+esac
 
 API_NAME="ApexTickAPI"
 API_CONTEXT="api"   # no leading slash: Git Bash would rewrite it as a path
 API_VERSION="1.0.0"
 POLICY_NAME="ApexTickHoldBurst"
 APP_NAME="ApexTickWeb"
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OPENAPI="$ROOT/wso2/apextick-api/openapi.json"
 
 # WSO2 serves the portals over a self-signed certificate.
@@ -54,10 +80,6 @@ CURL=(curl -sk)
 # Scratch space for the API document we round-trip through the Publisher API.
 API_TMP="$(mktemp -t apextick-api.XXXXXX)"
 trap 'rm -f "$API_TMP"' EXIT
-
-step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
-info() { printf '    %s\n' "$1"; }
-die()  { printf '\033[31mERROR: %s\033[0m\n' "$1" >&2; exit 1; }
 
 [ -f "$OPENAPI" ] || die "missing $OPENAPI — run scripts/wso2/refresh-openapi.sh first"
 
@@ -102,11 +124,8 @@ step "Registering Keycloak as a key manager"
 KM_EXISTS=$(api "$WSO2_HOST/api/am/admin/v4/key-managers" \
   | python3 -c "import json,sys;d=json.load(sys.stdin);print(next((k['id'] for k in d.get('list',[]) if k.get('name')=='Keycloak'),''))" 2>/dev/null || true)
 
-if [ -n "$KM_EXISTS" ]; then
-  info "already registered ($KM_EXISTS)"
-else
-  KM_BODY=$(python3 - "$WSO2_KC_WELLKNOWN" "$WSO2_KC_ISSUER" "$WSO2_KC_JWKS" \
-                     "$WSO2_KC_BASE" "$WSO2_KM_CLIENT_ID" "$WSO2_KM_CLIENT_SECRET" <<'PY'
+KM_BODY=$(python3 - "$WSO2_KC_WELLKNOWN" "$WSO2_KC_ISSUER" "$WSO2_KC_JWKS" \
+                   "$WSO2_KC_BASE" "$WSO2_KM_CLIENT_ID" "$WSO2_KM_CLIENT_SECRET" <<'PY'
 import json, sys
 
 wellknown, issuer, jwks, base, client_id, client_secret = sys.argv[1:7]
@@ -148,6 +167,20 @@ print(json.dumps({
 }))
 PY
 )
+
+if [ -n "$KM_EXISTS" ]; then
+  # Updated in place rather than skipped, so a rotated WSO2_KM_CLIENT_SECRET (or a
+  # corrected issuer) actually reaches a gateway that was configured earlier.
+  KM_RESULT=$(api -X PUT -H 'Content-Type: application/json' -d "$KM_BODY" \
+    -w '\n%{http_code}' "$WSO2_HOST/api/am/admin/v4/key-managers/$KM_EXISTS")
+  KM_CODE=$(printf '%s' "$KM_RESULT" | tail -1)
+  if [ "$KM_CODE" = "200" ]; then
+    info "already registered ($KM_EXISTS), configuration re-applied"
+  else
+    printf '\033[33m    WARNING: updating key manager %s returned %s -- it keeps its previous settings\033[0m\n' "$KM_EXISTS" "$KM_CODE"
+    printf '    %s\n' "$(printf '%s' "$KM_RESULT" | head -c 400)"
+  fi
+else
   KM_RESULT=$(api -H 'Content-Type: application/json' -d "$KM_BODY" \
     -w '\n%{http_code}' "$WSO2_HOST/api/am/admin/v4/key-managers")
   KM_CODE=$(printf '%s' "$KM_RESULT" | tail -1)

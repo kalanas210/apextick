@@ -36,7 +36,7 @@
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
-      "secret": "apextick-wso2-km-secret",
+      "secret": "${WSO2_KM_CLIENT_SECRET}",
       "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "basic", "email", "wso2-audience"],
       "optionalClientScopes": ["default"]
     }

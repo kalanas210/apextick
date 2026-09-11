@@ -48,6 +48,16 @@ scripts/wso2/smoke-test.sh           # what the gateway does with each kind of c
 `docker compose --profile wso2 up -d && scripts/wso2/setup.sh` reaches a working,
 authenticated, correctly-routed gateway on its own.
 
+It needs one secret: `WSO2_KM_CLIENT_SECRET`, the client secret of the
+`apextick-wso2-km` service account. The realm import only carries a
+`${WSO2_KM_CLIENT_SECRET}` placeholder that Keycloak fills from its own
+environment, so the same value has to be in `.env` for compose (which hands it
+to Keycloak) and for `setup.sh` (which hands it to WSO2). The script reads
+`.env` itself and stops if the value is missing. Re-running it re-applies the
+key-manager registration, which is how a rotated secret reaches the gateway —
+see [keycloak/README.md](../keycloak/README.md) for rotating it on a realm that
+already exists.
+
 | Surface | URL | Notes |
 | --- | --- | --- |
 | Gateway (http) | http://localhost:8280/api | what clients call |
