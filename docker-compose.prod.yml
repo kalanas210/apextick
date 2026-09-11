@@ -180,6 +180,7 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD must be set}
       SPRING_MAIL_HOST: ${SMTP_HOST:-mailpit}
       SPRING_MAIL_PORT: ${SMTP_PORT:-1025}
+      MAIL_FROM: ${MAIL_FROM:-no-reply@apextick.local}
       APP_WEB_URL: https://${SERVER_IP}.nip.io
     restart: unless-stopped
 

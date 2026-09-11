@@ -163,6 +163,7 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
       SPRING_MAIL_HOST: mailpit
       SPRING_MAIL_PORT: 1025
+      MAIL_FROM: ${MAIL_FROM:-no-reply@apextick.local}
       APP_WEB_URL: ${APP_WEB_URL:-http://localhost:3000}
     restart: unless-stopped
 
