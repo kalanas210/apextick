@@ -33,6 +33,14 @@ resource "aws_instance" "app" {
     volume_size = 30
   }
 
+  # IMDSv2 only: the metadata service answers only callers that first PUT
+  # for a session token, which a server-side request forgery (a plain GET
+  # to 169.254.169.254) can't do. Updates in place, no replacement.
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
+  }
+
   tags = { Name = "apextick-server" }
 
   lifecycle {
