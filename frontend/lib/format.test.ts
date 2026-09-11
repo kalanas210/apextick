@@ -55,6 +55,15 @@ describe("formatPrice", () => {
     expect(formatPrice(5.5, "")).toBe("5.50");
     expect(formatPrice(40, null)).toBe("40");
   });
+
+  it("keeps the minor digits on a receipt, so its lines read alike", () => {
+    const receipt = { keepMinorUnits: true };
+    expect(formatPrice(110, "GBP", receipt)).toBe("£110.00");
+    expect(formatPrice(5.5, "GBP", receipt)).toBe("£5.50");
+    expect(formatPrice(125000, "INR", receipt)).toBe("₹1,25,000.00");
+    expect(formatPrice(1200, "JPY", receipt)).toBe("¥1,200");
+    expect(formatPrice(40, "EURO", receipt)).toBe("EURO 40.00");
+  });
 });
 
 describe("formatDate", () => {

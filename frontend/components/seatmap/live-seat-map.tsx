@@ -112,6 +112,7 @@ export function LiveSeatMap({
   const currency = event?.currency ?? "USD";
   // priced exactly as the order will be, so checkout shows the same total
   const { subtotal, fee, total } = quoteOrder(selectedSeats.map((s) => s.price));
+  const money = (value: number) => formatPrice(value, currency, { keepMinorUnits: true });
 
   const secondsLeft = heldUntil
     ? Math.max(0, Math.floor((new Date(heldUntil).getTime() - now) / 1000))
@@ -239,7 +240,7 @@ export function LiveSeatMap({
             <p className="sr-only" aria-live="polite">
               {selectedSeats.length === 0
                 ? "No seats selected."
-                : `${selectedSeats.length} seat${selectedSeats.length === 1 ? "" : "s"} selected. Total ${formatPrice(total, currency)}.`}
+                : `${selectedSeats.length} seat${selectedSeats.length === 1 ? "" : "s"} selected. Total ${money(total)}.`}
             </p>
 
             <div className="flex items-center justify-between">
@@ -288,7 +289,7 @@ export function LiveSeatMap({
                       </span>
                       <span className="flex items-center gap-3">
                         <span className="tnum text-[0.84rem] text-bone">
-                          {formatPrice(s.price, currency)}
+                          {money(s.price)}
                         </span>
                         <button
                           type="button"
@@ -308,15 +309,15 @@ export function LiveSeatMap({
                     <dt>
                       Subtotal<span className="tnum"> ({selectedSeats.length})</span>
                     </dt>
-                    <dd className="tnum text-bone">{formatPrice(subtotal, currency)}</dd>
+                    <dd className="tnum text-bone">{money(subtotal)}</dd>
                   </div>
                   <div className="flex justify-between text-muted">
                     <dt>Booking fee</dt>
-                    <dd className="tnum text-bone">{formatPrice(fee, currency)}</dd>
+                    <dd className="tnum text-bone">{money(fee)}</dd>
                   </div>
                   <div className="mt-1 flex items-baseline justify-between border-t border-line pt-3">
                     <dt className="font-display text-base text-bone">Total</dt>
-                    <dd className="tnum text-xl text-bone">{formatPrice(total, currency)}</dd>
+                    <dd className="tnum text-xl text-bone">{money(total)}</dd>
                   </div>
                 </dl>
 

@@ -38,19 +38,31 @@ function currencyFormat(code: string, whole = false): Intl.NumberFormat | null {
   return format;
 }
 
+export interface PriceOptions {
+  /**
+   * Keep the minor digits on a whole amount too (£110.00), so a receipt's
+   * lines and totals read in one format next to a £5.50 fee.
+   */
+  keepMinorUnits?: boolean;
+}
+
 /**
  * A price in its currency's minor units: £57.75 and £5.50 (never £5.5), ¥1,200.
  * A whole amount drops the decimals (£55), so catalogue prices stay clean. An
  * unrecognised but well-formed code formats as "XYZ 5.50", and a malformed one
  * falls back to the code and the number rather than throwing.
  */
-export function formatPrice(value: number, currency: string | null | undefined): string {
+export function formatPrice(
+  value: number,
+  currency: string | null | undefined,
+  { keepMinorUnits = false }: PriceOptions = {},
+): string {
   const code = (currency ?? "").trim().toUpperCase();
   const format = currencyFormat(code);
   // 2 for most currencies, 0 for JPY, 3 for BHD
   const digits = format?.resolvedOptions().maximumFractionDigits ?? 2;
   const scale = 10 ** digits;
-  const whole = Math.round(value * scale) % scale === 0;
+  const whole = !keepMinorUnits && Math.round(value * scale) % scale === 0;
 
   if (!format) {
     const amount = new Intl.NumberFormat("en-GB", {
