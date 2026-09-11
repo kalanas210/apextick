@@ -131,7 +131,7 @@ The portals are **never published in production** — only loopback
 temporarily, point it back at the service directly:
 
 ```bash
-API_UPSTREAM=booking-service:8081 docker compose -f docker-compose.prod.yml up -d caddy
+API_UPSTREAM=booking-service:8081 docker compose -f docker-compose.prod.yml up -d --no-deps caddy
 ```
 
 Configure and check it **on the server itself**, from the repo checkout the
