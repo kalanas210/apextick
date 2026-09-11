@@ -120,7 +120,7 @@ There are no `synchronized` blocks, no application-level mutexes, and no distrib
 - **PCI-conscious payments** — the Stripe adapter never sees a raw card number: it creates a PaymentIntent and returns a `client_secret` for the browser to confirm, treating the signed `payment_intent.succeeded` webhook as the source of truth. Webhooks are idempotent, and a charge that lands after its seats were lost is automatically refunded.
 - **Stateless JWT security** — Keycloak issues OIDC tokens the API validates statelessly; roles map from `realm_access.roles` to `ROLE_*`. Auth keeps working containerized by fetching signing keys over the internal network while validating the public issuer.
 - **One-command infrastructure** — the whole backend, its dependencies, the Keycloak realm, and an optional observability stack start with `docker compose up`. Every secret, including the realm's client secrets, comes from a git-ignored `.env`, and the production stack refuses to start while any credential is unset.
-- **Verified** — 80 booking-service tests, most of them full-stack **Testcontainers** integration tests covering concurrency, expiry, the outbox, orders, payments, webhooks, admin, security and rate-limiting; GreenMail tests for the notification service's SMTP path (including authenticated STARTTLS); Vitest unit tests for the frontend's money and status helpers. CI also fails when the gateway's OpenAPI contract drifts from the code.
+- **Verified** — 80 booking-service tests, most of them full-stack **Testcontainers** integration tests covering concurrency, expiry, the outbox, orders, payments, webhooks, admin, security and rate-limiting; GreenMail tests for the notification service's SMTP path (an authenticated login, and refusing a server that doesn't offer STARTTLS); Vitest unit tests for the frontend's money and status helpers. CI also fails when the gateway's OpenAPI contract drifts from the code.
 
 ## Tech stack
 
@@ -347,13 +347,15 @@ The production file has no fallback for any credential: it refuses to start
 until `.env` sets the database, RabbitMQ, Keycloak admin, MinIO, WSO2 and
 Grafana passwords and the two realm client secrets (`WSO2_KM_CLIENT_SECRET`,
 `LOADTEST_CLIENT_SECRET`). The check only catches a missing value, so replace
-every `changeme`/`dev-*` value with `openssl rand -hex 32`.
+every `changeme`, `minioadmin`, `admin` and `dev-*` value with
+`openssl rand -hex 32`.
 
 Caddy is the only thing published (80/443). It terminates TLS with an
 automatically-provisioned certificate for `https://<SERVER_IP>.nip.io` and routes
 by path — `/api` to the WSO2 gateway (which then reaches the booking service),
-the apextick realm's `/realms`, `/resources` and `/js` to Keycloak, everything
-else (including the `/admin` panel) to the frontend. The security group in
+the apextick realm's `/realms`, `/resources` and `/js` to Keycloak (minus the
+master realm and the client-registration API), everything else (including the
+`/admin` panel) to the frontend. The security group in
 `infra/` opens only 80/443 to the world and SSH to `admin_cidr`, a required
 Terraform variable:
 
@@ -363,12 +365,37 @@ cd infra && terraform apply -var admin_cidr=<your-ip>/32
 
 Keycloak's own admin console is not published. Reach it over an SSH tunnel to
 its loopback-only port (`ssh -L 8180:localhost:8180 ubuntu@<host>`) after the
-one-time `kcadm` step described next to the keycloak service in
-`docker-compose.prod.yml`. Keycloak only imports `keycloak/import/` into an
-empty database, so a realm that already exists is brought up to date through
-the Admin API instead — `keycloak/README.md` has the tested block. Production
+`kcadm` step described next to the keycloak service in
+`docker-compose.prod.yml`, repeated whenever Keycloak is recreated. Production
 Keycloak still runs `start-dev` with its data inside the container: recreating
 it (which any change to its environment does) drops self-registered users.
+
+### Upgrading a running deployment
+
+`git pull` alone changes nothing that is already running. On the server:
+
+1. **Keycloak** — the first `up -d` of this compose file recreates it (new
+   environment, new loopback port), which re-imports the realm and drops
+   registered accounts. To keep them, deploy the other services with
+   `--no-deps` and patch the realm through the Admin API instead;
+   `keycloak/README.md` has both paths and the tested block.
+2. **Images and the rest** —
+   `docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d`
+   (plain `up -d` doesn't fetch new `:latest` images).
+3. **Caddy** — it only reads its config at start. This release recreates it
+   (its mount changed); after a later Caddyfile-only change run
+   `docker compose -f docker-compose.prod.yml restart caddy`. Then check the
+   edge: `curl -s -o /dev/null -w '%{http_code}\n' https://<SERVER_IP>.nip.io/realms/master/.well-known/openid-configuration`
+   must print `404`.
+4. **The gateway** — `scripts/wso2/setup.sh` pushes the regenerated API
+   contract (anonymous catalogue reads and the Stripe webhook) and the rotated
+   key-manager secret; `scripts/wso2/smoke-test.sh` confirms it.
+5. **RabbitMQ** — delete the queue booking-service no longer declares, which
+   otherwise keeps filling:
+   `docker exec apextick-rabbitmq rabbitmqctl delete_queue seat-held-notifications`.
+6. **Terraform** — `terraform plan -var admin_cidr=<your-ip>/32` must show
+   in-place changes only (security-group rules, `metadata_options`,
+   `user_data_replace_on_change`); stop if it plans a replacement.
 
 Prometheus and Grafana are an opt-in profile bound to loopback:
 
