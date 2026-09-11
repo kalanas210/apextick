@@ -1,6 +1,7 @@
 # Production stack for the EC2 deployment. Only Caddy is published to the
 # internet (80/443); everything else talks over the internal docker network, so
-# 3000 / 8081 / 8180 stay closed at the security group.
+# 3000 / 8081 / 8180 stay closed at the security group. Admin surfaces (the
+# Keycloak console, WSO2 portals, Grafana, Prometheus) bind to loopback only.
 #
 # Images are pulled, not built: CI publishes them to GHCR on every push to main.
 # Override *_IMAGE in .env to pin a tag or use a different registry.
@@ -48,6 +49,19 @@ services:
       # public HTTPS URL so issuer / auth / redirect URLs are correct.
       KC_PROXY_HEADERS: xforwarded
       KC_HOSTNAME: https://${SERVER_IP}.nip.io
+      # The admin console is not published through Caddy. It is served on the
+      # loopback-only port below and reached over an SSH tunnel, like the WSO2
+      # portals:  ssh -L 8180:localhost:8180 ubuntu@<host>
+      # then open http://localhost:8180/admin/. Its login runs in the master
+      # realm, whose pages would otherwise post back to the public hostname
+      # (where Caddy closes that realm), so point the master realm at the
+      # tunnel as well. start-dev keeps Keycloak's data inside the container,
+      # so repeat this whenever the container is recreated:
+      #   docker exec -it apextick-keycloak /opt/keycloak/bin/kcadm.sh config credentials --config /tmp/kcadm.config --server http://localhost:8080 --realm master --user <KEYCLOAK_ADMIN>
+      #   docker exec apextick-keycloak /opt/keycloak/bin/kcadm.sh update realms/master --config /tmp/kcadm.config -s attributes.frontendUrl=http://localhost:8180
+      KC_HOSTNAME_ADMIN: http://localhost:8180
+    ports:
+      - "127.0.0.1:8180:8080"
     volumes:
       - ./keycloak/import:/opt/keycloak/data/import
       # branded login screens; Keycloak reads themes from this directory
@@ -199,7 +213,8 @@ services:
 
   # TLS-terminating reverse proxy. Serves one HTTPS origin
   # (https://<SERVER_IP>.nip.io) and routes by path:
-  #   /realms,/resources,/admin,/js -> keycloak   /api -> wso2am   else -> frontend
+  #   /realms,/resources,/js -> keycloak   /api -> wso2am   else -> frontend
+  # (including /admin, the app's admin panel -- Keycloak's console is not public)
   # Caddy auto-provisions a browser-trusted cert via ACME (ports 80/443).
   caddy:
     image: caddy:2-alpine
