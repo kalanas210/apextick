@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -50,7 +51,7 @@ public class NotificationService {
         boolean fresh = idempotent.runOnce(env.eventId(), env.type(), () -> {
             Map<String, Object> model = new LinkedHashMap<>();
             model.put("booking", p);
-            model.put("ticketsUrl", publicBaseUrl + "/account/tickets");
+            model.put("ticketsUrl", orderUrl(p.orderId()));
             String subject = "You're in — " + p.event().name();
             email.send(new OutboundEmail(p.userEmail(), subject, templates.render("email/booking-confirmed", model)));
             logs.recordSent(env.eventId(), env.type(), p.userEmail(), subject);
@@ -86,6 +87,13 @@ public class NotificationService {
             log.debug("seat event {} for seat {}", env.type(), env.payload().seatId());
         });
         meters.counter("notifications_events_total", "type", env.type()).increment();
+    }
+
+    /** The frontend's order page (app/orders/[id]), keyed by the order's UUID; it lists the tickets. */
+    private String orderUrl(String orderId) {
+        return UriComponentsBuilder.fromUriString(publicBaseUrl)
+                .pathSegment("orders", orderId)
+                .toUriString();
     }
 
     private void countEvent(String type, boolean fresh) {
