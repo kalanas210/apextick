@@ -26,6 +26,15 @@
 	handle /realms/master/* {
 		respond 404
 	}
+	# Client registration is a realm-scoped admin API: a token holding
+	# manage-clients (WSO2's key-manager account) can read client secrets and
+	# rewrite redirect URIs through it. WSO2 calls it on the docker network, so
+	# nothing outside needs it. A "*" between segments matches exactly one
+	# segment, so each depth is listed (Keycloak uses up to two: provider, client).
+	@kcRegistration path /realms/*/clients-registrations /realms/*/clients-registrations/* /realms/*/clients-registrations/*/* /realms/*/clients-registrations/*/*/*
+	handle @kcRegistration {
+		respond 404
+	}
 	handle /realms/* {
 		reverse_proxy keycloak:8080
 	}

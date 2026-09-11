@@ -255,7 +255,10 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # The directory, not the file: git replaces the Caddyfile on checkout, and
+      # a single-file bind mount would keep showing the container the old one,
+      # so even `caddy reload` would reload stale routes.
+      - ./caddy:/etc/caddy:ro
       - caddy_data:/data
       - caddy_config:/config
     restart: unless-stopped
