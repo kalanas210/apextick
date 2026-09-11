@@ -165,7 +165,8 @@ function AppliedLayout({
     <div className="mt-8 space-y-8">
       <Notice tone="info">
         Seating layouts are created once. There is no edit endpoint — to change this one, delete the
-        event and create it again.
+        event and create it again. That only works until the first order: after that, cancel the
+        event instead.
       </Notice>
 
       <section>
