@@ -247,7 +247,13 @@ PY
 )
 
 if [ -n "$API_ID" ]; then
-  info "already imported ($API_ID)"
+  # Re-applied rather than skipped, so a regenerated contract -- new operations,
+  # ones that became anonymous -- reaches an API an earlier run imported. The
+  # revision deployed below is what puts it on the gateway.
+  CODE=$(api -X PUT -F "file=@$OPENAPI" -o /dev/null -w '%{http_code}' \
+    "$WSO2_HOST/api/am/publisher/v4/apis/$API_ID/swagger")
+  [ "$CODE" = "200" ] || die "updating the definition of $API_ID returned $CODE"
+  info "already imported ($API_ID), definition updated"
 else
   IMPORT=$(api -H 'Content-Type: multipart/form-data' \
     -F "file=@$OPENAPI" -F "additionalProperties=$ADDITIONAL" \

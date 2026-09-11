@@ -12,7 +12,9 @@ The booking service already validates JWTs and rate-limits holds in Redis. The
 gateway earns its place by moving two of those concerns to the edge:
 
 - **Rejecting bad traffic before it costs anything.** An unauthenticated request
-  dies at the gateway; the service never opens a database connection for it.
+  to anything that needs a caller dies at the gateway; the service never opens
+  a database connection for it. (The few routes the service itself serves to
+  anyone pass straight through — see [Public operations](#public-operations).)
 - **Shedding a burst.** During a flash sale the interesting failure is not one
   slow request, it is ten thousand at once. A throttling policy on the seat-hold
   operation caps what reaches the service, and the callers that lose get a clean
@@ -93,7 +95,9 @@ The portals are **never published in production** — only loopback
 4. **The API itself**, imported from `wso2/apextick-api/openapi.json` (generated
    from the service's own springdoc output, with the `/api` prefix stripped from
    every operation path — see below for why), with `/api` as the gateway's own
-   context.
+   context. On a gateway where it already exists, the definition is replaced
+   with the committed one, so a regenerated contract takes effect on the next
+   run.
 5. **A revision deployed to the gateway** and the API moved to `PUBLISHED`.
 6. **A DevPortal application** subscribed to the API.
 7. **The SPA's Keycloak client (`apextick-web`) mapped onto that application**
@@ -151,6 +155,27 @@ connection carrying STOMP frames; there is nothing an HTTP API gateway can
 usefully police there, and putting one in the middle only adds a hop that can
 drop the connection. Caddy handles `/api/ws*` before the gateway rule.
 
+## Public operations
+
+A few routes are public in booking-service itself (`permitAll()` in
+`SecurityConfig`): the catalogue reads (`GET /events/**`, `GET /series/**`),
+`GET /payments/config`, and Stripe's webhook, which authenticates with its own
+signature rather than a bearer token. The SPA calls the catalogue and payment
+config without a token even when signed in, so the gateway must not demand one
+either — otherwise the event page, seat map and checkout get `401` in
+production, and with Stripe enabled paid orders never confirm.
+
+`scripts/wso2/normalise-openapi.py` marks exactly those operations with
+`x-auth-type: None`, the per-resource switch WSO2's OpenAPI importer reads
+(it ignores the standard `security: []`, which is set as well). The list is one
+commented table in that script, mirroring `SecurityConfig`; a rule that stops
+matching any operation fails the script rather than silently dropping out.
+`GET /events/{idOrSlug}/holds/me` is deliberately left protected: the service's
+`/api/events/**` glob covers it, but it answers for the caller.
+`smoke-test.sh` checks both sides: an anonymous catalogue read gets `200`, and
+a badly-signed webhook gets booking-service's own `400`, not the gateway's
+`401`.
+
 ## What actually works today
 
 Verified against WSO2 API Manager 4.5.0 with a real, browser-shaped token
@@ -161,7 +186,7 @@ committed config alone produces, not hand-patched state):
 
 | Behaviour | Result |
 | --- | --- |
-| Unauthenticated request | `401` · `900902 Missing Credentials` — the backend is never dialled |
+| Unauthenticated request to a protected route | `401` · `900902 Missing Credentials` — the backend is never dialled |
 | Garbage bearer token | rejected · `900901` |
 | Keycloak-issued access token | validated, subscription validated, request reaches the backend · `200` |
 | Same token reused repeatedly | consistently `200` (was flaky before the cache fix below) |
