@@ -1092,6 +1092,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "held": {
+            "format": "int64",
+            "type": "integer"
+          },
           "tierCode": {
             "type": "string"
           },
