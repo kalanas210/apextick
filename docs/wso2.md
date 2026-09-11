@@ -122,6 +122,27 @@ temporarily, point it back at the service directly:
 API_UPSTREAM=booking-service:8081 docker compose -f docker-compose.prod.yml up -d caddy
 ```
 
+Configure and check it **on the server itself**, from the repo checkout the
+stack runs from:
+
+```bash
+scripts/wso2/setup.sh
+LOADTEST_USER=... LOADTEST_PASSWORD=... scripts/wso2/smoke-test.sh
+```
+
+Both read `.env` (`WSO2_ADMIN_PASSWORD`, the client secrets, `SERVER_IP`) and
+ask the running Keycloak container for its `KC_HOSTNAME`. With one set — as
+`docker-compose.prod.yml` does, `https://$SERVER_IP.nip.io` — `setup.sh`
+registers the key manager with issuer `https://$SERVER_IP.nip.io/realms/apextick`
+(the `iss` production tokens actually carry) and `smoke-test.sh` goes through
+the public origin, `https://$SERVER_IP.nip.io/api`, because production publishes
+no gateway port of its own. Both stop before doing anything if `.env`'s
+`SERVER_IP` and Keycloak's `KC_HOSTNAME` disagree (a new Elastic IP with a
+Keycloak that was never recreated, say), and `setup.sh` refuses a
+`WSO2_KC_ISSUER` override on any other host — a key manager with the wrong
+issuer rejects every token. `GATEWAY`, `KEYCLOAK` and `WSO2_KC_ISSUER` still
+override everything.
+
 **Locally**, the gateway is opt-in and the frontend talks to `booking-service`
 directly unless told otherwise:
 
@@ -145,10 +166,10 @@ device on the LAN, a hostname Keycloak's redirect URIs don't already list —
 `extra_hosts: host.docker.internal:host-gateway` and `apextick-web` allows
 `http://host.docker.internal:3000/*`, so overriding `WSO2_KC_ISSUER` and
 booking-service's `JWT_ISSUER_URI` to `host.docker.internal` and browsing via
-that hostname instead is there as a fallback. Production doesn't need any of
-this either way — Keycloak there has a fixed `KC_HOSTNAME` (the real
-`https://<server-ip>.nip.io` domain), reachable like anything else on the
-internet.
+that hostname instead is there as a fallback. Production needs none of this —
+Keycloak there has a fixed `KC_HOSTNAME` (the real `https://<server-ip>.nip.io`
+domain), reachable like anything else on the internet, and `setup.sh` derives
+the issuer from it as described above.
 
 **The WebSocket stays on a direct route.** `/api/ws` is a long-lived upgraded
 connection carrying STOMP frames; there is nothing an HTTP API gateway can

@@ -9,23 +9,33 @@
 #   docker compose --profile wso2 up -d
 #   scripts/wso2/setup.sh
 #
+# Run it on the docker host: it reads the repo's .env and asks the running
+# Keycloak container which issuer its tokens carry.
+#
 # Environment (all optional):
 #   WSO2_HOST            https://localhost:9443
-#   WSO2_USER/PASSWORD   admin / admin
+#   WSO2_USER            admin
+#   WSO2_PASSWORD        WSO2_ADMIN_PASSWORD (environment, then .env -- the value
+#                        deployment.toml gives the super admin), else admin
 #   WSO2_BACKEND         http://booking-service:8081/api  (as seen from the gateway --
 #                        every controller in booking-service is mapped under /api, and
 #                        the operation paths below have that prefix stripped so the
 #                        gateway's own /api context doesn't double up client-side; the
 #                        backend URL puts the prefix back for the upstream call)
 #   WSO2_KC_WELLKNOWN    Keycloak discovery URL, gateway-internal
-#   WSO2_KC_ISSUER       the `iss` claim in tokens the browser gets -- must be a host
-#                        this gateway container can also resolve and reach itself (the
-#                        Keycloak connector dials it directly, not just the JWKS URL
-#                        below). localhost can't mean that from inside a container, so
-#                        this only works for a browser hitting the app via
-#                        http://localhost:3000 when testing outside the gateway; to
-#                        exercise the gateway path locally use host.docker.internal
-#                        instead -- see docs/wso2.md.
+#   WSO2_KC_ISSUER       the `iss` claim in tokens the browser gets. Defaults to
+#                        Keycloak's KC_HOSTNAME + /realms/apextick when it has one
+#                        (production: https://$SERVER_IP.nip.io), otherwise
+#                        http://localhost:8180/realms/apextick. Setting it to a host
+#                        other than KC_HOSTNAME's is refused -- no token would match.
+#                        Locally it must also be a host this gateway container can
+#                        resolve and reach itself (the Keycloak connector dials it
+#                        directly, not just the JWKS URL below). localhost can't mean
+#                        that from inside a container, so this only works for a
+#                        browser hitting the app via http://localhost:3000 when
+#                        testing outside the gateway; to exercise the gateway path
+#                        locally use host.docker.internal instead -- see docs/wso2.md.
+#   KEYCLOAK_CONTAINER   apextick-keycloak (where KC_HOSTNAME is read from)
 #
 # Required (from the environment, or else the repo's .env):
 #   WSO2_KM_CLIENT_SECRET  the secret Keycloak imported for apextick-wso2-km. The realm
@@ -42,15 +52,18 @@ step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 info() { printf '    %s\n' "$1"; }
 die()  { printf '\033[31mERROR: %s\033[0m\n' "$1" >&2; exit 1; }
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$(dirname "$0")/env.sh"
+ROOT="$APEXTICK_ROOT"
 
-# Fall back to the repo's .env, as scripts/grant-admin.sh does: compose reads the
-# same file, so it is what Keycloak and WSO2 were actually started with.
-ENV_FILE="$ROOT/.env"
-if [ -f "$ENV_FILE" ]; then
-  from_env() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -n1 | tr -d '\r"'; }
-  : "${WSO2_KM_CLIENT_SECRET:=$(from_env WSO2_KM_CLIENT_SECRET)}"
-  : "${LOADTEST_CLIENT_SECRET:=$(from_env LOADTEST_CLIENT_SECRET)}"
+env_default WSO2_KM_CLIENT_SECRET LOADTEST_CLIENT_SECRET WSO2_ADMIN_PASSWORD SERVER_IP
+resolve_public_origin
+
+if [ -n "$PUBLIC_ORIGIN" ]; then
+  DEFAULT_ISSUER="$PUBLIC_ORIGIN/realms/apextick"
+  GATEWAY_URL="$PUBLIC_ORIGIN/api"   # through Caddy, which routes /api to the gateway
+else
+  DEFAULT_ISSUER="http://localhost:8180/realms/apextick"
+  GATEWAY_URL="http://localhost:8280/api"
 fi
 
 WSO2_HOST="${WSO2_HOST:-https://localhost:9443}"
@@ -58,7 +71,7 @@ WSO2_USER="${WSO2_USER:-admin}"
 WSO2_PASSWORD="${WSO2_PASSWORD:-${WSO2_ADMIN_PASSWORD:-admin}}"
 WSO2_BACKEND="${WSO2_BACKEND:-http://booking-service:8081/api}"
 WSO2_KC_WELLKNOWN="${WSO2_KC_WELLKNOWN:-http://keycloak:8080/realms/apextick/.well-known/openid-configuration}"
-WSO2_KC_ISSUER="${WSO2_KC_ISSUER:-http://localhost:8180/realms/apextick}"
+WSO2_KC_ISSUER="${WSO2_KC_ISSUER:-$DEFAULT_ISSUER}"
 WSO2_KC_JWKS="${WSO2_KC_JWKS:-http://keycloak:8080/realms/apextick/protocol/openid-connect/certs}"
 WSO2_KC_BASE="${WSO2_KC_BASE:-http://keycloak:8080/realms/apextick}"
 WSO2_KM_CLIENT_ID="${WSO2_KM_CLIENT_ID:-apextick-wso2-km}"
@@ -74,6 +87,15 @@ case "$WSO2_KM_CLIENT_SECRET" in
   # secret, and one the gateway must not be configured to rely on.
   '${'*) die "WSO2_KM_CLIENT_SECRET is the unresolved placeholder '$WSO2_KM_CLIENT_SECRET'" ;;
 esac
+
+# A key manager registered with the wrong issuer rejects every token, and the
+# only symptom is a 401 on every authenticated call -- so refuse up front.
+if [ -n "$PUBLIC_ORIGIN" ]; then
+  case "$WSO2_KC_ISSUER" in
+    "$PUBLIC_ORIGIN/realms/"*) ;;
+    *) die "WSO2_KC_ISSUER=$WSO2_KC_ISSUER, but Keycloak issues tokens as $PUBLIC_ORIGIN (KC_HOSTNAME)" ;;
+  esac
+fi
 
 API_NAME="ApexTickAPI"
 API_CONTEXT="api"   # no leading slash: Git Bash would rewrite it as a path
@@ -130,6 +152,7 @@ api() { "${CURL[@]}" "${AUTH[@]}" "$@"; }
 step "Registering Keycloak as a key manager"
 # Lets the gateway accept the very same access tokens the SPA already holds,
 # instead of issuing a second set of credentials nobody else understands.
+info "issuer $WSO2_KC_ISSUER"
 KM_EXISTS=$(api "$WSO2_HOST/api/am/admin/v4/key-managers" \
   | python3 -c "import json,sys;d=json.load(sys.stdin);print(next((k['id'] for k in d.get('list',[]) if k.get('name')=='Keycloak'),''))" 2>/dev/null || true)
 
@@ -366,5 +389,5 @@ else
   info "skipped -- LOADTEST_CLIENT_SECRET is not set, so load-test tokens will get 403/900908 here"
 fi
 
-printf '\n\033[32mDone.\033[0m Gateway: http://localhost:8280/%s  ·  Publisher: %s/publisher\n' "$API_CONTEXT" "$WSO2_HOST"
+printf '\n\033[32mDone.\033[0m Gateway: %s  ·  Publisher: %s/publisher\n' "$GATEWAY_URL" "$WSO2_HOST"
 printf 'Verify with: scripts/wso2/smoke-test.sh\n'

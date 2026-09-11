@@ -10,19 +10,23 @@
 # Required (from the environment, or else the repo's .env) -- the token comes
 # from the password grant on the confidential apextick-loadtest client:
 #   LOADTEST_USER, LOADTEST_PASSWORD, LOADTEST_CLIENT_SECRET
+#
+# Where it points: GATEWAY and KEYCLOAK when set; otherwise the public origin
+# when Keycloak runs with a KC_HOSTNAME (production: https://$SERVER_IP.nip.io,
+# with /api through Caddy to the gateway), else the local published ports.
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-ENV_FILE="$ROOT/.env"
-if [ -f "$ENV_FILE" ]; then
-  from_env() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -n1 | tr -d '\r"'; }
-  : "${LOADTEST_USER:=$(from_env LOADTEST_USER)}"
-  : "${LOADTEST_PASSWORD:=$(from_env LOADTEST_PASSWORD)}"
-  : "${LOADTEST_CLIENT_SECRET:=$(from_env LOADTEST_CLIENT_SECRET)}"
-fi
+. "$(dirname "$0")/env.sh"
+env_default LOADTEST_USER LOADTEST_PASSWORD LOADTEST_CLIENT_SECRET SERVER_IP
+resolve_public_origin
 
-GATEWAY="${GATEWAY:-http://localhost:8280/api}"
-KEYCLOAK="${KEYCLOAK:-http://localhost:8180}"
+if [ -n "$PUBLIC_ORIGIN" ]; then
+  GATEWAY="${GATEWAY:-$PUBLIC_ORIGIN/api}"
+  KEYCLOAK="${KEYCLOAK:-$PUBLIC_ORIGIN}"
+else
+  GATEWAY="${GATEWAY:-http://localhost:8280/api}"
+  KEYCLOAK="${KEYCLOAK:-http://localhost:8180}"
+fi
 REALM="${REALM:-apextick}"
 CLIENT_ID="${CLIENT_ID:-apextick-loadtest}"
 EVENT_SLUG="${EVENT_SLUG:-india-australia-semi-final}"
@@ -50,7 +54,7 @@ except Exception: print('')" 2>/dev/null)
   printf '%s %s' "$code" "$wsocode"
 }
 
-echo "Gateway: $GATEWAY"
+echo "Gateway: $GATEWAY  ·  Keycloak: $KEYCLOAK"
 
 TOKEN=$(curl -s "$KEYCLOAK/realms/$REALM/protocol/openid-connect/token" \
   -d grant_type=password -d "client_id=$CLIENT_ID" \
