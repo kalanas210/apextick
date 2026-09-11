@@ -1,4 +1,9 @@
+# Only Caddy (80/443) faces the internet. The app, API and Keycloak talk over
+# the docker network, and every admin surface binds to loopback on the host,
+# reached through SSH -- which is itself limited to admin_cidr.
 resource "aws_security_group" "ec2" {
+  # The description is left as it was: changing it would make Terraform
+  # replace the whole group instead of updating its rules in place.
   name        = "apextick-ec2-sg"
   description = "SSH plus the public-facing app ports"
   vpc_id      = aws_vpc.main.id
@@ -8,31 +13,7 @@ resource "aws_security_group" "ec2" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "Frontend"
-    from_port   = 3000
-    to_port     = 3000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "Booking API"
-    from_port   = 8081
-    to_port     = 8081
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "Keycloak"
-    from_port   = 8180
-    to_port     = 8180
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [var.admin_cidr]
   }
 
   ingress {
