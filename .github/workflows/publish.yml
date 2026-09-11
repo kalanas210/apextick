@@ -14,10 +14,12 @@ on:
 permissions: {}
 
 concurrency:
-  # Every CI run wakes this workflow, pull requests included. Keying on the
-  # triggering event stops a no-op PR run from a branch called develop (a
-  # fork's, or the develop -> main release PR) cancelling the real publish.
-  group: publish-${{ github.event.workflow_run.event || 'push' }}-${{ github.event.workflow_run.head_branch || github.ref_name }}
+  # Every CI run wakes this workflow, pull requests and red runs included.
+  # Keying on the triggering event and its outcome means only real publishes
+  # of a branch compete: a no-op run for a PR from a branch called develop (a
+  # fork's, or the develop -> main release PR) or for a failed or superseded
+  # CI run can no longer cancel the publish of the last green commit.
+  group: publish-${{ github.event.workflow_run.event || 'push' }}-${{ github.event.workflow_run.conclusion || 'success' }}-${{ github.event.workflow_run.head_branch || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
