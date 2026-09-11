@@ -37,8 +37,8 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       # Client secrets the realm import fills in (keycloak/README.md). The
-      # defaults equal .env.example's, so scripts that read .env still agree
-      # with a Keycloak started without them.
+      # defaults equal .env.example's; scripts/wso2 reads a secret an older
+      # .env lacks from this container's environment, so they still agree.
       WSO2_KM_CLIENT_SECRET: ${WSO2_KM_CLIENT_SECRET:-dev-wso2-km-secret}
       LOADTEST_CLIENT_SECRET: ${LOADTEST_CLIENT_SECRET:-dev-loadtest-secret}
       APP_WEB_URL: ${APP_WEB_URL:-http://localhost:3000}

@@ -177,10 +177,11 @@ this goes through the confidential `apextick-loadtest` client, whose secret is
 
 ```bash
 LOADTEST_CLIENT_SECRET=$(sed -n 's/^LOADTEST_CLIENT_SECRET=//p' .env)
+: "${LOADTEST_CLIENT_SECRET:=dev-loadtest-secret}"   # docker-compose.yml's fallback, for an older .env
 curl -s http://localhost:8180/realms/apextick/protocol/openid-connect/token \
   -d grant_type=password -d client_id=apextick-loadtest \
   -d "client_secret=$LOADTEST_CLIENT_SECRET" \
-  -d username=kalana -d password=12345 | jq -r .access_token
+  -d username=kalana -d password=12345 | jq -er .access_token
 ```
 
 ### 4. (Optional) Run the frontend
@@ -279,6 +280,7 @@ It logs in with the password grant on the confidential `apextick-loadtest` clien
 cd load-test
 export LOADTEST_USER=kalana LOADTEST_PASSWORD=12345
 export LOADTEST_CLIENT_SECRET=$(sed -n 's/^LOADTEST_CLIENT_SECRET=//p' ../.env)
+: "${LOADTEST_CLIENT_SECRET:=dev-loadtest-secret}"   # docker-compose.yml's fallback, for an older .env
 k6 run booking-load-test.js
 # tune anything via env:
 k6 run -e VUS=200 -e ITERATIONS=5000 -e EVENT_SLUG=india-australia-semi-final booking-load-test.js

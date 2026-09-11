@@ -4,7 +4,8 @@
 #   env_default NAME...     fills each unset or empty NAME from the repo's .env.
 #                           Compose reads the same file, so it is what the stack
 #                           was actually started with (scripts/grant-admin.sh
-#                           does the same).
+#                           does the same). A NAME .env lacks falls back to the
+#                           running Keycloak container's environment.
 #   resolve_public_origin   sets PUBLIC_ORIGIN to the origin Keycloak puts in the
 #                           `iss` of every token: KC_HOSTNAME in production
 #                           (docker-compose.prod.yml pins it to
@@ -17,11 +18,24 @@ APEXTICK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APEXTICK_ENV_FILE="$APEXTICK_ROOT/.env"
 
 env_default() {
-  local name value
-  [ -f "$APEXTICK_ENV_FILE" ] || return 0
+  local name value kc_env="" kc_read=""
   for name in "$@"; do
     [ -n "${!name:-}" ] && continue
-    value=$(sed -n "s/^$name=//p" "$APEXTICK_ENV_FILE" | tail -n1 | tr -d '\r"')
+    value=""
+    if [ -f "$APEXTICK_ENV_FILE" ]; then
+      value=$(sed -n "s/^$name=//p" "$APEXTICK_ENV_FILE" | tail -n1 | tr -d '\r"')
+    fi
+    if [ -z "$value" ]; then
+      # A .env written before the variable existed: take what the running
+      # Keycloak was started with instead (compose's own fallback), which is
+      # what its realm actually holds.
+      if [ -z "$kc_read" ]; then
+        kc_env=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' \
+          "${KEYCLOAK_CONTAINER:-apextick-keycloak}" 2>/dev/null || true)
+        kc_read=1
+      fi
+      value=$(printf '%s\n' "$kc_env" | sed -n "s/^$name=//p" | tail -n1 | tr -d '\r')
+    fi
     printf -v "$name" '%s' "$value"
   done
 }
