@@ -13,7 +13,7 @@ export default function ForgotPasswordPage() {
     <AuthShell
       kicker="Forgot password"
       title="Reset your password"
-      subtitle="Enter your email and we will send a link to set a new one."
+      subtitle='On our secure sign-in page, choose "Forgot password?" and we will email you a link to set a new one.'
       image={IMG.playerTunnel}
       alt="A player tunnel opening toward the pitch"
       quote="Happens to everyone. Let us get you back in."

@@ -59,8 +59,8 @@ export function AuthShell({
         </div>
 
         <p className="text-center text-[0.7rem] leading-relaxed text-faint">
-          A demonstration experience. No real account is created and no data is
-          stored.
+          Accounts are created and stored by our Keycloak sign-in service. This
+          is a demonstration site: checkout runs in test mode.
         </p>
       </div>
 

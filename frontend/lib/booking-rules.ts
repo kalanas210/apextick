@@ -11,6 +11,9 @@ export const BOOKING_FEE_PERCENT = 5;
 /** app.hold.max-seats (APP_HOLD_MAX_SEATS). */
 export const MAX_SEATS_PER_ORDER = 8;
 
+/** app.hold.duration (APP_HOLD_DURATION, PT5M). Checkout ends when the hold does. */
+export const HOLD_MINUTES = 5;
+
 export interface OrderQuote {
   subtotal: number;
   fee: number;

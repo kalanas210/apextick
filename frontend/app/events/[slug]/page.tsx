@@ -10,6 +10,7 @@ import {
 } from "@/data/events";
 import { unsplash } from "@/data/images";
 import { formatDate, formatPrice } from "@/lib/format";
+import { HOLD_MINUTES } from "@/lib/booking-rules";
 import { ParallaxImage } from "@/components/ui/parallax-image";
 import { Reveal } from "@/components/ui/motion";
 import { Button } from "@/components/ui/button";
@@ -209,8 +210,8 @@ export default async function FixtureDetailPage({
                     <Pin className="h-4 w-4 text-bone/50" /> {fixture.stadium}
                   </li>
                   <li className="flex items-center gap-2.5">
-                    <Clock className="h-4 w-4 text-bone/50" /> Seats held 7
-                    minutes at checkout
+                    <Clock className="h-4 w-4 text-bone/50" /> Seats held{" "}
+                    {HOLD_MINUTES} minutes at checkout
                   </li>
                   <li className="flex items-center gap-2.5">
                     <ArrowUpRight className="h-4 w-4 text-bone/50" /> Instant
@@ -229,7 +230,8 @@ export default async function FixtureDetailPage({
                   </Button>
                 </div>
                 <p className="mt-4 text-center text-[0.72rem] text-faint">
-                  A demonstration checkout. No payment is taken.
+                  Checkout runs in test mode. Pay with a test card; no real
+                  money is charged.
                 </p>
               </div>
             </Reveal>
