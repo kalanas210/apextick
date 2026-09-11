@@ -119,8 +119,8 @@ There are no `synchronized` blocks, no application-level mutexes, and no distrib
 - **Event-driven decoupling** — the booking service writes to a **transactional outbox** and publishes to a RabbitMQ topic exchange after commit; the notification service consumes independently, idempotently, with a dead-letter queue for poison messages.
 - **PCI-conscious payments** — the Stripe adapter never sees a raw card number: it creates a PaymentIntent and returns a `client_secret` for the browser to confirm, treating the signed `payment_intent.succeeded` webhook as the source of truth. Webhooks are idempotent, and a charge that lands after its seats were lost is automatically refunded.
 - **Stateless JWT security** — Keycloak issues OIDC tokens the API validates statelessly; roles map from `realm_access.roles` to `ROLE_*`. Auth keeps working containerized by fetching signing keys over the internal network while validating the public issuer.
-- **One-command infrastructure** — the whole backend, its dependencies, the Keycloak realm, and an optional observability stack start with `docker compose up`. Every secret is externalized to a git-ignored `.env`.
-- **Verified** — 71 tests, most of them full-stack **Testcontainers** integration tests covering concurrency, expiry, the outbox, orders, payments, webhooks, admin, security and rate-limiting.
+- **One-command infrastructure** — the whole backend, its dependencies, the Keycloak realm, and an optional observability stack start with `docker compose up`. Every secret, including the realm's client secrets, comes from a git-ignored `.env`, and the production stack refuses to start while any credential is unset.
+- **Verified** — 80 booking-service tests, most of them full-stack **Testcontainers** integration tests covering concurrency, expiry, the outbox, orders, payments, webhooks, admin, security and rate-limiting; GreenMail tests for the notification service's SMTP path (including authenticated STARTTLS); Vitest unit tests for the frontend's money and status helpers. CI also fails when the gateway's OpenAPI contract drifts from the code.
 
 ## Tech stack
 
@@ -289,11 +289,12 @@ After the run, `teardown` reads the seat map back and asserts every targeted sea
 ## Testing
 
 ```bash
-cd booking-service
-./mvnw verify   # needs Docker for Testcontainers
+(cd booking-service && ./mvnw verify)        # needs Docker for Testcontainers
+(cd notification-service && ./mvnw verify)
+(cd frontend && npm ci --ignore-scripts && npm test)
 ```
 
-71 tests run, most of them full-stack Testcontainers integration tests: seat concurrency (1 winner / 199 losers), multi-seat all-or-nothing holds, Redis-driven expiry, the hold sweeper, the transactional outbox, the order/payment flow, Stripe signature verification and mapping, seats-lost compensation, the admin API, security, and rate limiting.
+booking-service runs 80 tests, most of them full-stack Testcontainers integration tests: seat concurrency (1 winner / 199 losers), multi-seat all-or-nothing holds, Redis-driven expiry, the hold sweeper, the transactional outbox, the order/payment flow, Stripe signature verification and mapping, seats-lost compensation, the admin API, security, and rate limiting. Its verify also exports the served OpenAPI document to `target/openapi/api-docs.json`, which CI normalises and compares with the committed gateway contract. notification-service runs 8 (GreenMail, including an authenticated SMTP server and one that refuses STARTTLS); the frontend runs 42 Vitest unit tests.
 
 ## Project structure
 
@@ -336,15 +337,36 @@ CI builds the three service images and pushes them to GHCR once the test run for
 that commit is green; the production stack pulls those tags.
 
 ```bash
-cp .env.example .env            # set SERVER_IP, passwords, Stripe keys
+cp .env.example .env            # set SERVER_IP, every credential, Stripe keys
 docker compose -f docker-compose.prod.yml up -d
 ```
+
+The production file has no fallback for any credential: it refuses to start
+until `.env` sets the database, RabbitMQ, Keycloak admin, MinIO, WSO2 and
+Grafana passwords and the two realm client secrets (`WSO2_KM_CLIENT_SECRET`,
+`LOADTEST_CLIENT_SECRET`). The check only catches a missing value, so replace
+every `changeme`/`dev-*` value with `openssl rand -hex 32`.
 
 Caddy is the only thing published (80/443). It terminates TLS with an
 automatically-provisioned certificate for `https://<SERVER_IP>.nip.io` and routes
 by path — `/api` to the WSO2 gateway (which then reaches the booking service),
-`/realms` to Keycloak, everything else to the frontend — so the app, API and
-Keycloak ports stay closed at the security group.
+the apextick realm's `/realms`, `/resources` and `/js` to Keycloak, everything
+else (including the `/admin` panel) to the frontend. The security group in
+`infra/` opens only 80/443 to the world and SSH to `admin_cidr`, a required
+Terraform variable:
+
+```bash
+cd infra && terraform apply -var admin_cidr=<your-ip>/32
+```
+
+Keycloak's own admin console is not published. Reach it over an SSH tunnel to
+its loopback-only port (`ssh -L 8180:localhost:8180 ubuntu@<host>`) after the
+one-time `kcadm` step described next to the keycloak service in
+`docker-compose.prod.yml`. Keycloak only imports `keycloak/import/` into an
+empty database, so a realm that already exists is brought up to date through
+the Admin API instead — `keycloak/README.md` has the tested block. Production
+Keycloak still runs `start-dev` with its data inside the container: recreating
+it (which any change to its environment does) drops self-registered users.
 
 Prometheus and Grafana are an opt-in profile bound to loopback:
 
