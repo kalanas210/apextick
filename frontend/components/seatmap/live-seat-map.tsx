@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatPrice } from "@/lib/format";
+import { MAX_SEATS_PER_ORDER, quoteOrder } from "@/lib/booking-rules";
 import { apiErrorCode, apiErrorMessage } from "@/lib/api";
 import { useSeatUpdates, type SeatStatusChange } from "@/lib/realtime";
 import { cn } from "@/lib/cn";
@@ -18,8 +19,6 @@ import { useSession } from "@/hooks/useSession";
 import type { EventDetail, Seat as ApiSeat } from "@/lib/types";
 import { Legend, Pitch, Stand, mmss, type MapSeat } from "./parts";
 import { Clock } from "@/components/ui/icons";
-
-const MAX_SEATS = 8;
 
 interface MapSection {
   sectionId: number;
@@ -159,9 +158,8 @@ export function LiveSeatMap({
     .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
 
   const currency = event?.currency ?? "USD";
-  const subtotal = selectedSeats.reduce((sum, s) => sum + s.price, 0);
-  const fee = Math.round(subtotal * 0.05);
-  const total = subtotal + fee;
+  // priced exactly as the order will be, so checkout shows the same total
+  const { subtotal, fee, total } = quoteOrder(selectedSeats.map((s) => s.price));
 
   const secondsLeft = heldUntil
     ? Math.max(0, Math.floor((new Date(heldUntil).getTime() - now) / 1000))
@@ -170,8 +168,8 @@ export function LiveSeatMap({
   const toggle = (id: string) => {
     const seat = byId.get(id);
     if (!seat || seat.state !== "available") return;
-    if (!selected.includes(id) && selected.length >= MAX_SEATS) {
-      setNotice(`That is the ${MAX_SEATS} seat limit for a single order.`);
+    if (!selected.includes(id) && selected.length >= MAX_SEATS_PER_ORDER) {
+      setNotice(`That is the ${MAX_SEATS_PER_ORDER} seat limit for a single order.`);
       return;
     }
     setNotice(null);
