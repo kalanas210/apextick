@@ -335,20 +335,65 @@ info "update returned $CODE"
 
 # --------------------------------------------------------------------------
 step "Deploying a revision to the gateway"
-REV=$(api -H 'Content-Type: application/json' \
-  -d '{"description":"configured by scripts/wso2/setup.sh"}' \
-  "$WSO2_HOST/api/am/publisher/v4/apis/$API_ID/revisions" \
-  | python3 -c "import json,sys;print(json.load(sys.stdin).get('id',''))" 2>/dev/null || true)
+# Only a revision ever reaches the gateway: the definition and policies above
+# change the Publisher's working copy, and none of it is served until a
+# snapshot of it is deployed. So from here on a failure is fatal -- reporting
+# success would leave the gateway on the previous contract with nobody told.
+#
+# WSO2 caps the revisions one API may hold (five by default) and never discards
+# any itself, while every run of this script adds one -- and in production the
+# database lives on a volume, so they outlast the container. At the cap a create
+# is refused with code 900351; on exactly that refusal the oldest undeployed
+# revision is deleted and the create retried. A deployed revision is never
+# deleted (WSO2 refuses to anyway): the one the gateway serves stays until the
+# new one replaces it, and the newer undeployed ones remain as rollback points.
+REVISIONS_URL="$WSO2_HOST/api/am/publisher/v4/apis/$API_ID/revisions"
 
-if [ -n "$REV" ]; then
-  CODE=$(api -H 'Content-Type: application/json' \
-    -d '[{"name":"Default","vhost":"localhost","displayOnDevportal":true}]' \
-    -o /dev/null -w '%{http_code}' \
-    "$WSO2_HOST/api/am/publisher/v4/apis/$API_ID/deploy-revision?revisionId=$REV")
-  info "revision $REV deployed ($CODE)"
-else
-  info "no new revision created (the API may already be at the revision limit)"
-fi
+# Sets REV to the new revision's id, or leaves it empty and sets REV_CODE and
+# REV_BODY to what WSO2 answered instead.
+create_revision() {
+  local result
+  result=$(api -H 'Content-Type: application/json' \
+    -d '{"description":"configured by scripts/wso2/setup.sh"}' \
+    -w '\n%{http_code}' "$REVISIONS_URL" || true)
+  REV_CODE=$(printf '%s' "$result" | tail -1)
+  REV_BODY=$(printf '%s' "$result" | sed '$d')
+  REV=""
+  if [ "$REV_CODE" = "201" ]; then
+    REV=$(printf '%s' "$REV_BODY" | python3 -c "import json,sys;print(json.load(sys.stdin).get('id',''))" 2>/dev/null || true)
+  fi
+}
+
+at_revision_limit() {
+  [ "$(printf '%s' "$REV_BODY" | python3 -c "import json,sys;print(json.load(sys.stdin).get('code',''))" 2>/dev/null || true)" = "900351" ]
+}
+
+create_revision
+while [ -z "$REV" ] && at_revision_limit; do
+  # deployed:false filters server-side; deploymentInfo is checked again so a
+  # query WSO2 ignored could still never hand back a deployed revision.
+  OLDEST=$(api "$REVISIONS_URL?query=deployed:false" | python3 -c "import json,sys
+revs = [r for r in json.load(sys.stdin).get('list', []) if not r.get('deploymentInfo')]
+print(min(revs, key=lambda r: int(r.get('createdTime') or 0))['id'] if revs else '')") \
+    || die "could not list the undeployed revisions of $API_ID"
+  [ -n "$OLDEST" ] \
+    || die "$API_ID is at WSO2's revision limit and every revision is deployed -- undeploy one in the Publisher, then re-run"
+  CODE=$(api -X DELETE -o /dev/null -w '%{http_code}' "$REVISIONS_URL/$OLDEST" || true)
+  [ "$CODE" = "200" ] || die "deleting stale revision $OLDEST of $API_ID returned $CODE"
+  info "at the revision limit -- deleted the oldest undeployed revision ($OLDEST)"
+  create_revision
+done
+[ -n "$REV" ] \
+  || die "creating a revision of $API_ID returned $REV_CODE, so the gateway still serves the previous one: $(printf '%s' "$REV_BODY" | head -c 400)"
+info "revision $REV created"
+
+DEPLOY=$(api -H 'Content-Type: application/json' \
+  -d '[{"name":"Default","vhost":"localhost","displayOnDevportal":true}]' \
+  -w '\n%{http_code}' "$WSO2_HOST/api/am/publisher/v4/apis/$API_ID/deploy-revision?revisionId=$REV" || true)
+CODE=$(printf '%s' "$DEPLOY" | tail -1)
+[ "$CODE" = "201" ] \
+  || die "deploying revision $REV returned $CODE, so the gateway still serves the previous one: $(printf '%s' "$DEPLOY" | sed '$d' | head -c 400)"
+info "revision $REV deployed to the Default gateway"
 
 # --------------------------------------------------------------------------
 step "Publishing"

@@ -100,6 +100,14 @@ The portals are **never published in production** — only loopback
    with the committed one, so a regenerated contract takes effect on the next
    run.
 5. **A revision deployed to the gateway** and the API moved to `PUBLISHED`.
+   Every run deploys a fresh revision — only a revision reaches the gateway,
+   so that is how a changed definition takes effect. WSO2 caps an API at five
+   revisions by default and never discards one itself (in production they
+   persist on the database volume), so when a create is refused at the cap,
+   `setup.sh` deletes the oldest *undeployed* revision and retries; the
+   deployed one and the newer rollback points stay. If a revision still can't
+   be created or deployed, the script stops with an error instead of reporting
+   success on a gateway that is still serving the previous contract.
 6. **A DevPortal application** subscribed to the API.
 7. **The SPA's Keycloak client (`apextick-web`) mapped onto that application**
    (`POST /applications/{id}/map-keys`) — a bring-your-own-key mapping, since
