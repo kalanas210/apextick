@@ -3,16 +3,63 @@
  * zone so server and client render byte-identical strings (no hydration drift).
  */
 
-export function formatPrice(
-  value: number,
-  currency: "INR" | "GBP" | "USD",
-): string {
-  const config = {
-    INR: { locale: "en-IN", symbol: "₹" },
-    GBP: { locale: "en-GB", symbol: "£" },
-    USD: { locale: "en-US", symbol: "$" },
-  }[currency];
-  return config.symbol + value.toLocaleString(config.locale);
+/**
+ * The market each currency is normally shown to, so the symbol and digit
+ * grouping read naturally (₹1,25,000, not ₹125,000). Any other currency still
+ * formats, with en-GB grouping.
+ */
+const CURRENCY_LOCALE: Record<string, string> = {
+  INR: "en-IN",
+  GBP: "en-GB",
+  USD: "en-US",
+  EUR: "en-IE",
+  LKR: "en-LK",
+};
+
+const currencyFormats = new Map<string, Intl.NumberFormat | null>();
+
+/** Null when `code` is not shaped like an ISO 4217 code, which Intl rejects. */
+function currencyFormat(code: string, whole = false): Intl.NumberFormat | null {
+  const key = `${code}|${whole}`;
+  let format = currencyFormats.get(key);
+  if (format === undefined) {
+    try {
+      format = new Intl.NumberFormat(CURRENCY_LOCALE[code] ?? "en-GB", {
+        style: "currency",
+        currency: code,
+        currencyDisplay: "narrowSymbol",
+        ...(whole && { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
+      });
+    } catch {
+      format = null;
+    }
+    currencyFormats.set(key, format);
+  }
+  return format;
+}
+
+/**
+ * A price in its currency's minor units: £57.75 and £5.50 (never £5.5), ¥1,200.
+ * A whole amount drops the decimals (£55), so catalogue prices stay clean. An
+ * unrecognised but well-formed code formats as "XYZ 5.50", and a malformed one
+ * falls back to the code and the number rather than throwing.
+ */
+export function formatPrice(value: number, currency: string | null | undefined): string {
+  const code = (currency ?? "").trim().toUpperCase();
+  const format = currencyFormat(code);
+  // 2 for most currencies, 0 for JPY, 3 for BHD
+  const digits = format?.resolvedOptions().maximumFractionDigits ?? 2;
+  const scale = 10 ** digits;
+  const whole = Math.round(value * scale) % scale === 0;
+
+  if (!format) {
+    const amount = new Intl.NumberFormat("en-GB", {
+      minimumFractionDigits: whole ? 0 : digits,
+      maximumFractionDigits: whole ? 0 : digits,
+    }).format(value);
+    return code ? `${code} ${amount}` : amount;
+  }
+  return whole ? currencyFormat(code, true)!.format(value) : format.format(value);
 }
 
 export interface DateParts {

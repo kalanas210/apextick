@@ -1,5 +1,61 @@
 import { describe, expect, it } from "vitest";
-import { formatDate, formatInstant, relativeTime, slugify, statusLabel } from "./format";
+import {
+  formatDate,
+  formatInstant,
+  formatPrice,
+  relativeTime,
+  slugify,
+  statusLabel,
+} from "./format";
+
+/** Intl separates a code from the amount with a no-break space. */
+const plain = (s: string) => s.replace(/ /g, " ");
+
+describe("formatPrice", () => {
+  it("keeps whole amounts free of decimals", () => {
+    expect(formatPrice(55, "GBP")).toBe("£55");
+    expect(formatPrice(1500, "USD")).toBe("$1,500");
+  });
+
+  it("shows every minor digit once there are pence", () => {
+    expect(formatPrice(5.5, "GBP")).toBe("£5.50");
+    expect(formatPrice(115.5, "GBP")).toBe("£115.50");
+    expect(formatPrice(57.75, "GBP")).toBe("£57.75");
+    expect(formatPrice(2.75, "USD")).toBe("$2.75");
+  });
+
+  it("groups digits the way each market reads them", () => {
+    expect(formatPrice(125000, "INR")).toBe("₹1,25,000");
+    expect(formatPrice(1234.5, "INR")).toBe("₹1,234.50");
+  });
+
+  it("formats currencies beyond the three the catalogue uses", () => {
+    expect(formatPrice(12.5, "EUR")).toBe("€12.50");
+    expect(plain(formatPrice(1500.5, "LKR"))).toBe("Rs 1,500.50");
+  });
+
+  it("uses the currency's own minor units", () => {
+    expect(formatPrice(1200, "JPY")).toBe("¥1,200");
+    expect(formatPrice(1200.4, "JPY")).toBe("¥1,200");
+    expect(plain(formatPrice(5.5, "BHD"))).toBe("BHD 5.500");
+  });
+
+  it("is not fooled by floating-point noise", () => {
+    expect(formatPrice(0.1 + 0.2, "GBP")).toBe("£0.30");
+    expect(formatPrice(110.00000000001, "GBP")).toBe("£110");
+  });
+
+  it("accepts a lower-case code", () => {
+    expect(formatPrice(5.5, "gbp")).toBe("£5.50");
+  });
+
+  it("never throws on a currency it cannot place", () => {
+    expect(plain(formatPrice(5.5, "XYZ"))).toBe("XYZ 5.50");
+    expect(formatPrice(5.5, "EURO")).toBe("EURO 5.50");
+    expect(formatPrice(5.5, "")).toBe("5.50");
+    expect(formatPrice(40, null)).toBe("40");
+  });
+});
 
 describe("formatDate", () => {
   it("splits a calendar date into display parts", () => {
