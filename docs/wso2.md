@@ -204,8 +204,9 @@ production, and with Stripe enabled paid orders never confirm.
 (it ignores the standard `security: []`, which is set as well). The list is one
 commented table in that script, mirroring `SecurityConfig`; a rule that stops
 matching any operation fails the script rather than silently dropping out.
-`GET /events/{idOrSlug}/holds/me` is deliberately left protected: the service's
-`/api/events/**` glob covers it, but it answers for the caller.
+`GET /events/{idOrSlug}/holds/me` is deliberately left protected: it answers for
+the caller, and `SecurityConfig` requires a token for it ahead of the public
+`/api/events/**` glob.
 `smoke-test.sh` checks both sides: an anonymous catalogue read gets `200`, and
 a badly-signed webhook gets booking-service's own `400`, not the gateway's
 `401`.

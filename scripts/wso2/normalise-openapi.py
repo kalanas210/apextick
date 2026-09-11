@@ -34,9 +34,9 @@ ANONYMOUS = [
     ("POST", "/payments/stripe/webhook"),  # POST /api/payments/stripe/webhook
 ]
 
-# ...minus the operations those globs happen to cover that still answer for
-# the caller. SecurityConfig lets them through anonymously, but without a user
-# they have nothing to return, so the gateway keeps asking for a token.
+# ...minus the operations those globs happen to cover that answer for the
+# caller. SecurityConfig lists these as authenticated() ahead of its permitAll
+# globs, so the gateway keeps asking for a token too.
 AUTHENTICATED = [
     ("GET", "/events/*/holds/me"),
 ]
