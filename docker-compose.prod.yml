@@ -56,11 +56,12 @@ services:
       # The admin console is not published through Caddy. It is served on the
       # loopback-only port below and reached over an SSH tunnel, like the WSO2
       # portals:  ssh -L 8180:localhost:8180 ubuntu@<host>
-      # then open http://localhost:8180/admin/. Its login runs in the master
-      # realm, whose pages would otherwise post back to the public hostname
-      # (where Caddy closes that realm), so point the master realm at the
-      # tunnel as well. start-dev keeps Keycloak's data inside the container,
-      # so repeat this whenever the container is recreated:
+      # (stop the local dev stack first: it also listens on 8180, and ssh only
+      # warns when it can't bind), then open http://localhost:8180/admin/.
+      # Its login runs in the master realm, whose pages would otherwise post
+      # back to the public hostname (where Caddy closes that realm), so point
+      # the master realm at the tunnel as well. start-dev keeps Keycloak's data
+      # inside the container, so repeat this whenever it is recreated:
       #   docker exec -it apextick-keycloak /opt/keycloak/bin/kcadm.sh config credentials --config /tmp/kcadm.config --server http://localhost:8080 --realm master --user <KEYCLOAK_ADMIN>
       #   docker exec apextick-keycloak /opt/keycloak/bin/kcadm.sh update realms/master --config /tmp/kcadm.config -s attributes.frontendUrl=http://localhost:8180
       KC_HOSTNAME_ADMIN: http://localhost:8180
@@ -248,7 +249,7 @@ services:
   #   docker compose -f docker-compose.prod.yml --profile observability up -d
   # Bound to loopback only — reach them over an SSH tunnel rather than the
   # public interface, e.g.
-  #   ssh -L 3001:localhost:3001 -L 9090:localhost:9090 ec2-user@<host>
+  #   ssh -L 3001:localhost:3001 -L 9090:localhost:9090 ubuntu@<host>
   prometheus:
     image: prom/prometheus:v2.55.1
     container_name: apextick-prometheus
