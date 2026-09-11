@@ -14,6 +14,8 @@ of git. The compose files pass these through from `.env`.
 | Placeholder | Used for | Default in the realm |
 | --- | --- | --- |
 | `WSO2_KM_CLIENT_SECRET` | secret of `apextick-wso2-km`, the service account WSO2 uses to read and manage clients | none -- required |
+| `APP_WEB_URL` | the deployed frontend's origin, allowed as an `apextick-web` redirect URI (prod: `https://<SERVER_IP>.nip.io`) | `http://localhost:3000` |
+| `DEMO_USER_EMAIL` | the seeded `kalana` account's address | `kalana@apextick.local` |
 | `SMTP_*` | outgoing mail | the bundled Mailpit |
 
 A placeholder with no default that is **not** set is not an error: Keycloak
@@ -23,6 +25,26 @@ imports the literal text (the client secret becomes the string
 `scripts/wso2/setup.sh` refuses to use a value that looks like a placeholder.
 
 Generate a secret with `openssl rand -hex 32`.
+
+## Hardening
+
+- `sslRequired: external` -- plain HTTP is accepted only from localhost and
+  private addresses (local dev, the docker network, Caddy with
+  `KC_PROXY_HEADERS`); a public client has to use HTTPS.
+- Brute-force detection: 10 failures lock an account out for a minute, growing
+  to at most 15 minutes. Temporary on purpose, so a stranger can't permanently
+  lock the published demo account.
+- Password policy: 8 to 128 characters, not the username or email. It applies
+  to every password set after import -- registration, reset, the Admin API.
+
+The demo account's published password (`12345`, advertised on the sign-in
+page) is shorter than that policy allows. Keycloak checks a plaintext seed
+`value` against the policy too and would abort the whole import
+(`invalidPasswordMinLengthMessage`), so it is seeded pre-hashed instead
+(`secretData`/`credentialData`, the same shape a realm export produces), which
+the policy has nothing to check against. Keycloak re-hashes it with the current
+default algorithm at the first login. To regenerate it: PBKDF2WithHmacSHA512,
+210000 iterations, a 16-byte random salt, a 512-bit key, both base64-encoded.
 
 ### Rotating a secret on a realm that already exists
 

@@ -1,7 +1,16 @@
 {
   "realm": "apextick",
   "enabled": true,
-  "sslRequired": "none",
+  "sslRequired": "external",
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 10,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "maxDeltaTimeSeconds": 43200,
+  "quickLoginCheckMilliSeconds": 1000,
+  "minimumQuickLoginWaitSeconds": 60,
+  "passwordPolicy": "length(8) and maxLength(128) and notUsername and notEmail",
   "clients": [
     {
       "clientId": "apextick-web",
@@ -14,8 +23,7 @@
         "http://localhost:3000/*",
         "http://localhost:3005/*",
         "http://host.docker.internal:3000/*",
-        "http://54.255.121.222:3000/*",
-        "https://54.255.121.222.nip.io/*"
+        "${APP_WEB_URL:http://localhost:3000}/*"
       ],
       "webOrigins": [
         "+"
@@ -327,12 +335,14 @@
       "enabled": true,
       "firstName": "Kalana",
       "lastName": "Sandakelum",
-      "email": "kalanasandakelum210@gmail.com",
+      "email": "${DEMO_USER_EMAIL:kalana@apextick.local}",
       "emailVerified": true,
       "credentials": [
         {
           "type": "password",
-          "value": "12345",
+          "userLabel": "Seeded demo password",
+          "secretData": "{\"value\":\"V9nYytr6CKUxs24kMwwL3XERsJSWFU5NfSR42BN2Yr+WgOFnZouMb4jOGWDSqL5nR6jcs5LIhw8uDTz71Wsbow==\",\"salt\":\"nxzM7TWfhyydqVO8CTiF1A==\",\"additionalParameters\":{}}",
+          "credentialData": "{\"hashIterations\":210000,\"algorithm\":\"pbkdf2-sha512\",\"additionalParameters\":{}}",
           "temporary": false
         }
       ],
