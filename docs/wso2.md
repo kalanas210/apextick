@@ -73,7 +73,7 @@ LOADTEST_USER=kalana LOADTEST_PASSWORD=12345 scripts/wso2/smoke-test.sh
 | --- | --- | --- |
 | Gateway (http) | http://localhost:8280/api | what clients call |
 | Gateway (https) | https://localhost:8243/api | self-signed certificate |
-| Publisher | https://localhost:9443/publisher | `admin` / `admin` locally |
+| Publisher | https://localhost:9443/publisher | `admin` / `WSO2_ADMIN_PASSWORD` from `.env` (`admin` if unset) |
 | DevPortal | https://localhost:9443/devportal | subscriptions, try-it console |
 | Admin | https://localhost:9443/admin | key managers, throttling policies |
 
@@ -147,8 +147,17 @@ override everything.
 directly unless told otherwise:
 
 ```bash
-NEXT_PUBLIC_API_URL=http://localhost:8280/api npm run dev
+NEXT_PUBLIC_API_URL=http://localhost:8280 npm run dev
 ```
+
+No `/api` on the end: `NEXT_PUBLIC_API_URL` is the origin every call is
+relative to, and the calls already start with `/api` — which is exactly the
+gateway's context. With `.../api` there, requests go to `/api/api/...`, which
+no gateway resource matches. The same variable also builds the live seat map's
+WebSocket URL (`/api/ws`), and the gateway carries no WebSocket API, so seat
+flips stop arriving live in this mode; the REST calls, holds and checkout are
+unaffected. (Production is unaffected too: there Caddy sends `/api/ws` straight
+to `booking-service`.)
 
 `setup.sh`'s defaults (issuer `http://localhost:8180/realms/apextick`,
 matching `apextick-web`'s existing redirect URI and booking-service's own
