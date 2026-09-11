@@ -141,11 +141,19 @@ public class StripePaymentGateway implements PaymentGateway {
         if (signature == null || signature.isBlank()) {
             throw new WebhookVerificationException("Missing Stripe-Signature header");
         }
+        // constructEvent parses the body before it checks the signature, so an
+        // unsigned non-JSON body would surface as a parse error (500); verify first.
+        try {
+            Webhook.Signature.verifyHeader(req.rawBody(), signature, webhookSecret, Webhook.DEFAULT_TOLERANCE);
+        } catch (SignatureVerificationException e) {
+            throw new WebhookVerificationException("Invalid Stripe signature");
+        } catch (RuntimeException e) {
+            // stripe-java parses the header without guarding it: "t" or "t=1,v1" throw
+            // ArrayIndexOutOfBounds, "t=abc" NumberFormat
+            throw new WebhookVerificationException("Malformed Stripe-Signature header");
+        }
         Event event;
         try {
-            // constructEvent parses the body before it checks the signature, so an
-            // unsigned non-JSON body would surface as a parse error (500); verify first.
-            Webhook.Signature.verifyHeader(req.rawBody(), signature, webhookSecret, Webhook.DEFAULT_TOLERANCE);
             event = Webhook.constructEvent(req.rawBody(), signature, webhookSecret);
         } catch (SignatureVerificationException e) {
             throw new WebhookVerificationException("Invalid Stripe signature");
