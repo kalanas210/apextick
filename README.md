@@ -120,7 +120,7 @@ There are no `synchronized` blocks, no application-level mutexes, and no distrib
 - **PCI-conscious payments** — the Stripe adapter never sees a raw card number: it creates a PaymentIntent and returns a `client_secret` for the browser to confirm, treating the signed `payment_intent.succeeded` webhook as the source of truth. Webhooks are idempotent, and a charge that lands after its seats were lost is automatically refunded.
 - **Stateless JWT security** — Keycloak issues OIDC tokens the API validates statelessly; roles map from `realm_access.roles` to `ROLE_*`. Auth keeps working containerized by fetching signing keys over the internal network while validating the public issuer.
 - **One-command infrastructure** — the whole backend, its dependencies, the Keycloak realm, and an optional observability stack start with `docker compose up`. Every secret, including the realm's client secrets, comes from a git-ignored `.env`, and the production stack refuses to start while any credential is unset.
-- **Verified** — 80 booking-service tests, most of them full-stack **Testcontainers** integration tests covering concurrency, expiry, the outbox, orders, payments, webhooks, admin, security and rate-limiting; GreenMail tests for the notification service's SMTP path (an authenticated login, and refusing a server that doesn't offer STARTTLS); Vitest unit tests for the frontend's money and status helpers. CI also fails when the gateway's OpenAPI contract drifts from the code.
+- **Verified** — 86 booking-service tests, most of them full-stack **Testcontainers** integration tests covering concurrency, expiry, the outbox, orders, payments, webhooks, admin, security and rate-limiting; GreenMail tests for the notification service's SMTP path (an authenticated login, and refusing a server that doesn't offer STARTTLS); Vitest unit tests for the frontend's money and status helpers. CI also fails when the gateway's OpenAPI contract drifts from the code.
 
 ## Tech stack
 
@@ -296,7 +296,7 @@ After the run, `teardown` reads the seat map back and asserts every targeted sea
 (cd frontend && npm ci --ignore-scripts && npm test)
 ```
 
-booking-service runs 80 tests, most of them full-stack Testcontainers integration tests: seat concurrency (1 winner / 199 losers), multi-seat all-or-nothing holds, Redis-driven expiry, the hold sweeper, the transactional outbox, the order/payment flow, Stripe signature verification and mapping, seats-lost compensation, the admin API, security, and rate limiting. Its verify also exports the served OpenAPI document to `target/openapi/api-docs.json`, which CI normalises and compares with the committed gateway contract. notification-service runs 8 (GreenMail, including an authenticated SMTP server and one that refuses STARTTLS); the frontend runs 42 Vitest unit tests.
+booking-service runs 86 tests, most of them full-stack Testcontainers integration tests: seat concurrency (1 winner / 199 losers), multi-seat all-or-nothing holds, Redis-driven expiry, the hold sweeper, the transactional outbox, the order/payment flow, Stripe signature verification and mapping, seats-lost compensation, the admin API, security, and rate limiting. Its verify also exports the served OpenAPI document to `target/openapi/api-docs.json`, which CI normalises and compares with the committed gateway contract. notification-service runs 8 (GreenMail, including an authenticated SMTP server and one that refuses STARTTLS); the frontend runs 42 Vitest unit tests.
 
 ## Project structure
 
