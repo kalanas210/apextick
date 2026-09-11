@@ -41,9 +41,6 @@ export const metadata: Metadata = {
     "Indian Premier League",
     "Premier League",
   ],
-  icons: {
-    icon: "/favicon.svg",
-  },
 };
 
 export const viewport: Viewport = {

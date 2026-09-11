@@ -16,13 +16,6 @@ const ACCOUNT = [
   { href: "/forgot-password", label: "Reset password" },
 ];
 
-const SUPPORT = [
-  { href: "#", label: "Help center" },
-  { href: "#", label: "Venue guides" },
-  { href: "#", label: "Accessibility" },
-  { href: "#", label: "Contact" },
-];
-
 function Column({
   title,
   links,
@@ -70,7 +63,7 @@ export function Footer() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-10 sm:grid-cols-4 lg:col-span-8">
+          <div className="grid grid-cols-2 gap-10 sm:grid-cols-3 lg:col-span-8">
             <div>
               <h3 className="kicker mb-5">Series</h3>
               <ul className="space-y-3">
@@ -88,7 +81,6 @@ export function Footer() {
             </div>
             <Column title="Explore" links={EXPLORE} />
             <Column title="Account" links={ACCOUNT} />
-            <Column title="Support" links={SUPPORT} />
           </div>
         </div>
 
