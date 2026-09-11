@@ -39,6 +39,9 @@ spring:
     properties:
       mail.smtp.auth: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH:false}
       mail.smtp.starttls.enable: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE:false}
+      # Once STARTTLS is on, a server that does not offer it is refused instead of
+      # being sent the login in plaintext (an attacker can strip it from EHLO).
+      mail.smtp.starttls.required: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_REQUIRED:${SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE:false}}
       # Implicit TLS for providers on port 465; STARTTLS (587) leaves this off.
       mail.smtp.ssl.enable: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_ENABLE:false}
       # JavaMail waits forever by default, so a hung SMTP server would stall the
