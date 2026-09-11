@@ -304,6 +304,7 @@ export interface TierStat {
     tierCode: string;
     total: number;
     available: number;
+    held: number;
     booked: number;
 }
 

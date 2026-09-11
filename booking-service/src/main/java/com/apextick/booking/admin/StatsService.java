@@ -42,14 +42,17 @@ public class StatsService {
         long total = available + held + booked;
         BigDecimal revenue = orders.paidRevenueForEvent(eventId);
 
-        Map<Long, SeatRepository.TierCountView> tierCounts = seats.countByTier(eventId, SeatStatus.AVAILABLE)
+        // held and booked are counted separately: a hold is transient, so folding it into
+        // booked would inflate a tier during an on-sale rush and disagree with the event totals
+        Map<Long, SeatRepository.TierCountView> tierCounts = seats.countByTier(eventId)
                 .stream().collect(Collectors.toMap(SeatRepository.TierCountView::getTierId, v -> v));
         List<EventStatsResponse.TierStat> byTier = tiers.findByEventIdOrderBySortOrderAscIdAsc(eventId).stream()
                 .map(t -> {
                     SeatRepository.TierCountView tc = tierCounts.get(t.getId());
-                    long tt = tc == null ? 0 : tc.getTotal();
-                    long ta = tc == null ? 0 : tc.getAvailable();
-                    return new EventStatsResponse.TierStat(t.getId(), t.getCode(), tt, ta, tt - ta);
+                    return tc == null
+                            ? new EventStatsResponse.TierStat(t.getId(), t.getCode(), 0, 0, 0, 0)
+                            : new EventStatsResponse.TierStat(t.getId(), t.getCode(),
+                                    tc.getTotal(), tc.getAvailable(), tc.getHeld(), tc.getBooked());
                 }).toList();
 
         return new EventStatsResponse(eventId, available, held, booked, total,

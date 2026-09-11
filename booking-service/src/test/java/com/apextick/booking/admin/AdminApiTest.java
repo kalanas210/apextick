@@ -83,6 +83,51 @@ class AdminApiTest {
                 .andExpect(jsonPath("$[0].status").value("AVAILABLE"));
     }
 
+    /** Per-tier stats used to report booked as total - available, so a hold counted as a sale. */
+    @Test
+    void tier_stats_count_held_and_booked_seats_separately() throws Exception {
+        String slug = "admin-tier-stats-" + System.nanoTime();
+        Map<String, Object> event = Map.of(
+                "name", "Tier Stats", "slug", slug, "sport", "football", "status", "onsale",
+                "startsAt", "2027-01-01T18:00:00Z", "venue", "Test Arena", "currency", "USD");
+        String created = mvc.perform(post("/api/admin/events").header("Authorization", adminToken())
+                        .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(event)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        long eventId = json.readTree(created).get("id").asLong();
+        Map<String, Object> layout = Map.of(
+                "tiers", List.of(Map.of("code", "std", "name", "Standard", "price", 100)),
+                "sections", List.of(Map.of("code", "main", "name", "Main", "tierCode", "std",
+                        "side", "n", "rows", 2, "seatsPerRow", 2)));
+        mvc.perform(post("/api/admin/events/" + eventId + "/layout").header("Authorization", adminToken())
+                        .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(layout)))
+                .andExpect(status().isCreated());
+
+        List<Long> seatIds = seatRepository.findByEventIdOrderByIdAsc(eventId).stream().map(Seat::getId).toList();
+        CurrentUser holder = new CurrentUser("tier-holder", "tierholder", "th@apextick.local", "Tier Holder", Set.of("user"));
+        holdService.hold(slug, List.of(seatIds.get(0)), holder);
+
+        CurrentUser buyer = new CurrentUser("tier-buyer", "tierbuyer", "tb@apextick.local", "Tier Buyer", Set.of("user"));
+        List<Long> bought = List.of(seatIds.get(1));
+        holdService.hold(slug, bought, buyer);
+        OrderResponse order = orderService.create(new CreateOrderRequest(eventId, bought),
+                "tier-order-" + System.nanoTime(), buyer);
+        paymentService.pay(UUID.fromString(order.id()),
+                new PayRequest(new PaymentCard("4242424242424242", 12, 2030, "123", "T"), null, null, null),
+                "tier-pay-" + System.nanoTime(), buyer);
+
+        mvc.perform(get("/api/admin/events/" + eventId + "/stats").header("Authorization", adminToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.available").value(2))
+                .andExpect(jsonPath("$.held").value(1))
+                .andExpect(jsonPath("$.booked").value(1))
+                .andExpect(jsonPath("$.byTier[0].tierCode").value("std"))
+                .andExpect(jsonPath("$.byTier[0].total").value(4))
+                .andExpect(jsonPath("$.byTier[0].available").value(2))
+                .andExpect(jsonPath("$.byTier[0].held").value(1))
+                .andExpect(jsonPath("$.byTier[0].booked").value(1));
+    }
+
     @Test
     void admin_verifies_a_ticket_once_then_rejects_reuse() throws Exception {
         String slug = "australia-england-super-8";

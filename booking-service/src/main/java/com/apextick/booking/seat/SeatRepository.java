@@ -130,10 +130,11 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
                                         @Param("available") SeatStatus available);
 
     @Query("select sec.tier.id as tierId, count(s) as total, "
-            + "sum(case when s.status = :available then 1 else 0 end) as available "
+            + "sum(case when s.status = com.apextick.booking.seat.SeatStatus.AVAILABLE then 1 else 0 end) as available, "
+            + "sum(case when s.status = com.apextick.booking.seat.SeatStatus.HELD then 1 else 0 end) as held, "
+            + "sum(case when s.status = com.apextick.booking.seat.SeatStatus.BOOKED then 1 else 0 end) as booked "
             + "from Seat s join s.section sec where s.eventId = :eventId group by sec.tier.id")
-    List<TierCountView> countByTier(@Param("eventId") Long eventId,
-                                    @Param("available") SeatStatus available);
+    List<TierCountView> countByTier(@Param("eventId") Long eventId);
 
     @Query("select s.section.id as sectionId, "
             + "sum(case when s.status = :available then 1 else 0 end) as available "
@@ -155,6 +156,10 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
         long getTotal();
 
         long getAvailable();
+
+        long getHeld();
+
+        long getBooked();
     }
 
     interface SectionCountView {
