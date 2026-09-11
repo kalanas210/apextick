@@ -26,6 +26,12 @@ works). That is why `docker-compose.prod.yml` must refuse to start without the
 two secrets, and why `scripts/wso2/setup.sh` refuses to use a value that looks
 like a placeholder.
 
+An **empty** value is worse still: Keycloak stores an empty secret and then
+accepts an empty `client_secret` for that client. So never give the secrets an
+empty default (`${WSO2_KM_CLIENT_SECRET:}` in the realm), and in compose use
+the colon forms, `${VAR:?...}` or `${VAR:-...}`, which treat an empty `.env`
+entry as unset -- a bare `${VAR}` passes the empty string through.
+
 Generate a secret with `openssl rand -hex 32`.
 
 ## Hardening
@@ -52,17 +58,49 @@ the policy has nothing to check against. Keycloak re-hashes it with the current
 default algorithm at the first login. To regenerate it: PBKDF2WithHmacSHA512,
 210000 iterations, a 16-byte random salt, a 512-bit key, both base64-encoded.
 
-### Rotating a secret on a realm that already exists
+## Bringing a realm that already exists up to date
 
-The import will not overwrite it, so set it through the Admin API and then let
-`scripts/wso2/setup.sh` push the new value to WSO2's key-manager registration:
+None of the above reaches a Keycloak that imported an older version of this
+file -- production, for one, where `apextick-wso2-km` still has the secret
+that used to be committed here. Recreating the container to force a fresh
+import would also drop every account registered since (the dev-mode database
+lives inside the container), so patch it through the Admin API instead. From
+the repo checkout the stack runs from, with the two new secrets already in
+`.env`:
 
 ```bash
-docker exec -it apextick-keycloak /opt/keycloak/bin/kcadm.sh config credentials \
-  --server http://localhost:8080 --realm master --user "$KEYCLOAK_ADMIN"
-ID=$(docker exec apextick-keycloak /opt/keycloak/bin/kcadm.sh get clients -r apextick \
-  -q clientId=apextick-wso2-km --fields id --format csv --noquotes)
-docker exec apextick-keycloak /opt/keycloak/bin/kcadm.sh update "clients/$ID" -r apextick \
-  -s "secret=$WSO2_KM_CLIENT_SECRET"
+kc() { docker exec -i apextick-keycloak /opt/keycloak/bin/kcadm.sh "$@"; }
+id_of() { kc get clients -r apextick -q "clientId=$1" --fields id --format csv --noquotes; }
+env_of() { sed -n "s/^$1=//p" .env | tail -n1; }
+
+kc config credentials --server http://localhost:8080 --realm master \
+  --user "$(env_of KEYCLOAK_ADMIN)" --password "$(env_of KEYCLOAK_ADMIN_PASSWORD)"
+
+# The key-manager secret: the old one is public.
+kc update "clients/$(id_of apextick-wso2-km)" -r apextick \
+  -s "secret=$(env_of WSO2_KM_CLIENT_SECRET)"
+
+# The password grant moves off the SPA's public client.
+kc create clients -r apextick -s clientId=apextick-loadtest -s publicClient=false \
+  -s standardFlowEnabled=false -s directAccessGrantsEnabled=true \
+  -s "secret=$(env_of LOADTEST_CLIENT_SECRET)" \
+  -s 'defaultClientScopes=["web-origins","acr","profile","roles","basic","email","wso2-audience"]'
+kc update "clients/$(id_of apextick-web)" -r apextick -s directAccessGrantsEnabled=false
+
+# Realm settings. Existing passwords, the demo account's included, keep working:
+# the policy is checked when a password is set, not at login.
+kc update realms/apextick -s sslRequired=external -s bruteForceProtected=true \
+  -s permanentLockout=false -s failureFactor=10 -s waitIncrementSeconds=60 \
+  -s maxFailureWaitSeconds=900 -s maxDeltaTimeSeconds=43200 \
+  -s 'passwordPolicy=length(8) and maxLength(128) and notUsername and notEmail'
+
+# Push the new key-manager secret to WSO2 and map apextick-loadtest there.
 scripts/wso2/setup.sh
 ```
+
+`setup.sh` checks `WSO2_KM_CLIENT_SECRET` against Keycloak before it touches
+the gateway, and stops if Keycloak rejects it or still holds a publicly known
+value, so running it before the rotation above can't break a working gateway.
+To rotate either secret later, it is the same `kc update ... -s secret=...`
+followed by `setup.sh` (the key manager) or nothing (`apextick-loadtest`, whose
+secret only its callers need).
