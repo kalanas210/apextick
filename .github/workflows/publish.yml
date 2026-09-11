@@ -7,23 +7,61 @@ on:
     workflows: ["CI"]
     types: [completed]
     branches: [main, develop]
+  # Manual re-publish of main or develop; the gate still wants a green CI run.
   workflow_dispatch:
 
-# Only the package registry is writable; the repo itself stays read-only.
-permissions:
-  contents: read
-  packages: write
+# Nothing by default; each job asks for exactly what it needs.
+permissions: {}
 
 concurrency:
-  group: publish-${{ github.event.workflow_run.head_branch || github.ref }}
+  # Every CI run wakes this workflow, pull requests and red runs included.
+  # Keying on the triggering event and its outcome means only real publishes
+  # of a branch compete: a no-op run for a PR from a branch called develop (a
+  # fork's, or the develop -> main release PR) or for a failed or superseded
+  # CI run can no longer cancel the publish of the last green commit.
+  group: publish-${{ github.event.workflow_run.event || 'push' }}-${{ github.event.workflow_run.conclusion || 'success' }}-${{ github.event.workflow_run.head_branch || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
+  gate:
+    name: Publish gate
+    # The workflow_run branch filter matches the head branch of any CI run, so
+    # a fork's PR from its own "main" passes it and would be built with a
+    # write token. Only publish commits pushed to this repository whose CI run
+    # went green, and only main or develop.
+    if: >-
+      (github.event_name == 'workflow_run'
+        && github.event.workflow_run.conclusion == 'success'
+        && github.event.workflow_run.event == 'push'
+        && github.event.workflow_run.head_repository.full_name == github.repository
+        && contains(fromJSON('["main", "develop"]'), github.event.workflow_run.head_branch))
+      || (github.event_name == 'workflow_dispatch'
+        && contains(fromJSON('["refs/heads/main", "refs/heads/develop"]'), github.ref))
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - name: Require a green CI run for a manual publish
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          runs=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&status=success" --jq '.total_count')
+          if [ "$runs" -eq 0 ]; then
+            echo "::error::No successful CI run for a push of $SHA; refusing to publish an untested commit."
+            exit 1
+          fi
+
   images:
     name: ${{ matrix.service }}
-    # Never publish an image built from a commit whose tests failed.
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    needs: gate
     runs-on: ubuntu-latest
+    # Only the package registry is writable; the repo itself stays read-only.
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -36,35 +74,42 @@ jobs:
             context: frontend
     steps:
       - name: Check out the tested commit
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          # Nothing here talks to git again; keep the token out of .git/config.
+          persist-credentials: false
 
       - name: Scan for injected/obfuscated code in config files
         run: bash scripts/ci/check-injected-code.sh
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # metadata-action takes the SHA from GITHUB_SHA, which on workflow_run is
+      # the default branch's head rather than the commit built here, so the
+      # sha tag and the revision label are spelled out explicitly.
       - name: Derive image tags
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/apextick-${{ matrix.service }}
           tags: |
             type=raw,value=latest,enable=${{ (github.event.workflow_run.head_branch || github.ref_name) == 'main' }}
             type=raw,value=develop,enable=${{ (github.event.workflow_run.head_branch || github.ref_name) == 'develop' }}
-            type=sha,format=long
+            type=raw,value=sha-${{ github.event.workflow_run.head_sha || github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: ${{ matrix.context }}
           push: true

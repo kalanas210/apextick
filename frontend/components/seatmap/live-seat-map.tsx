@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatPrice } from "@/lib/format";
+import { MAX_SEATS_PER_ORDER, quoteOrder } from "@/lib/booking-rules";
 import { apiErrorCode, apiErrorMessage } from "@/lib/api";
 import { useSeatUpdates, type SeatStatusChange } from "@/lib/realtime";
 import { cn } from "@/lib/cn";
@@ -15,60 +16,10 @@ import {
   useSeats,
 } from "@/hooks/useBooking";
 import { useSession } from "@/hooks/useSession";
-import type { EventDetail, Seat as ApiSeat } from "@/lib/types";
+import type { Seat as ApiSeat } from "@/lib/types";
 import { Legend, Pitch, Stand, mmss, type MapSeat } from "./parts";
+import { buildSections, isLinkedSection, type MapSection } from "./sections";
 import { Clock } from "@/components/ui/icons";
-
-const MAX_SEATS = 8;
-
-interface MapSection {
-  sectionId: number;
-  sectionName: string;
-  side: "n" | "s" | "e" | "w";
-  tierId: string;
-  seats: MapSeat[];
-}
-
-/** Folds API seats into the sections described by the event, ready to render. */
-function buildSections(event: EventDetail, seats: ApiSeat[]): MapSection[] {
-  const tierNameByCode = new Map(event.tiers.map((t) => [t.code, t.name]));
-  const sectionById = new Map(event.sections.map((s) => [s.id, s]));
-  const grouped = new Map<number, MapSeat[]>();
-
-  for (const seat of seats) {
-    const section = sectionById.get(seat.sectionId);
-    if (!section) continue;
-    const state: MapSeat["state"] =
-      seat.status === "BOOKED" ? "sold"
-        // a seat this user is holding stays pickable — it is already theirs
-        : seat.status === "HELD" && !seat.mine ? "held"
-          : "available";
-    const list = grouped.get(seat.sectionId) ?? [];
-    list.push({
-      id: String(seat.id),
-      label: seat.label,
-      col: seat.col ?? list.length,
-      sectionName: section.name,
-      tierId: seat.tierCode,
-      tierName: tierNameByCode.get(seat.tierCode) ?? seat.tierCode,
-      state,
-      price: seat.price,
-    });
-    grouped.set(seat.sectionId, list);
-  }
-
-  return event.sections
-    .filter((s) => grouped.has(s.id))
-    .map((s) => ({
-      sectionId: s.id,
-      sectionName: s.name,
-      side: s.side,
-      tierId: s.tierCode,
-      seats: (grouped.get(s.id) ?? []).sort(
-        (a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }),
-      ),
-    }));
-}
 
 export function LiveSeatMap({
   slug,
@@ -159,9 +110,9 @@ export function LiveSeatMap({
     .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
 
   const currency = event?.currency ?? "USD";
-  const subtotal = selectedSeats.reduce((sum, s) => sum + s.price, 0);
-  const fee = Math.round(subtotal * 0.05);
-  const total = subtotal + fee;
+  // priced exactly as the order will be, so checkout shows the same total
+  const { subtotal, fee, total } = quoteOrder(selectedSeats.map((s) => s.price));
+  const money = (value: number) => formatPrice(value, currency, { keepMinorUnits: true });
 
   const secondsLeft = heldUntil
     ? Math.max(0, Math.floor((new Date(heldUntil).getTime() - now) / 1000))
@@ -170,8 +121,8 @@ export function LiveSeatMap({
   const toggle = (id: string) => {
     const seat = byId.get(id);
     if (!seat || seat.state !== "available") return;
-    if (!selected.includes(id) && selected.length >= MAX_SEATS) {
-      setNotice(`That is the ${MAX_SEATS} seat limit for a single order.`);
+    if (!selected.includes(id) && selected.length >= MAX_SEATS_PER_ORDER) {
+      setNotice(`That is the ${MAX_SEATS_PER_ORDER} seat limit for a single order.`);
       return;
     }
     setNotice(null);
@@ -231,10 +182,6 @@ export function LiveSeatMap({
     );
   }
 
-  const isHighlighted = (sectionCode: string, tierCode: string) =>
-    (!!initialSection && sectionCode === initialSection) ||
-    (!!initialTier && tierCode === initialTier);
-
   const renderStand = (side: MapSection["side"], className?: string) => {
     const sec = sections.find((s) => s.side === side);
     if (!sec) return null;
@@ -245,7 +192,7 @@ export function LiveSeatMap({
         tierId={sec.tierId}
         selectedIds={selectedSet}
         onToggle={toggle}
-        highlighted={isHighlighted(String(sec.sectionId), sec.tierId)}
+        highlighted={isLinkedSection(sec, { section: initialSection, tier: initialTier })}
         className={className}
       />
     );
@@ -293,7 +240,7 @@ export function LiveSeatMap({
             <p className="sr-only" aria-live="polite">
               {selectedSeats.length === 0
                 ? "No seats selected."
-                : `${selectedSeats.length} seat${selectedSeats.length === 1 ? "" : "s"} selected. Total ${formatPrice(total, currency)}.`}
+                : `${selectedSeats.length} seat${selectedSeats.length === 1 ? "" : "s"} selected. Total ${money(total)}.`}
             </p>
 
             <div className="flex items-center justify-between">
@@ -342,7 +289,7 @@ export function LiveSeatMap({
                       </span>
                       <span className="flex items-center gap-3">
                         <span className="tnum text-[0.84rem] text-bone">
-                          {formatPrice(s.price, currency)}
+                          {money(s.price)}
                         </span>
                         <button
                           type="button"
@@ -362,15 +309,15 @@ export function LiveSeatMap({
                     <dt>
                       Subtotal<span className="tnum"> ({selectedSeats.length})</span>
                     </dt>
-                    <dd className="tnum text-bone">{formatPrice(subtotal, currency)}</dd>
+                    <dd className="tnum text-bone">{money(subtotal)}</dd>
                   </div>
                   <div className="flex justify-between text-muted">
                     <dt>Booking fee</dt>
-                    <dd className="tnum text-bone">{formatPrice(fee, currency)}</dd>
+                    <dd className="tnum text-bone">{money(fee)}</dd>
                   </div>
                   <div className="mt-1 flex items-baseline justify-between border-t border-line pt-3">
                     <dt className="font-display text-base text-bone">Total</dt>
-                    <dd className="tnum text-xl text-bone">{formatPrice(total, currency)}</dd>
+                    <dd className="tnum text-xl text-bone">{money(total)}</dd>
                   </div>
                 </dl>
 

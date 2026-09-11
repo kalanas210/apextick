@@ -88,7 +88,7 @@ function Checkout({ orderId }: { orderId: string }) {
     );
   }
 
-  const totalLabel = formatPrice(order.total, order.currency);
+  const totalLabel = formatPrice(order.total, order.currency, { keepMinorUnits: true });
 
   /** Sends the attempt to the API and interprets the payment status it returns. */
   const submitPayment = async (input: { card?: MockCard; paymentMethodId?: string }) => {

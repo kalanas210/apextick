@@ -1,21 +1,30 @@
 {
   "realm": "apextick",
   "enabled": true,
-  "sslRequired": "none",
+  "sslRequired": "external",
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 10,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "maxDeltaTimeSeconds": 43200,
+  "quickLoginCheckMilliSeconds": 1000,
+  "minimumQuickLoginWaitSeconds": 60,
+  "passwordPolicy": "length(8) and maxLength(128) and notUsername and notEmail",
   "clients": [
     {
       "clientId": "apextick-web",
+      "description": "The browser SPA: authorization code + PKCE only. A public client can't keep a secret, so it doesn't take the password grant either; command-line logins use apextick-loadtest.",
       "protocol": "openid-connect",
       "enabled": true,
       "publicClient": true,
       "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": true,
+      "directAccessGrantsEnabled": false,
       "redirectUris": [
         "http://localhost:3000/*",
         "http://localhost:3005/*",
         "http://host.docker.internal:3000/*",
-        "http://54.255.121.222:3000/*",
-        "https://54.255.121.222.nip.io/*"
+        "${APP_WEB_URL:http://localhost:3000}/*"
       ],
       "webOrigins": [
         "+"
@@ -36,9 +45,35 @@
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
-      "secret": "apextick-wso2-km-secret",
+      "secret": "${WSO2_KM_CLIENT_SECRET}",
       "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "basic", "email", "wso2-audience"],
       "optionalClientScopes": ["default"]
+    },
+    {
+      "clientId": "apextick-loadtest",
+      "name": "Load and smoke tests",
+      "description": "Confidential and password-grant only, so k6 and scripts/wso2/smoke-test.sh can log a user in from the command line. Same default scopes as apextick-web, so its tokens are accepted by booking-service and the gateway alike.",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "secret": "${LOADTEST_CLIENT_SECRET}",
+      "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "basic", "email", "wso2-audience"]
+    },
+    {
+      "clientId": "admin-cli",
+      "description": "Keycloak's built-in public CLI client, defined here so it imports with the password grant off; kcadm logs in through the master realm instead.",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false
     }
   ],
   "clientScopes": [
@@ -323,16 +358,19 @@
   },
   "users": [
     {
+      "id": "5e0f3a0c-7b1d-4c2e-9a6f-3d8b2c1e4f70",
       "username": "kalana",
       "enabled": true,
       "firstName": "Kalana",
       "lastName": "Sandakelum",
-      "email": "kalanasandakelum210@gmail.com",
+      "email": "${DEMO_USER_EMAIL:kalana@apextick.local}",
       "emailVerified": true,
       "credentials": [
         {
           "type": "password",
-          "value": "12345",
+          "userLabel": "Seeded demo password",
+          "secretData": "{\"value\":\"V9nYytr6CKUxs24kMwwL3XERsJSWFU5NfSR42BN2Yr+WgOFnZouMb4jOGWDSqL5nR6jcs5LIhw8uDTz71Wsbow==\",\"salt\":\"nxzM7TWfhyydqVO8CTiF1A==\",\"additionalParameters\":{}}",
+          "credentialData": "{\"hashIterations\":210000,\"algorithm\":\"pbkdf2-sha512\",\"additionalParameters\":{}}",
           "temporary": false
         }
       ],

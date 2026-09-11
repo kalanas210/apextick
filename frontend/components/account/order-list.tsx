@@ -109,7 +109,7 @@ function Orders() {
                   </div>
                   <div className="flex items-center gap-4">
                     <span className="tnum text-[0.92rem] text-bone">
-                      {formatPrice(order.total, order.currency)}
+                      {formatPrice(order.total, order.currency, { keepMinorUnits: true })}
                     </span>
                     <span
                       className={cn(

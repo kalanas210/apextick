@@ -102,7 +102,7 @@ public class CatalogQueryService {
                 .stream().findFirst().map(PriceTierRepository.MinPriceView::getFromPrice).orElse(null);
         EventSummaryResponse summary = summary(e, count, fromPrice);
 
-        Map<Long, SeatRepository.TierCountView> tierCounts = seatRepository.countByTier(id, SeatStatus.AVAILABLE)
+        Map<Long, SeatRepository.TierCountView> tierCounts = seatRepository.countByTier(id)
                 .stream().collect(Collectors.toMap(SeatRepository.TierCountView::getTierId, v -> v));
         Map<Long, Long> sectionAvail = seatRepository.countBySection(id, SeatStatus.AVAILABLE)
                 .stream().collect(Collectors.toMap(SeatRepository.SectionCountView::getSectionId,

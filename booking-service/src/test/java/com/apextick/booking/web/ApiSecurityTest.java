@@ -51,6 +51,25 @@ class ApiSecurityTest {
                 .andExpect(jsonPath("$").isArray());
     }
 
+    /**
+     * holds/me sits under the public GET /api/events/** tree but reads the caller's own
+     * holds. It used to be reachable anonymously and then fail on the missing user with a 500.
+     */
+    @Test
+    void my_holds_are_unauthorized_without_a_token() throws Exception {
+        mvc.perform(get("/api/events/1/holds/me"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void my_holds_are_readable_with_a_token() throws Exception {
+        String token = TestTokens.user("sub-holds", "holds", "holds@apextick.local");
+        mvc.perform(get("/api/events/1/holds/me").header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.eventId").value(1))
+                .andExpect(jsonPath("$.seatIds").isArray());
+    }
+
     @Test
     void unknown_path_returns_problem_detail() throws Exception {
         String token = TestTokens.user("sub-x", "x", "x@apextick.local");

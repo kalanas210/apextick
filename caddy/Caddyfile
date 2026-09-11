@@ -7,15 +7,38 @@
 {$SERVER_IP}.nip.io {
 	encode gzip
 
-	# --- Keycloak (OIDC: discovery, token, auth, login theme, admin) ---
+	# --- Keycloak: only what the apextick realm's OIDC flow needs ---
+	#   /realms     discovery, auth, token, login pages, account console
+	#   /resources  theme CSS/JS/images for those pages
+	#   /js         keycloak.js, for adapters that load it from the server
 	# `handle` (not handle_path) keeps the full path so Keycloak sees /realms/...
+	#
+	# Keycloak's admin console and admin REST API (/admin/...) are deliberately
+	# not published: /admin belongs to the Next.js admin panel, which falls
+	# through to the frontend below. The master realm, whose only users are
+	# Keycloak administrators, is closed too, so nobody on the internet can use
+	# its token endpoint to guess the bootstrap admin password. Operators reach
+	# the console over an SSH tunnel to Keycloak's loopback-only port instead --
+	# see the keycloak service in docker-compose.prod.yml.
+	handle /realms/master {
+		respond 404
+	}
+	handle /realms/master/* {
+		respond 404
+	}
+	# Client registration is a realm-scoped admin API: a token holding
+	# manage-clients (WSO2's key-manager account) can read client secrets and
+	# rewrite redirect URIs through it. WSO2 calls it on the docker network, so
+	# nothing outside needs it. A "*" between segments matches exactly one
+	# segment, so each depth is listed (Keycloak uses up to two: provider, client).
+	@kcRegistration path /realms/*/clients-registrations /realms/*/clients-registrations/* /realms/*/clients-registrations/*/* /realms/*/clients-registrations/*/*/*
+	handle @kcRegistration {
+		respond 404
+	}
 	handle /realms/* {
 		reverse_proxy keycloak:8080
 	}
 	handle /resources/* {
-		reverse_proxy keycloak:8080
-	}
-	handle /admin/* {
 		reverse_proxy keycloak:8080
 	}
 	handle /js/* {
@@ -35,7 +58,7 @@
 		reverse_proxy {$API_UPSTREAM:booking-service:8081}
 	}
 
-	# --- Everything else -> Next.js frontend (/, /_next, /favicon.ico, ...) ---
+	# --- Everything else -> Next.js frontend (/, /admin, /_next, ...) ---
 	handle {
 		reverse_proxy frontend:3000
 	}

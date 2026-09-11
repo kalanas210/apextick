@@ -12,7 +12,9 @@ The booking service already validates JWTs and rate-limits holds in Redis. The
 gateway earns its place by moving two of those concerns to the edge:
 
 - **Rejecting bad traffic before it costs anything.** An unauthenticated request
-  dies at the gateway; the service never opens a database connection for it.
+  to anything that needs a caller dies at the gateway; the service never opens
+  a database connection for it. (The few routes the service itself serves to
+  anyone pass straight through — see [Public operations](#public-operations).)
 - **Shedding a burst.** During a flash sale the interesting failure is not one
   slow request, it is ten thousand at once. A throttling policy on the seat-hold
   operation caps what reaches the service, and the callers that lose get a clean
@@ -48,11 +50,31 @@ scripts/wso2/smoke-test.sh           # what the gateway does with each kind of c
 `docker compose --profile wso2 up -d && scripts/wso2/setup.sh` reaches a working,
 authenticated, correctly-routed gateway on its own.
 
+It needs one secret: `WSO2_KM_CLIENT_SECRET`, the client secret of the
+`apextick-wso2-km` service account. The realm import only carries a
+`${WSO2_KM_CLIENT_SECRET}` placeholder that Keycloak fills from its own
+environment, so the same value has to be in `.env` for compose (which hands it
+to Keycloak) and for `setup.sh` (which hands it to WSO2). The script reads
+`.env` itself, and stops before touching the gateway if the value is missing
+or Keycloak doesn't accept it. Re-running it re-applies the key-manager
+registration, which is how a rotated secret reaches the gateway — see
+[keycloak/README.md](../keycloak/README.md) for rotating it on a realm that
+already exists.
+
+`smoke-test.sh` logs a real user in with the password grant on the
+confidential `apextick-loadtest` client. It takes `LOADTEST_USER`,
+`LOADTEST_PASSWORD` and `LOADTEST_CLIENT_SECRET` from the environment or
+`.env`, has no built-in credentials, and stops if any is missing:
+
+```bash
+LOADTEST_USER=kalana LOADTEST_PASSWORD=12345 scripts/wso2/smoke-test.sh
+```
+
 | Surface | URL | Notes |
 | --- | --- | --- |
 | Gateway (http) | http://localhost:8280/api | what clients call |
 | Gateway (https) | https://localhost:8243/api | self-signed certificate |
-| Publisher | https://localhost:9443/publisher | `admin` / `admin` locally |
+| Publisher | https://localhost:9443/publisher | `admin` / `WSO2_ADMIN_PASSWORD` from `.env` (`admin` if unset) |
 | DevPortal | https://localhost:9443/devportal | subscriptions, try-it console |
 | Admin | https://localhost:9443/admin | key managers, throttling policies |
 
@@ -74,14 +96,33 @@ The portals are **never published in production** — only loopback
 4. **The API itself**, imported from `wso2/apextick-api/openapi.json` (generated
    from the service's own springdoc output, with the `/api` prefix stripped from
    every operation path — see below for why), with `/api` as the gateway's own
-   context.
+   context. On a gateway where it already exists, the definition is replaced
+   with the committed one, so a regenerated contract takes effect on the next
+   run.
 5. **A revision deployed to the gateway** and the API moved to `PUBLISHED`.
+   Every run deploys a fresh revision — only a revision reaches the gateway,
+   so that is how a changed definition takes effect. WSO2 caps an API at five
+   revisions by default and never discards one itself (in production they
+   persist on the database volume), so when a create is refused at the cap,
+   `setup.sh` deletes the oldest *undeployed* revision and retries; the
+   deployed one and the newer rollback points stay. If a revision still can't
+   be created or deployed, the script stops with an error instead of reporting
+   success on a gateway that is still serving the previous contract.
 6. **A DevPortal application** subscribed to the API.
 7. **The SPA's Keycloak client (`apextick-web`) mapped onto that application**
    (`POST /applications/{id}/map-keys`) — a bring-your-own-key mapping, since
    `apextick-web` is a client the SPA already logs into directly, not one WSO2
    minted for itself. This is the step that used to fail outright (see the fix
    history below) and is now automatic.
+8. **The same for `apextick-loadtest`**, on a second application
+   (`ApexTickLoadTest`). k6 and `smoke-test.sh` log in through that
+   confidential client — `apextick-web` no longer accepts the password grant —
+   so their tokens carry `azp=apextick-loadtest` and need a subscription of
+   their own. An application holds one production key per key manager, hence
+   two. Both are mapped by client id only: the gateway validates tokens and
+   never needs a client's secret, and WSO2's Keycloak connector rejects any
+   non-blank `consumerSecret` as "wrong for the given consumer key" (its client
+   lookup doesn't return Keycloak's secret to compare against).
 
 ## Putting it in the request path
 
@@ -90,15 +131,45 @@ The portals are **never published in production** — only loopback
 temporarily, point it back at the service directly:
 
 ```bash
-API_UPSTREAM=booking-service:8081 docker compose -f docker-compose.prod.yml up -d caddy
+API_UPSTREAM=booking-service:8081 docker compose -f docker-compose.prod.yml up -d --no-deps caddy
 ```
+
+Configure and check it **on the server itself**, from the repo checkout the
+stack runs from:
+
+```bash
+scripts/wso2/setup.sh
+LOADTEST_USER=... LOADTEST_PASSWORD=... scripts/wso2/smoke-test.sh
+```
+
+Both read `.env` (`WSO2_ADMIN_PASSWORD`, the client secrets, `SERVER_IP`) and
+ask the running Keycloak container for its `KC_HOSTNAME`. With one set — as
+`docker-compose.prod.yml` does, `https://$SERVER_IP.nip.io` — `setup.sh`
+registers the key manager with issuer `https://$SERVER_IP.nip.io/realms/apextick`
+(the `iss` production tokens actually carry) and `smoke-test.sh` goes through
+the public origin, `https://$SERVER_IP.nip.io/api`, because production publishes
+no gateway port of its own. Both stop before doing anything if `.env`'s
+`SERVER_IP` and Keycloak's `KC_HOSTNAME` disagree (a new Elastic IP with a
+Keycloak that was never recreated, say), and `setup.sh` refuses a
+`WSO2_KC_ISSUER` override on any other host — a key manager with the wrong
+issuer rejects every token. `GATEWAY`, `KEYCLOAK` and `WSO2_KC_ISSUER` still
+override everything.
 
 **Locally**, the gateway is opt-in and the frontend talks to `booking-service`
 directly unless told otherwise:
 
 ```bash
-NEXT_PUBLIC_API_URL=http://localhost:8280/api npm run dev
+NEXT_PUBLIC_API_URL=http://localhost:8280 npm run dev
 ```
+
+No `/api` on the end: `NEXT_PUBLIC_API_URL` is the origin every call is
+relative to, and the calls already start with `/api` — which is exactly the
+gateway's context. With `.../api` there, requests go to `/api/api/...`, which
+no gateway resource matches. The same variable also builds the live seat map's
+WebSocket URL (`/api/ws`), and the gateway carries no WebSocket API, so seat
+flips stop arriving live in this mode; the REST calls, holds and checkout are
+unaffected. (Production is unaffected too: there Caddy sends `/api/ws` straight
+to `booking-service`.)
 
 `setup.sh`'s defaults (issuer `http://localhost:8180/realms/apextick`,
 matching `apextick-web`'s existing redirect URI and booking-service's own
@@ -116,15 +187,37 @@ device on the LAN, a hostname Keycloak's redirect URIs don't already list —
 `extra_hosts: host.docker.internal:host-gateway` and `apextick-web` allows
 `http://host.docker.internal:3000/*`, so overriding `WSO2_KC_ISSUER` and
 booking-service's `JWT_ISSUER_URI` to `host.docker.internal` and browsing via
-that hostname instead is there as a fallback. Production doesn't need any of
-this either way — Keycloak there has a fixed `KC_HOSTNAME` (the real
-`https://<server-ip>.nip.io` domain), reachable like anything else on the
-internet.
+that hostname instead is there as a fallback. Production needs none of this —
+Keycloak there has a fixed `KC_HOSTNAME` (the real `https://<server-ip>.nip.io`
+domain), reachable like anything else on the internet, and `setup.sh` derives
+the issuer from it as described above.
 
 **The WebSocket stays on a direct route.** `/api/ws` is a long-lived upgraded
 connection carrying STOMP frames; there is nothing an HTTP API gateway can
 usefully police there, and putting one in the middle only adds a hop that can
 drop the connection. Caddy handles `/api/ws*` before the gateway rule.
+
+## Public operations
+
+A few routes are public in booking-service itself (`permitAll()` in
+`SecurityConfig`): the catalogue reads (`GET /events/**`, `GET /series/**`),
+`GET /payments/config`, and Stripe's webhook, which authenticates with its own
+signature rather than a bearer token. The SPA calls the catalogue and payment
+config without a token even when signed in, so the gateway must not demand one
+either — otherwise the event page, seat map and checkout get `401` in
+production, and with Stripe enabled paid orders never confirm.
+
+`scripts/wso2/normalise-openapi.py` marks exactly those operations with
+`x-auth-type: None`, the per-resource switch WSO2's OpenAPI importer reads
+(it ignores the standard `security: []`, which is set as well). The list is one
+commented table in that script, mirroring `SecurityConfig`; a rule that stops
+matching any operation fails the script rather than silently dropping out.
+`GET /events/{idOrSlug}/holds/me` is deliberately left protected: it answers for
+the caller, and `SecurityConfig` requires a token for it ahead of the public
+`/api/events/**` glob.
+`smoke-test.sh` checks both sides: an anonymous catalogue read gets `200`, and
+a badly-signed webhook gets booking-service's own `400`, not the gateway's
+`401`.
 
 ## What actually works today
 
@@ -136,7 +229,7 @@ committed config alone produces, not hand-patched state):
 
 | Behaviour | Result |
 | --- | --- |
-| Unauthenticated request | `401` · `900902 Missing Credentials` — the backend is never dialled |
+| Unauthenticated request to a protected route | `401` · `900902 Missing Credentials` — the backend is never dialled |
 | Garbage bearer token | rejected · `900901` |
 | Keycloak-issued access token | validated, subscription validated, request reaches the backend · `200` |
 | Same token reused repeatedly | consistently `200` (was flaky before the cache fix below) |

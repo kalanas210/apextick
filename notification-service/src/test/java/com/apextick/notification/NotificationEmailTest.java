@@ -6,6 +6,7 @@ import com.apextick.notification.log.NotificationStatus;
 import com.apextick.notification.messaging.RabbitTopologyConfig;
 import com.icegreen.greenmail.junit5.GreenMailExtension;
 import com.icegreen.greenmail.util.ServerSetupTest;
+import jakarta.mail.internet.MimeMessage;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageBuilder;
@@ -15,6 +16,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -41,6 +43,8 @@ class NotificationEmailTest {
     static void mailProps(DynamicPropertyRegistry registry) {
         registry.add("spring.mail.host", () -> "127.0.0.1");
         registry.add("spring.mail.port", ServerSetupTest.SMTP::getPort);
+        // trailing slash on purpose: the order link must not come out as "//orders"
+        registry.add("app.public-base-url", () -> "https://tickets.apextick.test/");
     }
 
     @Autowired RabbitTemplate rabbit;
@@ -48,6 +52,7 @@ class NotificationEmailTest {
     @Autowired ProcessedEventRepository processed;
     @Autowired NotificationLogRepository logs;
     @Autowired tools.jackson.databind.ObjectMapper mapper;
+    @Autowired JavaMailSenderImpl mailSender;
 
     private Map<String, Object> bookingPayload(String email) {
         Map<String, Object> event = new LinkedHashMap<>();
@@ -105,13 +110,29 @@ class NotificationEmailTest {
     @Test
     void booking_confirmed_sends_an_email_and_records_it() throws Exception {
         UUID eventId = UUID.randomUUID();
-        publish("booking.confirmed", envelope(eventId, "booking.confirmed", bookingPayload("winner@apextick.local")));
+        Map<String, Object> payload = bookingPayload("winner@apextick.local");
+        publish("booking.confirmed", envelope(eventId, "booking.confirmed", payload));
 
         assertThat(greenMail.waitForIncomingEmail(15_000, 1)).isTrue();
         assertThat(greenMail.getReceivedMessages()).hasSize(1);
-        assertThat(greenMail.getReceivedMessages()[0].getSubject()).contains("World Cup Final");
+        MimeMessage mail = greenMail.getReceivedMessages()[0];
+        assertThat(mail.getSubject()).contains("World Cup Final");
+        // the link must land on the frontend's order page (app/orders/[id]), not a 404
+        assertThat((String) mail.getContent())
+                .contains("href=\"https://tickets.apextick.test/orders/" + payload.get("orderId") + "\"")
+                .doesNotContain("/account/tickets");
         await().atMost(Duration.ofSeconds(5))
                 .untilAsserted(() -> assertThat(processed.findById(eventId)).isPresent());
+    }
+
+    @Test
+    void smtp_calls_are_bounded_by_timeouts() {
+        // JavaMail's own defaults are infinite; a hung server must fail the send instead.
+        assertThat(mailSender.getJavaMailProperties())
+                .containsEntry("mail.smtp.connectiontimeout", "10000")
+                .containsEntry("mail.smtp.timeout", "10000")
+                .containsEntry("mail.smtp.writetimeout", "10000")
+                .containsEntry("mail.smtp.ssl.enable", "false");
     }
 
     @Test

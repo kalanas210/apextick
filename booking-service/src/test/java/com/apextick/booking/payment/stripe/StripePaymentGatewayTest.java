@@ -15,6 +15,8 @@ import com.stripe.model.StripeError;
 import com.stripe.net.RequestOptions;
 import com.stripe.param.PaymentIntentCreateParams;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 
 import javax.crypto.Mac;
@@ -170,6 +172,48 @@ class StripePaymentGatewayTest {
 
         assertThatThrownBy(() -> gateway(Set.of())
                 .verifyCallback(new CallbackRequest(payload, Map.of("Stripe-Signature", header), Map.of())))
+                .isInstanceOf(WebhookVerificationException.class);
+    }
+
+    @Test
+    void verifyCallback_rejects_a_missing_signature() {
+        String payload = eventJson("payment_intent.succeeded");
+
+        assertThatThrownBy(() -> gateway(Set.of())
+                .verifyCallback(new CallbackRequest(payload, Map.of(), Map.of())))
+                .isInstanceOf(WebhookVerificationException.class);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"t", "t=1,v1", "t=abc,v1=x", "t=", "=", ","})
+    void verifyCallback_rejects_a_malformed_signature_header(String header) {
+        String payload = eventJson("payment_intent.succeeded");
+
+        assertThatThrownBy(() -> gateway(Set.of())
+                .verifyCallback(new CallbackRequest(payload, Map.of("Stripe-Signature", header), Map.of())))
+                .isInstanceOf(WebhookVerificationException.class);
+    }
+
+    @Test
+    void verifyCallback_rejects_everything_when_no_webhook_secret_is_configured() throws Exception {
+        String payload = eventJson("payment_intent.succeeded");
+        String header = sign(payload, WHSEC, System.currentTimeMillis() / 1000);
+        AppProperties.Payment.Stripe stripe =
+                new AppProperties.Payment.Stripe("sk_test_key", "pk_test_key", "", Set.of());
+        StripePaymentGateway unconfigured = new StripePaymentGateway(
+                new AppProperties(null, null, null, new AppProperties.Payment("mock", stripe), null));
+
+        assertThatThrownBy(() -> unconfigured
+                .verifyCallback(new CallbackRequest(payload, Map.of("Stripe-Signature", header), Map.of())))
+                .isInstanceOf(WebhookVerificationException.class);
+    }
+
+    @Test
+    void verifyCallback_rejects_an_unsigned_body_that_is_not_json() {
+        String header = "t=" + (System.currentTimeMillis() / 1000) + ",v1=deadbeef";
+
+        assertThatThrownBy(() -> gateway(Set.of())
+                .verifyCallback(new CallbackRequest("not json", Map.of("Stripe-Signature", header), Map.of())))
                 .isInstanceOf(WebhookVerificationException.class);
     }
 

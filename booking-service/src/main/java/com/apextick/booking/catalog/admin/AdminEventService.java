@@ -77,9 +77,14 @@ public class AdminEventService {
     @Transactional
     public void delete(Long id) {
         Event e = events.findById(id).orElseThrow(() -> new NotFoundException("Event", id));
+        // Deliberately counts orders in every status, expired and cancelled included: orders
+        // reference the event, order_items reference its seats, and payments and tickets hang
+        // off those orders, all with plain foreign keys. A cancelled order can still carry a
+        // captured-then-refunded payment, so clearing the way would mean deleting sales history.
         if (orders.existsByEventId(id)) {
             throw new ConflictException("EVENT_HAS_ORDERS",
-                    "Event has orders; set status to cancelled instead of deleting");
+                    "Event has orders (expired and cancelled ones included), which are kept as the sales "
+                            + "record; set its status to cancelled instead of deleting it");
         }
         // Seating layouts are create-only, so deleting the event is the only way back
         // from a mis-built one. The schema declares plain foreign keys with no cascade,

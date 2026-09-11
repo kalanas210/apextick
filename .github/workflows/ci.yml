@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Scan for injected/obfuscated code in config files
         run: bash scripts/ci/check-injected-code.sh
 
@@ -30,9 +30,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Set up Java 21
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: '21'
@@ -42,6 +42,15 @@ jobs:
         run: |
           chmod +x mvnw
           ./mvnw -B verify
+      # verify writes the live springdoc document to target/openapi; the
+      # contract WSO2 publishes must be exactly that, normalised.
+      - name: OpenAPI contract
+        run: |
+          python3 scripts/wso2/normalise-openapi.py booking-service/target/openapi/api-docs.json wso2/apextick-api/openapi.json
+          if ! git diff --exit-code -- wso2/apextick-api/openapi.json; then
+            echo "::error file=wso2/apextick-api/openapi.json::The WSO2 API contract no longer matches the booking service. Run scripts/wso2/refresh-openapi.sh against a running booking-service (or, after ./mvnw verify, python3 scripts/wso2/normalise-openapi.py booking-service/target/openapi/api-docs.json wso2/apextick-api/openapi.json) and commit the result."
+            exit 1
+          fi
 
   notification-service:
     name: Notification Service
@@ -49,9 +58,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Set up Java 21
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: '21'
@@ -68,10 +77,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: '22'
           cache: npm
@@ -85,6 +94,21 @@ jobs:
         working-directory: frontend
         run: npm run lint
 
+      - name: Test
+        working-directory: frontend
+        run: npm test
+
       - name: Build
         working-directory: frontend
         run: npm run build
+
+  scripts:
+    name: Shell scripts
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      # ShellCheck ships with the runner image. Info-level notes stay advice.
+      - name: ShellCheck
+        run: git ls-files -z '*.sh' 'scripts/git-hooks/*' | xargs -0 shellcheck --severity=warning

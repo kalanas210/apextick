@@ -4,13 +4,19 @@ import com.apextick.booking.messaging.RabbitConfig;
 import com.apextick.booking.outbox.payload.SeatHeldPayload;
 import com.apextick.booking.support.IntegrationTest;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.core.AmqpAdmin;
+import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.Message;
+import org.springframework.amqp.core.Queue;
+import org.springframework.amqp.core.QueueBuilder;
+import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
@@ -21,25 +27,41 @@ class OutboxPublisherTest {
     @Autowired DomainEventPublisher publisher;
     @Autowired OutboxRepository outboxRepository;
     @Autowired RabbitTemplate rabbitTemplate;
+    @Autowired AmqpAdmin amqpAdmin;
 
     @Test
     void writes_to_outbox_then_relays_an_envelope_to_rabbit() {
-        long marker = System.nanoTime();
-        publisher.publish(EventTypes.SEAT_HELD, "seat", String.valueOf(marker),
-                new SeatHeldPayload(marker, "Z9", "tester", Instant.now()));
+        // this service declares no queues of its own (consumers own theirs), so bind a
+        // throwaway one to seat.held. Not exclusive: that ties the queue to the connection
+        // that declared it, and the cached connection the scheduled publisher shares can be
+        // replaced mid-test, taking the queue with it (404 NOT_FOUND on receive). Durable,
+        // because RabbitMQ 4 refuses a transient non-exclusive queue by closing the whole
+        // connection (541, transient_nonexcl_queues). x-expires cleans up after a test that
+        // dies before its finally block.
+        // (Not AnonymousQueue: it sets x-queue-master-locator, which RabbitMQ 4 rejects.)
+        Queue queue = QueueBuilder.durable("outbox-test-" + UUID.randomUUID()).expires(60_000).build();
+        amqpAdmin.declareQueue(queue);
+        amqpAdmin.declareBinding(BindingBuilder.bind(queue)
+                .to(new TopicExchange(RabbitConfig.EXCHANGE)).with(EventTypes.SEAT_HELD));
+        try {
+            long marker = System.nanoTime();
+            publisher.publish(EventTypes.SEAT_HELD, "seat", String.valueOf(marker),
+                    new SeatHeldPayload(marker, "Z9", "tester", Instant.now()));
 
-        // the durable seat-held-notifications queue (declared by RabbitConfig) is bound to
-        // seat.held; the @Scheduled OutboxPublisher relays our row there. Drain until we see it.
-        String body = await().atMost(Duration.ofSeconds(15)).until(() -> {
-            Message m = rabbitTemplate.receive(RabbitConfig.SEAT_HELD_QUEUE, 500);
-            return m == null ? null : new String(m.getBody(), StandardCharsets.UTF_8);
-        }, b -> b != null && b.contains(String.valueOf(marker)));
+            // the @Scheduled OutboxPublisher relays our row to the exchange. Drain until we see it.
+            String body = await().atMost(Duration.ofSeconds(15)).until(() -> {
+                Message m = rabbitTemplate.receive(queue.getName(), 500);
+                return m == null ? null : new String(m.getBody(), StandardCharsets.UTF_8);
+            }, b -> b != null && b.contains(String.valueOf(marker)));
 
-        assertThat(body).contains("\"type\":\"seat.held\"");
-        assertThat(body).contains("\"aggregateType\":\"seat\"");
-        assertThat(body).contains("\"eventId\":");
-        assertThat(body).contains("\"payload\":");
-        assertThat(body).contains("Z9");
+            assertThat(body).contains("\"type\":\"seat.held\"");
+            assertThat(body).contains("\"aggregateType\":\"seat\"");
+            assertThat(body).contains("\"eventId\":");
+            assertThat(body).contains("\"payload\":");
+            assertThat(body).contains("Z9");
+        } finally {
+            amqpAdmin.deleteQueue(queue.getName());
+        }
     }
 
     @Test

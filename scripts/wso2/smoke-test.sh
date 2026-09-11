@@ -5,16 +5,35 @@
 # limitation (see docs/wso2.md), so the token pass-through case prints the
 # gateway's own error code instead of quietly failing.
 #
-#   scripts/wso2/smoke-test.sh
+#   LOADTEST_USER=... LOADTEST_PASSWORD=... scripts/wso2/smoke-test.sh
+#
+# Required (from the environment, or else the repo's .env) -- the token comes
+# from the password grant on the confidential apextick-loadtest client:
+#   LOADTEST_USER, LOADTEST_PASSWORD, LOADTEST_CLIENT_SECRET
+#
+# Where it points: GATEWAY and KEYCLOAK when set; otherwise the public origin
+# when Keycloak runs with a KC_HOSTNAME (production: https://$SERVER_IP.nip.io,
+# with /api through Caddy to the gateway), else the local published ports.
 set -uo pipefail
 
-GATEWAY="${GATEWAY:-http://localhost:8280/api}"
-KEYCLOAK="${KEYCLOAK:-http://localhost:8180}"
+. "$(dirname "$0")/env.sh"
+env_default LOADTEST_USER LOADTEST_PASSWORD LOADTEST_CLIENT_SECRET SERVER_IP
+resolve_public_origin
+
+if [ -n "$PUBLIC_ORIGIN" ]; then
+  GATEWAY="${GATEWAY:-$PUBLIC_ORIGIN/api}"
+  KEYCLOAK="${KEYCLOAK:-$PUBLIC_ORIGIN}"
+else
+  GATEWAY="${GATEWAY:-http://localhost:8280/api}"
+  KEYCLOAK="${KEYCLOAK:-http://localhost:8180}"
+fi
 REALM="${REALM:-apextick}"
-CLIENT_ID="${CLIENT_ID:-apextick-web}"
-USERNAME="${LOADTEST_USER:-kalana}"
-PASSWORD="${LOADTEST_PASSWORD:-12345}"
+CLIENT_ID="${CLIENT_ID:-apextick-loadtest}"
 EVENT_SLUG="${EVENT_SLUG:-india-australia-semi-final}"
+
+for var in LOADTEST_USER LOADTEST_PASSWORD LOADTEST_CLIENT_SECRET; do
+  [ -n "${!var:-}" ] || { echo "ERROR: $var is not set (export it, or add it to .env)" >&2; exit 2; }
+done
 
 pass=0; fail=0
 ok()   { printf '  \033[32mPASS\033[0m %-44s %s\n' "$1" "$2"; pass=$((pass+1)); }
@@ -35,18 +54,21 @@ except Exception: print('')" 2>/dev/null)
   printf '%s %s' "$code" "$wsocode"
 }
 
-echo "Gateway: $GATEWAY"
+echo "Gateway: $GATEWAY  ·  Keycloak: $KEYCLOAK"
 
 TOKEN=$(curl -s "$KEYCLOAK/realms/$REALM/protocol/openid-connect/token" \
   -d grant_type=password -d "client_id=$CLIENT_ID" \
-  -d "username=$USERNAME" -d "password=$PASSWORD" \
+  --data-urlencode "client_secret=$LOADTEST_CLIENT_SECRET" \
+  --data-urlencode "username=$LOADTEST_USER" --data-urlencode "password=$LOADTEST_PASSWORD" \
   | python3 -c "import json,sys;print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null)
-[ -n "$TOKEN" ] || { echo "ERROR: could not get a Keycloak token" >&2; exit 1; }
+[ -n "$TOKEN" ] || { echo "ERROR: could not get a Keycloak token as $LOADTEST_USER via $CLIENT_ID" >&2; exit 1; }
 
-URL="$GATEWAY/events/$EVENT_SLUG"
+# A route that needs a caller, and a public one the SPA reads without a token.
+URL="$GATEWAY/me"
+PUBLIC_URL="$GATEWAY/events/$EVENT_SLUG"
 
 echo
-echo "1. Unauthenticated traffic dies at the edge"
+echo "1. Unauthenticated traffic to a protected route dies at the edge"
 read -r code wsocode <<<"$(probe "$URL")"
 # 900902 = Missing Credentials. The backend is never dialled.
 if [ "$code" = "401" ] && [ "$wsocode" = "900902" ]; then
@@ -63,7 +85,30 @@ else
 fi
 
 echo
-echo "2. A real Keycloak token is recognised"
+echo "2. Public routes stay public"
+# The contract marks booking-service's permitAll() routes x-auth-type: None
+# (scripts/wso2/normalise-openapi.py). Without that, WSO2 401s them and the
+# event page and seat map break for everyone.
+read -r code wsocode <<<"$(probe "$PUBLIC_URL")"
+if [ "$code" = "200" ]; then
+  ok "anonymous catalogue read" "200"
+else
+  bad "anonymous catalogue read" "expected 200, got $code / ${wsocode:-none}"
+fi
+
+# Stripe authenticates with a signature, never a bearer token. A bad signature
+# on a well-formed body must reach booking-service and fail its check there
+# (400); a 401 means the gateway swallowed it and paid orders never confirm.
+read -r code wsocode <<<"$(probe "$GATEWAY/payments/stripe/webhook" -X POST \
+  -H 'Content-Type: application/json' -H 'Stripe-Signature: t=0,v1=smoke-test' -d '{}')"
+case "$code" in
+  400) ok "unsigned Stripe webhook reaches the service" "400 from the signature check" ;;
+  401) bad "unsigned Stripe webhook reaches the service" "401 / ${wsocode:-none} -- blocked at the gateway" ;;
+  *)   bad "unsigned Stripe webhook reaches the service" "expected 400, got $code / ${wsocode:-none}" ;;
+esac
+
+echo
+echo "3. A real Keycloak token is recognised"
 read -r code wsocode <<<"$(probe "$URL" -H "Authorization: Bearer $TOKEN")"
 case "$code:$wsocode" in
   200:*)
@@ -74,7 +119,7 @@ case "$code:$wsocode" in
     # The signature and issuer checked out — the gateway got far enough to look
     # for a subscription, which is the step that needs the key mapping.
     note "Keycloak token validated, not subscribed" "403 / 900908"
-    note "" "see the 'Known limitations' section of docs/wso2.md"
+    note "" "is $CLIENT_ID mapped onto a subscribed application? re-run setup.sh"
     SUBSCRIBED=0
     ;;
   *)
@@ -84,7 +129,7 @@ case "$code:$wsocode" in
 esac
 
 echo
-echo "3. A burst of seat holds is throttled"
+echo "4. A burst of seat holds is throttled"
 if [ "${SUBSCRIBED:-0}" != "1" ]; then
   note "skipped" "throttling only kicks in after subscription validation"
 else

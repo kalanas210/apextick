@@ -11,18 +11,30 @@ import { Counter } from 'k6/metrics';
 //   * every seat that started AVAILABLE is now HELD  (all sold, none lost), and
 //   * no targeted seat is still AVAILABLE            (no seat sold twice / skipped).
 //
-// Auth is real: each run logs into Keycloak (direct grant) and calls the JWT-secured
-// hold endpoint with a Bearer token, exactly like the app does.
+// Auth is real: each run logs into Keycloak (password grant, on the confidential
+// apextick-loadtest client -- the SPA's public client doesn't accept it) and calls
+// the JWT-secured hold endpoint with a Bearer token, exactly like the app does.
 //
-// Run:  k6 run booking-load-test.js
-// Tune: k6 run -e VUS=200 -e ITERATIONS=5000 -e EVENT_SLUG=india-australia-semi-final booking-load-test.js
+// Credentials are required, never defaulted:
+//   LOADTEST_USER, LOADTEST_PASSWORD   the account to log in as
+//   LOADTEST_CLIENT_SECRET             apextick-loadtest's secret (from .env)
+//
+// Run:  k6 run -e LOADTEST_USER=... -e LOADTEST_PASSWORD=... -e LOADTEST_CLIENT_SECRET=... booking-load-test.js
+// Tune: add -e VUS=200 -e ITERATIONS=5000 -e EVENT_SLUG=india-australia-semi-final
+
+const REQUIRED = ['LOADTEST_USER', 'LOADTEST_PASSWORD', 'LOADTEST_CLIENT_SECRET'];
+const missing = REQUIRED.filter((name) => !__ENV[name]);
+if (missing.length > 0) {
+  throw new Error(`Set ${missing.join(', ')} (k6 run -e NAME=value, or export them) -- see the header of this file.`);
+}
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8081';
 const KEYCLOAK_URL = __ENV.KEYCLOAK_URL || 'http://localhost:8180';
 const REALM = __ENV.REALM || 'apextick';
-const CLIENT_ID = __ENV.CLIENT_ID || 'apextick-web';
-const USERNAME = __ENV.LOADTEST_USER || 'kalana';
-const PASSWORD = __ENV.LOADTEST_PASSWORD || '12345';
+const CLIENT_ID = __ENV.CLIENT_ID || 'apextick-loadtest';
+const CLIENT_SECRET = __ENV.LOADTEST_CLIENT_SECRET;
+const USERNAME = __ENV.LOADTEST_USER;
+const PASSWORD = __ENV.LOADTEST_PASSWORD;
 const EVENT_SLUG = __ENV.EVENT_SLUG || 'india-australia-semi-final';
 const VUS = Number(__ENV.VUS || 200);
 const ITERATIONS = Number(__ENV.ITERATIONS || 5000);
@@ -53,7 +65,13 @@ export const options = {
 function login() {
   const res = http.post(
     `${KEYCLOAK_URL}/realms/${REALM}/protocol/openid-connect/token`,
-    { grant_type: 'password', client_id: CLIENT_ID, username: USERNAME, password: PASSWORD },
+    {
+      grant_type: 'password',
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      username: USERNAME,
+      password: PASSWORD,
+    },
     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
   );
   if (res.status !== 200) {

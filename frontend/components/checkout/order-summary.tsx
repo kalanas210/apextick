@@ -14,6 +14,9 @@ export function OrderSummary({
   order: Order;
   secondsLeft?: number | null;
 }) {
+  const money = (value: number) =>
+    formatPrice(value, order.currency, { keepMinorUnits: true });
+
   return (
     <div className="rounded-2xl border border-line bg-ink-2 p-6">
       <div className="flex items-center justify-between">
@@ -49,7 +52,7 @@ export function OrderSummary({
               <span className="ml-2 text-[0.72rem] text-faint">{item.tierName}</span>
             </span>
             <span className="tnum text-[0.84rem] text-bone">
-              {formatPrice(item.unitPrice, order.currency)}
+              {money(item.unitPrice)}
             </span>
           </li>
         ))}
@@ -60,15 +63,15 @@ export function OrderSummary({
           <dt>
             Subtotal<span className="tnum"> ({order.items.length})</span>
           </dt>
-          <dd className="tnum text-bone">{formatPrice(order.subtotal, order.currency)}</dd>
+          <dd className="tnum text-bone">{money(order.subtotal)}</dd>
         </div>
         <div className="flex justify-between text-muted">
           <dt>Booking fee</dt>
-          <dd className="tnum text-bone">{formatPrice(order.fee, order.currency)}</dd>
+          <dd className="tnum text-bone">{money(order.fee)}</dd>
         </div>
         <div className="mt-1 flex items-baseline justify-between border-t border-line pt-3">
           <dt className="font-display text-base text-bone">Total</dt>
-          <dd className="tnum text-xl text-bone">{formatPrice(order.total, order.currency)}</dd>
+          <dd className="tnum text-xl text-bone">{money(order.total)}</dd>
         </div>
       </dl>
     </div>

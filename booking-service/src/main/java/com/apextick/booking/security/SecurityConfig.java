@@ -34,6 +34,9 @@ public class SecurityConfig {
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/api/ws/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/payments/stripe/webhook").permitAll()
+                        // per-caller read under the public events tree; must precede the permitAll below,
+                        // or an anonymous call reaches the controller with no user and fails with a 500
+                        .requestMatchers(HttpMethod.GET, "/api/events/*/holds/me").authenticated()
                         .requestMatchers(HttpMethod.GET,
                                 "/api/series/**", "/api/events/**", "/api/payments/config").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")

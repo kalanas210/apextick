@@ -24,7 +24,8 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
-    show-sql: true
+    # off by default: statement logging is costly under load; SPRING_JPA_SHOW_SQL=true turns it on for debugging
+    show-sql: ${SPRING_JPA_SHOW_SQL:false}
     properties:
       hibernate:
         format_sql: true

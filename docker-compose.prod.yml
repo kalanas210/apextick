@@ -1,6 +1,11 @@
 # Production stack for the EC2 deployment. Only Caddy is published to the
 # internet (80/443); everything else talks over the internal docker network, so
-# 3000 / 8081 / 8180 stay closed at the security group.
+# 3000 / 8081 / 8180 stay closed at the security group. Admin surfaces (the
+# Keycloak console, WSO2 portals, Grafana, Prometheus) bind to loopback only.
+#
+# Credentials have no fallback values here: compose refuses to start until
+# each one is set in .env, rather than quietly running with a well-known
+# default (see .env.example for the list).
 #
 # Images are pulled, not built: CI publishes them to GHCR on every push to main.
 # Override *_IMAGE in .env to pin a tag or use a different registry.
@@ -10,8 +15,8 @@ services:
     container_name: apextick-postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       # notification-service owns its own database (database-per-service)
       POSTGRES_MULTIPLE_DATABASES: apextick_notifications
     volumes:
@@ -31,8 +36,8 @@ services:
     container_name: apextick-keycloak
     command: start-dev --import-realm
     environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:?KEYCLOAK_ADMIN must be set}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD must be set}
       # SMTP for verification / password-reset mail. Defaults hit the bundled
       # Mailpit; set SMTP_* in .env to send through a real provider.
       SMTP_HOST: ${SMTP_HOST:-mailpit}
@@ -44,10 +49,31 @@ services:
       SMTP_SSL: ${SMTP_SSL:-false}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      # Client secrets and the site origin the realm import fills in
+      # (keycloak/README.md). An unset placeholder would import as its own,
+      # publicly known text, so there is no fallback here.
+      WSO2_KM_CLIENT_SECRET: ${WSO2_KM_CLIENT_SECRET:?WSO2_KM_CLIENT_SECRET must be set}
+      LOADTEST_CLIENT_SECRET: ${LOADTEST_CLIENT_SECRET:?LOADTEST_CLIENT_SECRET must be set}
+      APP_WEB_URL: https://${SERVER_IP}.nip.io
+      DEMO_USER_EMAIL: ${DEMO_USER_EMAIL:-kalana@apextick.local}
       # Behind the Caddy reverse proxy: trust X-Forwarded-* and advertise the
       # public HTTPS URL so issuer / auth / redirect URLs are correct.
       KC_PROXY_HEADERS: xforwarded
       KC_HOSTNAME: https://${SERVER_IP}.nip.io
+      # The admin console is not published through Caddy. It is served on the
+      # loopback-only port below and reached over an SSH tunnel, like the WSO2
+      # portals:  ssh -L 8180:localhost:8180 ubuntu@<host>
+      # (stop the local dev stack first: it also listens on 8180, and ssh only
+      # warns when it can't bind), then open http://localhost:8180/admin/.
+      # Its login runs in the master realm, whose pages would otherwise post
+      # back to the public hostname (where Caddy closes that realm), so point
+      # the master realm at the tunnel as well. start-dev keeps Keycloak's data
+      # inside the container, so repeat this whenever it is recreated:
+      #   docker exec -it apextick-keycloak /opt/keycloak/bin/kcadm.sh config credentials --config /tmp/kcadm.config --server http://localhost:8080 --realm master --user <KEYCLOAK_ADMIN>
+      #   docker exec apextick-keycloak /opt/keycloak/bin/kcadm.sh update realms/master --config /tmp/kcadm.config -s attributes.frontendUrl=http://localhost:8180
+      KC_HOSTNAME_ADMIN: http://localhost:8180
+    ports:
+      - "127.0.0.1:8180:8080"
     volumes:
       - ./keycloak/import:/opt/keycloak/data/import
       # branded login screens; Keycloak reads themes from this directory
@@ -58,8 +84,8 @@ services:
     image: rabbitmq:4-management
     container_name: apextick-rabbitmq
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?RABBITMQ_USER must be set}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD must be set}
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
       interval: 10s
@@ -79,8 +105,8 @@ services:
     container_name: apextick-minio
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?S3_ACCESS_KEY must be set}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?S3_SECRET_KEY must be set}
     volumes:
       - apextick_minio:/data
     healthcheck:
@@ -115,10 +141,10 @@ services:
         condition: service_started
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      RABBITMQ_USER: ${RABBITMQ_USER}
-      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      RABBITMQ_USER: ${RABBITMQ_USER:?RABBITMQ_USER must be set}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD must be set}
       SPRING_RABBITMQ_HOST: rabbitmq
       SPRING_DATA_REDIS_HOST: redis
       # Keys are fetched server-side over the internal docker network, but the
@@ -133,11 +159,13 @@ services:
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_SUPPORTED_CURRENCIES: ${STRIPE_SUPPORTED_CURRENCIES:-}
       S3_ENABLED: ${S3_ENABLED:-true}
       S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
       S3_BUCKET: ${S3_BUCKET:-apextick-tickets}
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
-      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY must be set}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY must be set}
     restart: unless-stopped
 
   notification-service:
@@ -152,14 +180,26 @@ services:
         condition: service_started
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/apextick_notifications
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       SPRING_RABBITMQ_HOST: rabbitmq
       SPRING_RABBITMQ_PORT: 5672
-      RABBITMQ_USER: ${RABBITMQ_USER}
-      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      RABBITMQ_USER: ${RABBITMQ_USER:?RABBITMQ_USER must be set}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD must be set}
+      # Same SMTP_* as Keycloak; a real provider needs the login and STARTTLS.
       SPRING_MAIL_HOST: ${SMTP_HOST:-mailpit}
       SPRING_MAIL_PORT: ${SMTP_PORT:-1025}
+      SPRING_MAIL_USERNAME: ${SMTP_USER:-}
+      SPRING_MAIL_PASSWORD: ${SMTP_PASSWORD:-}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH: ${SMTP_AUTH:-false}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: ${SMTP_STARTTLS:-false}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_ENABLE: ${SMTP_SSL:-false}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_CONNECTIONTIMEOUT: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_CONNECTIONTIMEOUT:-10000}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_TIMEOUT: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_TIMEOUT:-10000}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_WRITETIMEOUT: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_WRITETIMEOUT:-10000}
+      # Gmail rewrites a From that isn't the authenticated account, so fall
+      # back to SMTP_FROM before the placeholder address.
+      MAIL_FROM: ${MAIL_FROM:-${SMTP_FROM:-no-reply@apextick.local}}
       APP_WEB_URL: https://${SERVER_IP}.nip.io
     restart: unless-stopped
 
@@ -179,7 +219,7 @@ services:
       keycloak:
         condition: service_started
     environment:
-      WSO2_ADMIN_PASSWORD: ${WSO2_ADMIN_PASSWORD}
+      WSO2_ADMIN_PASSWORD: ${WSO2_ADMIN_PASSWORD:?WSO2_ADMIN_PASSWORD must be set}
       JVM_MEM_OPTS: ${WSO2_JVM_MEM_OPTS:--Xms1g -Xmx2g}
     mem_limit: ${WSO2_MEM_LIMIT:-3g}
     ports:
@@ -199,7 +239,8 @@ services:
 
   # TLS-terminating reverse proxy. Serves one HTTPS origin
   # (https://<SERVER_IP>.nip.io) and routes by path:
-  #   /realms,/resources,/admin,/js -> keycloak   /api -> wso2am   else -> frontend
+  #   /realms,/resources,/js -> keycloak   /api -> wso2am   else -> frontend
+  # (including /admin, the app's admin panel -- Keycloak's console is not public)
   # Caddy auto-provisions a browser-trusted cert via ACME (ports 80/443).
   caddy:
     image: caddy:2-alpine
@@ -217,7 +258,10 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # The directory, not the file: git replaces the Caddyfile on checkout, and
+      # a single-file bind mount would keep showing the container the old one,
+      # so even `caddy reload` would reload stale routes.
+      - ./caddy:/etc/caddy:ro
       - caddy_data:/data
       - caddy_config:/config
     restart: unless-stopped
@@ -226,7 +270,7 @@ services:
   #   docker compose -f docker-compose.prod.yml --profile observability up -d
   # Bound to loopback only — reach them over an SSH tunnel rather than the
   # public interface, e.g.
-  #   ssh -L 3001:localhost:3001 -L 9090:localhost:9090 ec2-user@<host>
+  #   ssh -L 3001:localhost:3001 -L 9090:localhost:9090 ubuntu@<host>
   prometheus:
     image: prom/prometheus:v2.55.1
     container_name: apextick-prometheus
@@ -244,7 +288,7 @@ services:
     profiles: ["observability"]
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD must be set}
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro

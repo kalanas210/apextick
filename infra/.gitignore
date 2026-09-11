@@ -3,3 +3,5 @@
 *.tfstate.*
 crash.log
 apextick-key
+# per-operator inputs such as admin_cidr (your own public IP)
+*.tfvars

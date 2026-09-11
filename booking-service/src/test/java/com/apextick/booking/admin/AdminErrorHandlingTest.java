@@ -1,5 +1,14 @@
 package com.apextick.booking.admin;
 
+import com.apextick.booking.hold.HoldService;
+import com.apextick.booking.order.Order;
+import com.apextick.booking.order.OrderRepository;
+import com.apextick.booking.order.OrderService;
+import com.apextick.booking.order.OrderStatus;
+import com.apextick.booking.order.dto.CreateOrderRequest;
+import com.apextick.booking.order.dto.OrderResponse;
+import com.apextick.booking.security.CurrentUser;
+import com.apextick.booking.seat.SeatRepository;
 import com.apextick.booking.support.IntegrationTest;
 import com.apextick.booking.support.TestTokens;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -10,7 +19,10 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -26,6 +38,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AdminErrorHandlingTest {
 
     @Autowired MockMvc mvc;
+    @Autowired SeatRepository seatRepository;
+    @Autowired HoldService holdService;
+    @Autowired OrderService orderService;
+    @Autowired OrderRepository orderRepository;
 
     private final ObjectMapper json = new ObjectMapper();
 
@@ -34,9 +50,14 @@ class AdminErrorHandlingTest {
     }
 
     private long createEvent(String slug) throws Exception {
+        return createEvent(slug, "draft");
+    }
+
+    private long createEvent(String slug, String status) throws Exception {
         Map<String, Object> event = Map.of(
                 "name", "Error Fixture", "slug", slug, "sport", "football",
-                "startsAt", "2027-05-01T18:00:00Z", "venue", "Test Arena", "currency", "USD");
+                "startsAt", "2027-05-01T18:00:00Z", "venue", "Test Arena", "currency", "USD",
+                "status", status);
         String created = mvc.perform(post("/api/admin/events").header("Authorization", adminToken())
                         .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(event)))
                 .andExpect(status().isCreated())
@@ -110,6 +131,36 @@ class AdminErrorHandlingTest {
                 .andExpect(jsonPath("$.length()").value(0));
         mvc.perform(get("/api/events/" + slug))
                 .andExpect(status().isNotFound());
+    }
+
+    /**
+     * A cancelled order is still a sales record (it can carry a refunded payment), and it
+     * references the event and its seats by plain foreign keys. So even an event whose only
+     * order was cancelled refuses deletion and points the admin at cancelling it instead.
+     */
+    @Test
+    void an_event_with_only_a_cancelled_order_is_not_deleted() throws Exception {
+        String slug = "error-delete-cancelled-" + System.nanoTime();
+        long eventId = createEvent(slug, "onsale");
+        applyLayout(eventId);
+
+        CurrentUser buyer = new CurrentUser("delete-guard-buyer", "dgbuyer", "dg@apextick.local",
+                "Delete Guard", Set.of("user"));
+        List<Long> seatIds = List.of(seatRepository.findByEventIdOrderByIdAsc(eventId).get(0).getId());
+        holdService.hold(slug, seatIds, buyer);
+        OrderResponse order = orderService.create(new CreateOrderRequest(eventId, seatIds),
+                "delete-guard-" + System.nanoTime(), buyer);
+        orderService.cancel(UUID.fromString(order.id()), buyer);
+
+        mvc.perform(delete("/api/admin/events/" + eventId).header("Authorization", adminToken()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("EVENT_HAS_ORDERS"))
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("cancelled")));
+
+        assertThat(orderRepository.findById(UUID.fromString(order.id()))).get()
+                .extracting(Order::getStatus).isEqualTo(OrderStatus.CANCELLED);
+        mvc.perform(get("/api/events/" + slug))
+                .andExpect(status().isOk());
     }
 
     /**
