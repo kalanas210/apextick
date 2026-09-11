@@ -39,6 +39,13 @@ spring:
     properties:
       mail.smtp.auth: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH:false}
       mail.smtp.starttls.enable: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE:false}
+      # Implicit TLS for providers on port 465; STARTTLS (587) leaves this off.
+      mail.smtp.ssl.enable: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_ENABLE:false}
+      # JavaMail waits forever by default, so a hung SMTP server would stall the
+      # consumer (and its open DB transaction) instead of failing into a retry.
+      mail.smtp.connectiontimeout: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_CONNECTIONTIMEOUT:10000}
+      mail.smtp.timeout: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_TIMEOUT:10000}
+      mail.smtp.writetimeout: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_WRITETIMEOUT:10000}
 
 management:
   endpoints:

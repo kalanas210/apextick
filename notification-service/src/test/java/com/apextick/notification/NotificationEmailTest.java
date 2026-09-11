@@ -15,6 +15,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -48,6 +49,7 @@ class NotificationEmailTest {
     @Autowired ProcessedEventRepository processed;
     @Autowired NotificationLogRepository logs;
     @Autowired tools.jackson.databind.ObjectMapper mapper;
+    @Autowired JavaMailSenderImpl mailSender;
 
     private Map<String, Object> bookingPayload(String email) {
         Map<String, Object> event = new LinkedHashMap<>();
@@ -112,6 +114,16 @@ class NotificationEmailTest {
         assertThat(greenMail.getReceivedMessages()[0].getSubject()).contains("World Cup Final");
         await().atMost(Duration.ofSeconds(5))
                 .untilAsserted(() -> assertThat(processed.findById(eventId)).isPresent());
+    }
+
+    @Test
+    void smtp_calls_are_bounded_by_timeouts() {
+        // JavaMail's own defaults are infinite; a hung server must fail the send instead.
+        assertThat(mailSender.getJavaMailProperties())
+                .containsEntry("mail.smtp.connectiontimeout", "10000")
+                .containsEntry("mail.smtp.timeout", "10000")
+                .containsEntry("mail.smtp.writetimeout", "10000")
+                .containsEntry("mail.smtp.ssl.enable", "false");
     }
 
     @Test
