@@ -55,9 +55,10 @@ It needs one secret: `WSO2_KM_CLIENT_SECRET`, the client secret of the
 `${WSO2_KM_CLIENT_SECRET}` placeholder that Keycloak fills from its own
 environment, so the same value has to be in `.env` for compose (which hands it
 to Keycloak) and for `setup.sh` (which hands it to WSO2). The script reads
-`.env` itself and stops if the value is missing. Re-running it re-applies the
-key-manager registration, which is how a rotated secret reaches the gateway —
-see [keycloak/README.md](../keycloak/README.md) for rotating it on a realm that
+`.env` itself, and stops before touching the gateway if the value is missing
+or Keycloak doesn't accept it. Re-running it re-applies the key-manager
+registration, which is how a rotated secret reaches the gateway — see
+[keycloak/README.md](../keycloak/README.md) for rotating it on a realm that
 already exists.
 
 `smoke-test.sh` logs a real user in with the password grant on the

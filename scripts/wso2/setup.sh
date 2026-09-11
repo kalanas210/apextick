@@ -36,6 +36,9 @@
 #                        testing outside the gateway; to exercise the gateway path
 #                        locally use host.docker.internal instead -- see docs/wso2.md.
 #   KEYCLOAK_CONTAINER   apextick-keycloak (where KC_HOSTNAME is read from)
+#   KEYCLOAK             Keycloak as this host reaches it, to check the secret below
+#                        before WSO2 is told about it: KC_HOSTNAME when it has one,
+#                        otherwise http://localhost:8180
 #
 # Required (from the environment, or else the repo's .env):
 #   WSO2_KM_CLIENT_SECRET  the secret Keycloak imported for apextick-wso2-km. The realm
@@ -80,6 +83,10 @@ case "$WSO2_KM_CLIENT_SECRET" in
   # What Keycloak stores when the variable never reached it: a publicly known
   # secret, and one the gateway must not be configured to rely on.
   '${'*) die "WSO2_KM_CLIENT_SECRET is the unresolved placeholder '$WSO2_KM_CLIENT_SECRET'" ;;
+  # The value the realm file used to commit, and so what a realm imported before
+  # that changed still holds. Public either way: rotate it first.
+  apextick-wso2-km-secret)
+    die "WSO2_KM_CLIENT_SECRET is the old committed secret -- rotate it (keycloak/README.md) and put the new one in .env" ;;
 esac
 
 # A key manager registered with the wrong issuer rejects every token, and the
@@ -90,6 +97,31 @@ if [ -n "$PUBLIC_ORIGIN" ]; then
     *) die "WSO2_KC_ISSUER=$WSO2_KC_ISSUER, but Keycloak issues tokens as $PUBLIC_ORIGIN (KC_HOSTNAME)" ;;
   esac
 fi
+
+KEYCLOAK="${KEYCLOAK:-${PUBLIC_ORIGIN:-http://localhost:8180}}"
+
+# The key manager below is re-applied even on a gateway that already works, so
+# a secret Keycloak doesn't hold -- a freshly generated one in .env, say, on a
+# realm that was imported before the secret moved out of the realm file -- would
+# break a working gateway. Ask Keycloak first.
+step "Checking WSO2_KM_CLIENT_SECRET against Keycloak"
+km_token_code() {
+  curl -s -o /dev/null -w '%{http_code}' -d grant_type=client_credentials \
+    --data-urlencode "client_id=$WSO2_KM_CLIENT_ID" --data-urlencode "client_secret=$1" \
+    "$KEYCLOAK/realms/apextick/protocol/openid-connect/token" || true
+}
+CODE=$(km_token_code "$WSO2_KM_CLIENT_SECRET")
+case "$CODE" in
+  200) info "accepted by $KEYCLOAK" ;;
+  400|401)
+    for known in '${WSO2_KM_CLIENT_SECRET}' apextick-wso2-km-secret; do
+      if [ "$(km_token_code "$known")" = "200" ]; then
+        die "Keycloak's secret for $WSO2_KM_CLIENT_ID is '$known', which anyone reading this repo knows -- rotate it (keycloak/README.md), then re-run"
+      fi
+    done
+    die "Keycloak rejects WSO2_KM_CLIENT_SECRET for $WSO2_KM_CLIENT_ID ($CODE) -- .env and the realm disagree; see keycloak/README.md" ;;
+  *) printf '\033[33m    WARNING: could not check it -- %s answered %s\033[0m\n' "$KEYCLOAK" "${CODE:-nothing}" ;;
+esac
 
 API_NAME="ApexTickAPI"
 API_CONTEXT="api"   # no leading slash: Git Bash would rewrite it as a path
