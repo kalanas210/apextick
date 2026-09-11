@@ -39,7 +39,11 @@ Generate a secret with `openssl rand -hex 32`.
 - The SPA's client, `apextick-web`, is public and takes authorization code +
   PKCE only. The password grant (for k6, the gateway smoke test, curl) lives on
   the confidential `apextick-loadtest` client, so guessing passwords at the
-  token endpoint needs a secret first.
+  token endpoint needs a secret first. That includes Keycloak's own public
+  `admin-cli`, which every realm gets with the password grant on: the import
+  defines it with that grant off.
+- The seeded `kalana` account has a fixed id, so a fresh import gives it the
+  same `sub` and its bookings stay attached to it.
 - `sslRequired: external` -- plain HTTP is accepted only from localhost and
   private addresses (local dev, the docker network, Caddy with
   `KC_PROXY_HEADERS`); a public client has to use HTTPS.
@@ -62,11 +66,26 @@ default algorithm at the first login. To regenerate it: PBKDF2WithHmacSHA512,
 
 None of the above reaches a Keycloak that imported an older version of this
 file -- production, for one, where `apextick-wso2-km` still has the secret
-that used to be committed here. Recreating the container to force a fresh
-import would also drop every account registered since (the dev-mode database
-lives inside the container), so patch it through the Admin API instead. From
-the repo checkout the stack runs from, with the two new secrets already in
-`.env`:
+that used to be committed here. There are two ways to bring it up to date, and
+the choice is really about the accounts in it: the dev-mode database lives
+inside the container, so **any recreate drops every account registered since
+the last import** and re-imports this file.
+
+**Recreating is what a plain `docker compose -f docker-compose.prod.yml up -d`
+does after this change**, because the keycloak service gained environment
+variables and a loopback port. A fresh import gets everything above in one go
+(the demo account keeps its `sub`); self-registered accounts are gone, and so
+is every role granted with `scripts/grant-admin.sh` and the master-realm
+`frontendUrl` the console tunnel needs (see docker-compose.prod.yml). Run
+`scripts/wso2/setup.sh` afterwards so WSO2 picks up the new key-manager secret.
+
+**To keep the accounts**, leave the running container alone -- update the
+other services by name with `--no-deps` (e.g.
+`docker compose -f docker-compose.prod.yml up -d --no-deps booking-service
+notification-service frontend caddy wso2am`) -- and patch the realm through
+the Admin API instead. The console's loopback port only appears when Keycloak
+is eventually recreated; until then use `docker exec` as below. From the repo
+checkout the stack runs from, with the two new secrets already in `.env`:
 
 ```bash
 kc() { docker exec -i apextick-keycloak /opt/keycloak/bin/kcadm.sh "$@"; }
@@ -80,12 +99,15 @@ kc config credentials --server http://localhost:8080 --realm master \
 kc update "clients/$(id_of apextick-wso2-km)" -r apextick \
   -s "secret=$(env_of WSO2_KM_CLIENT_SECRET)"
 
-# The password grant moves off the SPA's public client.
-kc create clients -r apextick -s clientId=apextick-loadtest -s publicClient=false \
+# The password grant moves off the SPA's public client (and Keycloak's own
+# admin-cli). Safe to re-run: apextick-loadtest is only created when missing.
+[ -n "$(id_of apextick-loadtest)" ] || kc create clients -r apextick \
+  -s clientId=apextick-loadtest -s publicClient=false \
   -s standardFlowEnabled=false -s directAccessGrantsEnabled=true \
   -s "secret=$(env_of LOADTEST_CLIENT_SECRET)" \
   -s 'defaultClientScopes=["web-origins","acr","profile","roles","basic","email","wso2-audience"]'
 kc update "clients/$(id_of apextick-web)" -r apextick -s directAccessGrantsEnabled=false
+kc update "clients/$(id_of admin-cli)" -r apextick -s directAccessGrantsEnabled=false
 
 # Realm settings. Existing passwords, the demo account's included, keep working:
 # the policy is checked when a password is set, not at login.
