@@ -42,6 +42,15 @@ jobs:
         run: |
           chmod +x mvnw
           ./mvnw -B verify
+      # verify writes the live springdoc document to target/openapi; the
+      # contract WSO2 publishes must be exactly that, normalised.
+      - name: OpenAPI contract
+        run: |
+          python3 scripts/wso2/normalise-openapi.py booking-service/target/openapi/api-docs.json wso2/apextick-api/openapi.json
+          if ! git diff --exit-code -- wso2/apextick-api/openapi.json; then
+            echo "::error file=wso2/apextick-api/openapi.json::The WSO2 API contract no longer matches the booking service. Run scripts/wso2/refresh-openapi.sh against a running booking-service (or, after ./mvnw verify, python3 scripts/wso2/normalise-openapi.py booking-service/target/openapi/api-docs.json wso2/apextick-api/openapi.json) and commit the result."
+            exit 1
+          fi
 
   notification-service:
     name: Notification Service
