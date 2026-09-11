@@ -32,9 +32,14 @@ class OutboxPublisherTest {
     @Test
     void writes_to_outbox_then_relays_an_envelope_to_rabbit() {
         // this service declares no queues of its own (consumers own theirs), so bind a
-        // throwaway one to seat.held: exclusive and auto-delete, gone with the connection.
+        // throwaway one to seat.held. Not exclusive: that ties the queue to the connection
+        // that declared it, and the cached connection the scheduled publisher shares can be
+        // replaced mid-test, taking the queue with it (404 NOT_FOUND on receive). Durable,
+        // because RabbitMQ 4 refuses a transient non-exclusive queue by closing the whole
+        // connection (541, transient_nonexcl_queues). x-expires cleans up after a test that
+        // dies before its finally block.
         // (Not AnonymousQueue: it sets x-queue-master-locator, which RabbitMQ 4 rejects.)
-        Queue queue = QueueBuilder.nonDurable("outbox-test-" + UUID.randomUUID()).exclusive().autoDelete().build();
+        Queue queue = QueueBuilder.durable("outbox-test-" + UUID.randomUUID()).expires(60_000).build();
         amqpAdmin.declareQueue(queue);
         amqpAdmin.declareBinding(BindingBuilder.bind(queue)
                 .to(new TopicExchange(RabbitConfig.EXCHANGE)).with(EventTypes.SEAT_HELD));
