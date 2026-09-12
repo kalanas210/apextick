@@ -44,8 +44,12 @@ import { Counter } from 'k6/metrics';
 //    (booking-service .../platform/RateLimitHttpTest.java). A full-inventory sweep
 //    needs far more than 30 attempts per identity, so raise the limit for the run:
 //      APP_RATE_LIMIT_HOLD_LIMIT=100000 docker compose up -d booking-service
-//    Leaving it at 30 is also a valid run -- you then measure the limiter, and
-//    holds_throttled reports how much of the storm it absorbed.
+//    Leaving it at 30 measures the limiter instead of the sale: most of the storm
+//    comes back 429, holds_throttled reports how much it absorbed, and holds_won
+//    stops well short of the inventory -- so the run ends RED on the holds_won
+//    threshold. That is the limiter doing its job, not a failure, but only the
+//    raised-limit run is a sell-out proof. Every other invariant (no seat written
+//    twice, every holder from the pool) is checked either way.
 // 3. Run:
 //      export LOADTEST_USER=kalana LOADTEST_PASSWORD=...
 //      export LOADTEST_ADMIN_USER=kalana LOADTEST_ADMIN_PASSWORD=...
