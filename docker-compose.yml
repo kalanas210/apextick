@@ -104,6 +104,18 @@ services:
       # locally, since that container can't resolve "localhost" as the host
       # machine (see docs/wso2.md).
       JWT_ISSUER_URI: ${JWT_ISSUER_URI:-http://localhost:8180/realms/apextick}
+      # Abuse controls, declared with their application.yml defaults so a run can
+      # override them from the shell or .env. Compose only forwards variables a
+      # service declares, so without these lines the load test's documented
+      # `APP_RATE_LIMIT_HOLD_LIMIT=100000 docker compose up -d booking-service`
+      # would silently leave the container on 30/min (load-test/booking-load-test.js).
+      APP_RATE_LIMIT_ENABLED: ${APP_RATE_LIMIT_ENABLED:-true}
+      APP_RATE_LIMIT_HOLD_LIMIT: ${APP_RATE_LIMIT_HOLD_LIMIT:-30}
+      APP_RATE_LIMIT_HOLD_WINDOW: ${APP_RATE_LIMIT_HOLD_WINDOW:-PT1M}
+      # Seats one person may hold on one event. A k6 sell-out proof needs
+      # ceil(inventory / this) identities, so raising it is the alternative to
+      # seeding a bigger pool.
+      APP_HOLD_MAX_SEATS: ${APP_HOLD_MAX_SEATS:-8}
       APP_PAYMENT_PROVIDER: ${APP_PAYMENT_PROVIDER:-mock}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
