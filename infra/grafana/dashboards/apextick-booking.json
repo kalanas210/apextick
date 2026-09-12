@@ -20,7 +20,7 @@
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "targets": [
         { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(http_server_requests_seconds_count{uri=\"/api/events/{idOrSlug}/holds\", status=\"201\"})" }
+          "expr": "sum(http_server_requests_seconds_count{uri=\"/api/events/{idOrSlug}/holds\", method=\"POST\", status=\"201\"})" }
       ]
     },
     {
@@ -33,7 +33,7 @@
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "targets": [
         { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(http_server_requests_seconds_count{uri=\"/api/events/{idOrSlug}/holds\", status=\"409\"})" }
+          "expr": "sum(http_server_requests_seconds_count{uri=\"/api/events/{idOrSlug}/holds\", method=\"POST\", status=\"409\"})" }
       ]
     },
     {
@@ -65,14 +65,14 @@
     {
       "id": 5,
       "type": "timeseries",
-      "title": "Seat-hold outcomes (req/s)",
+      "title": "Seat-hold outcomes (POST, req/s)",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 20, "stacking": { "mode": "normal", "group": "A" } } }, "overrides": [] },
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum"] }, "tooltip": { "mode": "multi" } },
       "targets": [
         { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (status) (rate(http_server_requests_seconds_count{uri=\"/api/events/{idOrSlug}/holds\"}[1m]))",
+          "expr": "sum by (status) (rate(http_server_requests_seconds_count{uri=\"/api/events/{idOrSlug}/holds\", method=\"POST\"}[1m]))",
           "legendFormat": "HTTP {{status}}" }
       ]
     },
