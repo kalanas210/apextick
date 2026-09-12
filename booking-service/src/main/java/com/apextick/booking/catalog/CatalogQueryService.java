@@ -73,11 +73,16 @@ public class CatalogQueryService {
     }
 
     private PageResponse<EventSummaryResponse> search(Specification<Event> spec, int page, int size, String sort) {
-        Sort order = "latest".equalsIgnoreCase(sort)
-                ? Sort.by("startsAt").descending()
+        // `price` orders on an aggregate the Pageable cannot express, so the
+        // specification carries the ORDER BY and the Pageable stays unsorted --
+        // a sorted one would overwrite it. See EventSpecifications#orderByFromPrice.
+        boolean byPrice = "price".equalsIgnoreCase(sort);
+        Sort order = byPrice ? Sort.unsorted()
+                : "latest".equalsIgnoreCase(sort) ? Sort.by("startsAt").descending()
                 : Sort.by("startsAt").ascending();
+        Specification<Event> effective = byPrice ? spec.and(EventSpecifications.orderByFromPrice()) : spec;
         Pageable pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100), order);
-        Page<Event> events = eventRepository.findAll(spec, pageable);
+        Page<Event> events = eventRepository.findAll(effective, pageable);
         List<Long> ids = events.getContent().stream().map(Event::getId).toList();
 
         Map<Long, SeatRepository.SeatCountView> counts = ids.isEmpty() ? Map.of()

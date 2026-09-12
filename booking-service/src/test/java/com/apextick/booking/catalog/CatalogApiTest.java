@@ -1,10 +1,17 @@
 package com.apextick.booking.catalog;
 
 import com.apextick.booking.support.IntegrationTest;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -40,6 +47,36 @@ class CatalogApiTest {
         mvc.perform(get("/api/events?size=100&q=ApexTick Live"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content.length()").value(0));
+    }
+
+    /**
+     * The storefront's "Price" sort. It orders on the cheapest tier, which lives in
+     * another table, so the ordering rides on the specification rather than the
+     * Pageable -- and a page that came back in kickoff order would still look
+     * plausible. Assert the prices themselves are non-decreasing.
+     */
+    @Test
+    void events_can_be_sorted_by_their_cheapest_seat() throws Exception {
+        assertThat(fromPrices("/api/events?size=100&sort=price")).hasSizeGreaterThan(1).isSorted();
+        // the control: kickoff order is not already price order, so the assertion above bites
+        List<BigDecimal> byKickoff = fromPrices("/api/events?size=100");
+        assertThat(byKickoff).isNotEqualTo(byKickoff.stream().sorted().toList());
+    }
+
+    /** Every non-null `fromPrice` on a catalog page, in the order the API returned them. */
+    private List<BigDecimal> fromPrices(String url) throws Exception {
+        String body = mvc.perform(get(url))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        List<BigDecimal> prices = new ArrayList<>();
+        for (JsonNode event : new ObjectMapper().readTree(body).get("content")) {
+            JsonNode from = event.get("fromPrice");
+            if (from != null && !from.isNull()) {
+                prices.add(from.decimalValue());
+            }
+        }
+        return prices;
     }
 
     @Test
