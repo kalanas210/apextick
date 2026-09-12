@@ -13,14 +13,14 @@
     {
       "id": 1,
       "type": "stat",
-      "title": "Holds won (200)",
+      "title": "Holds won (201)",
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "green" }, "unit": "short" }, "overrides": [] },
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "targets": [
         { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(http_server_requests_seconds_count{uri=\"/api/seats/{seatId}/hold\", status=\"200\"})" }
+          "expr": "sum(http_server_requests_seconds_count{uri=\"/api/events/{idOrSlug}/holds\", status=\"201\"})" }
       ]
     },
     {
@@ -33,7 +33,7 @@
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "targets": [
         { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(http_server_requests_seconds_count{uri=\"/api/seats/{seatId}/hold\", status=\"409\"})" }
+          "expr": "sum(http_server_requests_seconds_count{uri=\"/api/events/{idOrSlug}/holds\", status=\"409\"})" }
       ]
     },
     {
@@ -72,7 +72,7 @@
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum"] }, "tooltip": { "mode": "multi" } },
       "targets": [
         { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (status) (rate(http_server_requests_seconds_count{uri=\"/api/seats/{seatId}/hold\"}[1m]))",
+          "expr": "sum by (status) (rate(http_server_requests_seconds_count{uri=\"/api/events/{idOrSlug}/holds\"}[1m]))",
           "legendFormat": "HTTP {{status}}" }
       ]
     },
