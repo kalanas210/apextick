@@ -73,7 +73,10 @@ export interface Series {
     tint: string | null;
     kicker: string | null;
     blurb: string | null;
+    /** The longer editorial paragraph the series band on the home page runs. */
+    story: string | null;
     image: string | null;
+    mobileHeroImage: string | null;
     currency: Currency;
     currencySymbol: string;
     cities: string[];
@@ -111,29 +114,13 @@ export interface EventSummary {
     salesEndAt: string | null;
 }
 
-export interface EventDetail {
-    id: number;
-    slug: string;
-    name: string;
-    seriesId?: number | null;
-    sport?: Sport;
-    home?: Team | null;
-    away?: Team | null;
-    startsAt: string;
-    timeZone: string;
-    stadium: string;
-    city: string;
-    country: string;
-    stage?: string | null;
-    status: EventStatus;
-    image?: string | null;
-    blurb?: string | null;
-    salesStartAt?: string | null;
-    salesEndAt?: string | null;
-    currency: Currency;
-    currencySymbol: string;
-    availableSeats: number;
-    totalSeats: number;
+/**
+ * Event detail. The API builds it from the summary and adds the series and the
+ * layout, so it carries every summary field — `date`, `time`, `seriesSlug` and
+ * `fromPrice` included, which the storefront renders and this type used to hide.
+ */
+export interface EventDetail extends EventSummary {
+    series: Series | null;
     tiers: PriceTier[];
     sections: Section[];
 }
