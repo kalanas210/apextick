@@ -3,8 +3,11 @@
 # LOADTEST_PASSWORD.
 #
 # booking-load-test.js needs a crowd of real accounts, not one login shared by every VU:
-# seats.held_by is the token's `sub`, the hold rate limiter is per subject, and "no seat
-# was held by two people" only means something when there are several people. The realm
+# seats.held_by is the token's `sub`, the hold rate limiter and the per-person seat cap
+# are per subject, and "no seat was held by two people" only means something when there
+# are several people. The script runs ONE VU per account, so this count is also the size
+# of the storm -- 200 for the headline run, 38+ for any sell-out at the default
+# 8-seat cap. See the header of booking-load-test.js for the arithmetic. The realm
 # import seeds one demo account, and re-importing it would drop everyone who has
 # self-registered since, so the pool is created through the Admin API instead -- the same
 # approach as scripts/grant-admin.sh.
