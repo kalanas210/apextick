@@ -11,6 +11,12 @@ import type { Order } from "./types";
  * Matching on the seat ids is exact; the most recent pending order for the event
  * is the fallback for the refusal that carries no seats. `orders` is expected in
  * the order `/api/orders/me` returns them, newest first.
+ *
+ * When seats *were* named and no order covers them, that is not a case for the
+ * fallback: the answer hangs a "Cancel that order" button off whatever comes
+ * back, and cancelling an order that is not the blocker destroys a good order
+ * without freeing a seat. Returning nothing sends the buyer to their order list
+ * instead, which is the honest answer to "we cannot tell which one".
  */
 export function findPendingOrder(
   orders: Order[] | undefined,
@@ -20,6 +26,9 @@ export function findPendingOrder(
   const pending = (orders ?? []).filter(
     (o) => o.status === "PENDING_PAYMENT" && o.eventId === eventId,
   );
+  if (seatIds.length === 0) {
+    return pending[0];
+  }
   const wanted = new Set(seatIds);
-  return pending.find((o) => o.items.some((i) => wanted.has(i.seatId))) ?? pending[0];
+  return pending.find((o) => o.items.some((i) => wanted.has(i.seatId)));
 }

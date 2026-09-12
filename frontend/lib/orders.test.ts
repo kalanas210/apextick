@@ -39,6 +39,12 @@ describe("findPendingOrder", () => {
     expect(findPendingOrder([orders[2]], 7, [20])).toBeUndefined();
   });
 
+  it("would rather name no order than the wrong one to cancel", () => {
+    // Seats were named and nothing covers them — a stale or paged list. Handing
+    // back `newest` here would offer to cancel an order that frees no seat.
+    expect(findPendingOrder(orders, 7, [99])).toBeUndefined();
+  });
+
   it("copes with the order list not having loaded yet", () => {
     expect(findPendingOrder(undefined, 7, [11])).toBeUndefined();
   });

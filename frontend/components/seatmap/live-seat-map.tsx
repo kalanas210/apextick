@@ -226,7 +226,11 @@ export function LiveSeatMap({
     try {
       await cancelOrder.mutateAsync();
       setBlockedSeatIds(null);
-      setPicked([]);
+      // `null`, not `[]`: cancelling frees the order's seats but not any others
+      // the buyer is still holding (the re-hold path leaves some off the order).
+      // Handing the selection back to the server's `mine` keeps those on screen
+      // with their timer and their Release link, which now works.
+      setPicked(null);
       setHoldExpiry(null);
       setNotice("That order was cancelled and its seats are back on sale.");
       queryClient.invalidateQueries({ queryKey: ["seats", slug] });
