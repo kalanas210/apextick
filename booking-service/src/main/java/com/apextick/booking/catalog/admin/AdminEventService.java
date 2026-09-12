@@ -54,7 +54,7 @@ public class AdminEventService {
         apply(e, r);
         e.setCreatedAt(Instant.now());
         save(e);
-        return catalog.detail(e.getId().toString());
+        return catalog.adminDetail(e.getId());
     }
 
     @Transactional
@@ -63,7 +63,7 @@ public class AdminEventService {
         apply(e, r);
         e.setUpdatedAt(Instant.now());
         save(e);
-        return catalog.detail(id.toString());
+        return catalog.adminDetail(id);
     }
 
     @Transactional
@@ -71,7 +71,7 @@ public class AdminEventService {
         Event e = events.findById(id).orElseThrow(() -> new NotFoundException("Event", id));
         e.setStatus(EventStatus.fromCode(status));
         e.setUpdatedAt(Instant.now());
-        return catalog.detail(id.toString());
+        return catalog.adminDetail(id);
     }
 
     @Transactional

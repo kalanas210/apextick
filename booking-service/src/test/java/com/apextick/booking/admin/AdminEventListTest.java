@@ -56,6 +56,36 @@ class AdminEventListTest {
                 .andExpect(jsonPath("$.content[?(@.slug == '" + slug + "')]").doesNotExist());
     }
 
+    /**
+     * The public detail endpoint 404s a draft, so the panel reads it from the admin route --
+     * same payload, every status visible. Without this the form could not reopen its own draft.
+     */
+    @Test
+    void admin_detail_opens_a_draft_the_public_endpoint_hides() throws Exception {
+        String slug = "admin-detail-" + System.nanoTime();
+        long eventId = json.readTree(createDraft(slug)).get("id").asLong();
+
+        mvc.perform(get("/api/admin/events/" + eventId).header("Authorization", adminToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.slug").value(slug))
+                .andExpect(jsonPath("$.status").value("draft"))
+                .andExpect(jsonPath("$.tiers").isArray())
+                .andExpect(jsonPath("$.sections").isArray());
+
+        mvc.perform(get("/api/events/" + slug))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void admin_detail_is_forbidden_without_the_role() throws Exception {
+        String slug = "admin-detail-forbidden-" + System.nanoTime();
+        long eventId = json.readTree(createDraft(slug)).get("id").asLong();
+
+        mvc.perform(get("/api/admin/events/" + eventId)
+                        .header("Authorization", "Bearer " + TestTokens.user("u-2", "user2", "user2@apextick.local")))
+                .andExpect(status().isForbidden());
+    }
+
     @Test
     void admin_list_filters_by_status_and_pages() throws Exception {
         createDraft("admin-draft-" + System.nanoTime());
