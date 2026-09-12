@@ -149,7 +149,8 @@ class DemoSeasonRefreshTest {
      * The deployment that needs healing is, by definition, one already migrated by an earlier
      * revision of this file -- and a changeset whose recorded checksum no longer matches makes
      * Liquibase refuse the whole update, so the service would not start at all and nothing
-     * would be healed. runOnChange is what lets that boot through.
+     * would be healed. runAlways is what lets that boot through: it re-runs the changeset and
+     * exempts it from checksum validation, so the stale sum is rewritten instead of fatal.
      */
     @Test
     void a_database_migrated_by_an_earlier_revision_of_the_changeset_still_boots() throws Exception {

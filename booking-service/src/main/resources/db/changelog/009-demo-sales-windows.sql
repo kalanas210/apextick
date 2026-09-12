@@ -1,6 +1,6 @@
 --liquibase formatted sql
 
---changeset apextick:009-01-demo-sales-windows context:demo runAlways:true runOnChange:true
+--changeset apextick:009-01-demo-sales-windows context:demo runAlways:true
 -- Holds, orders and payments now refuse an event once it has kicked off, once its sales
 -- window has closed, or before it opens (SalesWindow). The demo catalog in 005 carries
 -- fixed 2026 dates, so on any deployment made after them every fixture would be both
@@ -19,8 +19,15 @@
 -- season, so a long-lived demo stays holdable, payable and scannable. GREATEST(..., 0)
 -- keeps it from ever shifting the season backwards, and the shift is recomputed from
 -- min(starts_at) each time, so the result is the same wherever it starts from: idempotent
--- within a day, self-healing after one. runOnChange rides along so a database migrated by
--- an earlier revision of this file accepts the new checksum instead of refusing to boot.
+-- within a day, self-healing after one. runAlways carries a second thing this needs: it
+-- also exempts this changeset from checksum validation, and the deployment that needs
+-- healing is by definition one migrated by an earlier revision of this file. Without that
+-- exemption a changed checksum makes Liquibase refuse the whole update, and a service that
+-- will not start heals nothing. runOnChange grants that same exemption and nothing more, so
+-- this carries one flag rather than two.
+--
+-- (Keep every line here from starting with a Liquibase directive word: the formatted-SQL
+-- parser reads "-- changeset ..." as a declaration even mid-comment and fails the parse.)
 --
 -- Sales then open a week ago and close at the gates, so the demo shows a real, open sales
 -- window rather than two NULLs. Only the twenty events the 005 seed creates are touched;
