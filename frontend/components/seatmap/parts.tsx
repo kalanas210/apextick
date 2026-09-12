@@ -158,7 +158,8 @@ export function Stand({
 
 /* -------------------------------- Pitch ---------------------------------- */
 
-export function Pitch({ home, away }: { home: string; away: string }) {
+/** `away` is optional: not every event on sale is a fixture between two sides. */
+export function Pitch({ home, away }: { home: string; away?: string }) {
   return (
     <div className="relative grid min-h-[110px] min-w-[140px] flex-1 place-items-center rounded-xl border border-line bg-ink">
       <div className="absolute inset-5 rounded-[36%] border border-line-2/50" />
@@ -166,7 +167,13 @@ export function Pitch({ home, away }: { home: string; away: string }) {
       <div className="absolute inset-x-5 top-1/2 h-px bg-line-2/50" />
       <div className="relative text-center">
         <div className="font-display text-sm font-semibold tracking-tight text-bone">
-          {home} <span className="text-faint">v</span> {away}
+          {home}
+          {away && (
+            <>
+              {" "}
+              <span className="text-faint">v</span> {away}
+            </>
+          )}
         </div>
         <div className="font-mono text-[0.5rem] uppercase tracking-[0.2em] text-faint">
           Field of play

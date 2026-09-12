@@ -1,14 +1,37 @@
 import type { EventDetail, Seat as ApiSeat } from "@/lib/types";
 import type { MapSeat } from "./parts";
 
+export type Side = "n" | "s" | "e" | "w";
+
+/** Clockwise from the top, which is the order the bowl reads in. */
+export const SIDES: Side[] = ["n", "e", "s", "w"];
+
 export interface MapSection {
   sectionId: number;
   /** The section's stable code ("north"), which is what `?section=` links carry. */
   sectionCode: string;
   sectionName: string;
-  side: "n" | "s" | "e" | "w";
+  side: Side;
   tierId: string;
   seats: MapSeat[];
+}
+
+/**
+ * Sections grouped by the side of the ground they sit on, keeping the catalog's
+ * order within each side. Two stands on one side is an ordinary layout — taking
+ * only the first one left the rest of that side unreachable in the seat map
+ * while the event still counted those seats as available.
+ *
+ * A side outside the compass (only reachable through rows written before the API
+ * validated it) is put north rather than dropped: misplaced beats unsellable.
+ */
+export function bySide<T extends { side: string }>(sections: T[]): Record<Side, T[]> {
+  const grouped: Record<Side, T[]> = { n: [], e: [], s: [], w: [] };
+  for (const section of sections) {
+    const side = section.side as Side;
+    (grouped[side] ?? grouped.n).push(section);
+  }
+  return grouped;
 }
 
 /** Folds API seats into the sections described by the event, ready to render. */
