@@ -136,6 +136,29 @@ class RateLimitHttpTest {
     }
 
     @Test
+    void order_creation_shares_the_order_bucket_with_pay() throws Exception {
+        String token = TestTokens.user("rl-buyer", "rlbuyer", "rlbuyer@apextick.local");
+
+        // an unknown event, so the handler 404s without creating anything -- the point is
+        // that /api/orders itself is counted, the other half of the order bucket's matching
+        for (int i = 0; i < 2; i++) {
+            mvc.perform(createOrder(token)).andExpect(status().isNotFound());
+        }
+
+        mvc.perform(createOrder(token))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value("RATE_LIMITED"));
+    }
+
+    private MockHttpServletRequestBuilder createOrder(String token) {
+        return post("/api/orders")
+                .header("Authorization", "Bearer " + token)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"eventId\":999999999,\"seatIds\":[999999999]}");
+    }
+
+    @Test
     void posts_outside_the_two_buckets_are_never_throttled() throws Exception {
         String admin = TestTokens.admin("rl-admin", "rladmin", "rladmin@apextick.local");
 
