@@ -201,6 +201,12 @@ services:
   frontend:
     build: ./frontend
     container_name: apextick-frontend
+    environment:
+      # The browser reaches the API on the host (or through Caddy in prod);
+      # the storefront pages render on the server, inside this network, where
+      # that address need not resolve. Without this they fall back to
+      # localhost:8081 -- which is this container, not the API.
+      API_INTERNAL_URL: http://booking-service:8081
     ports:
       - "3000:3000"
     restart: unless-stopped

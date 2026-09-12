@@ -1,6 +1,7 @@
 /**
  * Wire types for the booking API (`booking-service`). These mirror the Java DTOs
- * exactly; the presentation types for the static catalog live in `data/types.ts`.
+ * exactly, and are the only catalog types the app has: every page renders from
+ * what the API returns.
  */
 
 export type SeatStatus = 'AVAILABLE' | 'HELD' | 'BOOKED';

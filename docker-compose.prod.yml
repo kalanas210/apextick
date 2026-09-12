@@ -213,6 +213,10 @@ services:
   frontend:
     image: ${FRONTEND_IMAGE:-ghcr.io/kalanas210/apextick-frontend:latest}
     container_name: apextick-frontend
+    environment:
+      # Server-rendered storefront pages read the catalog from inside the
+      # network; only the browser goes back out through Caddy.
+      API_INTERNAL_URL: http://booking-service:8081
     restart: unless-stopped
 
   # API gateway. Sits between Caddy and booking-service: rejects bad/missing

@@ -1,7 +1,6 @@
 import type { CSSProperties } from "react";
-import type { Series } from "@/data/types";
-import { seriesList, fixturesBySeries } from "@/data/events";
-import { unsplash } from "@/data/images";
+import type { Series } from "@/lib/types";
+import { seriesImage } from "@/lib/images";
 import { withAlpha } from "@/lib/color";
 import { cn } from "@/lib/cn";
 import { SectionHeading } from "@/components/ui/section-heading";
@@ -24,15 +23,17 @@ function SeriesBand({
   series,
   index,
   reversed,
+  count,
 }: {
   series: Series;
   index: number;
   reversed: boolean;
+  /** Fixtures of this series on sale right now, straight from the catalog. */
+  count: number;
 }) {
-  const count = fixturesBySeries(series.id).length;
   return (
     <div
-      style={{ "--tint": series.tint } as CSSProperties}
+      style={series.tint ? ({ "--tint": series.tint } as CSSProperties) : undefined}
       className="grid gap-8 lg:grid-cols-12 lg:items-center lg:gap-12"
     >
       <Reveal
@@ -40,17 +41,19 @@ function SeriesBand({
         y={32}
       >
         <ParallaxImage
-          src={unsplash(series.image, { w: 1500, q: 80 })}
+          src={seriesImage(series, { w: 1500, q: 80 })}
           alt={`${series.name} atmosphere`}
           sizes="(max-width: 1024px) 100vw, 58vw"
           className="aspect-[16/10] rounded-2xl border border-line"
         >
-          <div
-            className="absolute inset-0"
-            style={{
-              background: `linear-gradient(140deg, ${withAlpha(series.tint, 0.18)}, transparent 55%)`,
-            }}
-          />
+          {series.tint && (
+            <div
+              className="absolute inset-0"
+              style={{
+                background: `linear-gradient(140deg, ${withAlpha(series.tint, 0.18)}, transparent 55%)`,
+              }}
+            />
+          )}
           <div className="absolute inset-0 bg-gradient-to-t from-ink/70 via-transparent to-transparent" />
           <div className="absolute left-5 top-5">
             <span className="rounded-full border border-white/15 bg-ink/40 px-3 py-1 font-mono text-[0.6rem] uppercase tracking-[0.18em] text-bone/85 backdrop-blur-sm">
@@ -67,7 +70,7 @@ function SeriesBand({
         <Reveal>
           <div className="flex items-center gap-3">
             <span className="tnum text-sm text-faint">
-              0{index + 1}
+              {String(index + 1).padStart(2, "0")}
             </span>
             <span className="h-px w-6 bg-line-2" />
             <span className="kicker text-tint">{series.kicker}</span>
@@ -80,14 +83,14 @@ function SeriesBand({
           </p>
 
           <div className="mt-8 flex items-center gap-9 border-t border-line pt-6">
-            <Stat value={series.scale} label="Scale" />
-            <Stat value={String(count)} label="Fixtures listed" />
+            {series.scale && <Stat value={series.scale} label="Scale" />}
+            <Stat value={String(count)} label="Fixtures on sale" />
             <Stat value={String(series.cities.length)} label="Host cities" />
           </div>
 
           <div className="mt-8">
             <Button
-              href={`/events?series=${series.id}`}
+              href={`/events?series=${series.slug}`}
               variant="outline"
               arrow
             >
@@ -100,25 +103,42 @@ function SeriesBand({
   );
 }
 
-export function SeriesShowcase() {
+export function SeriesShowcase({
+  series,
+  fixturesBySeries = {},
+}: {
+  series: Series[];
+  /** Fixtures on sale per series slug. */
+  fixturesBySeries?: Record<string, number>;
+}) {
+  if (series.length === 0) {
+    return null;
+  }
+
   return (
     <section id="series" className="shell scroll-mt-24 pb-24 pt-10 md:py-32">
       <SectionHeading
         index="01"
-        kicker="Four worlds"
+        kicker={`${series.length} world${series.length === 1 ? "" : "s"}`}
         title={
           <>
-            Four series.{" "}
+            {series.length} series.{" "}
             <span className="text-muted">One way in.</span>
           </>
         }
-        description="Two world cups, a franchise juggernaut, and the oldest league in the modern game. Each carries its own color. All of them live here."
+        description="Each carries its own colour, its own cities and its own calendar. All of them sell from the same seat map."
         action={{ href: "/events", label: "All fixtures" }}
       />
 
       <div className="mt-16 space-y-20 md:mt-24 md:space-y-28">
-        {seriesList.map((s, i) => (
-          <SeriesBand key={s.id} series={s} index={i} reversed={i % 2 === 1} />
+        {series.map((s, i) => (
+          <SeriesBand
+            key={s.id}
+            series={s}
+            index={i}
+            reversed={i % 2 === 1}
+            count={fixturesBySeries[s.slug] ?? 0}
+          />
         ))}
       </div>
     </section>
