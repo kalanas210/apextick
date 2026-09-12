@@ -105,4 +105,31 @@ class RedisHoldExpiryTest {
                 .isEqualTo(SeatStatus.AVAILABLE);
         assertThat(expiredReleaseRows(seatId)).isZero();
     }
+
+    /**
+     * The key is dropped when the order is paid, but only after that transaction commits --
+     * a crash in between leaves an armed key on a sold seat. The release must then be a
+     * no-op, or a paid ticket goes back on sale and is resold underneath its owner.
+     */
+    @Test
+    void a_late_expiry_never_puts_a_booked_seat_back_on_sale() {
+        Long seatId = availableSeatId(2);
+        CurrentUser buyer = new CurrentUser("hold-expiry-buyer", "buyer",
+                "buyer@apextick.local", "Expiry Buyer", Set.of("user"));
+
+        holdService.hold(SLUG, List.of(seatId), buyer);
+
+        // the hold became a sale (the purchase path itself is covered by the order tests)
+        Seat sold = seatRepository.findById(seatId).orElseThrow();
+        sold.setStatus(SeatStatus.BOOKED);
+        sold.setHeldUntil(null);
+        seatRepository.save(sold);
+
+        assertThat(holdService.releaseExpired(seatId)).isFalse();
+
+        Seat after = seatRepository.findById(seatId).orElseThrow();
+        assertThat(after.getStatus()).isEqualTo(SeatStatus.BOOKED);
+        assertThat(after.getHeldBy()).isEqualTo(buyer.sub());
+        assertThat(expiredReleaseRows(seatId)).isZero();
+    }
 }
