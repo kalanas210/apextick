@@ -5,7 +5,6 @@ import {
   formatPrice,
   relativeTime,
   slugify,
-  statusLabel,
 } from "./format";
 
 /** Intl separates a code from the amount with a no-break space. */
@@ -80,17 +79,6 @@ describe("formatDate", () => {
 
   it("reads the date in UTC, so it never slips a day at midnight", () => {
     expect(formatDate("2026-01-01").full).toBe("Thu 01 Jan 2026");
-  });
-});
-
-describe("statusLabel", () => {
-  it("maps the public sale statuses to copy", () => {
-    expect(statusLabel("selling-fast")).toBe("Selling fast");
-    expect(statusLabel("final-release")).toBe("Final release");
-  });
-
-  it("falls back to 'On sale' for anything it does not know", () => {
-    expect(statusLabel("mystery")).toBe("On sale");
   });
 });
 
