@@ -2,8 +2,11 @@ package com.apextick.booking.hold;
 
 import com.apextick.booking.catalog.Event;
 import com.apextick.booking.catalog.EventLookup;
+import com.apextick.booking.catalog.SalesWindow;
 import com.apextick.booking.config.AppProperties;
 import com.apextick.booking.hold.dto.HoldResponse;
+import com.apextick.booking.order.OrderRepository;
+import com.apextick.booking.order.OrderService;
 import com.apextick.booking.outbox.AfterCommit;
 import com.apextick.booking.outbox.DomainEventPublisher;
 import com.apextick.booking.outbox.EventTypes;
@@ -19,8 +22,10 @@ import com.apextick.booking.seat.SeatUnavailableException;
 import com.apextick.booking.seat.dto.SeatResponse;
 import com.apextick.booking.web.ConflictException;
 import com.apextick.booking.web.ErrorCodes;
+import com.apextick.booking.web.NotFoundException;
 import com.apextick.booking.web.UnprocessableException;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,28 +34,34 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 /** Multi-seat, all-or-nothing holds with a configurable TTL; releases publish seat.released. */
 @Service
 public class HoldService {
 
-    private static final String KEY = "seat-hold:";
+    private static final Logger log = LoggerFactory.getLogger(HoldService.class);
 
     private final SeatRepository seats;
     private final EventLookup eventLookup;
-    private final StringRedisTemplate redis;
+    private final SeatHoldKeys holdKeys;
     private final DomainEventPublisher events;
     private final RealtimePublisher realtime;
+    private final OrderRepository orders;
+    private final OrderService orderService;
     private final Duration holdDuration;
     private final int maxSeats;
 
-    public HoldService(SeatRepository seats, EventLookup eventLookup, StringRedisTemplate redis,
-                       DomainEventPublisher events, RealtimePublisher realtime, AppProperties props) {
+    public HoldService(SeatRepository seats, EventLookup eventLookup, SeatHoldKeys holdKeys,
+                       DomainEventPublisher events, RealtimePublisher realtime,
+                       OrderRepository orders, OrderService orderService, AppProperties props) {
         this.seats = seats;
         this.eventLookup = eventLookup;
-        this.redis = redis;
+        this.holdKeys = holdKeys;
         this.events = events;
         this.realtime = realtime;
+        this.orders = orders;
+        this.orderService = orderService;
         this.holdDuration = props.hold().duration();
         this.maxSeats = props.hold().maxSeats();
     }
@@ -62,15 +73,18 @@ public class HoldService {
         }
         List<Long> ids = requested.stream().filter(Objects::nonNull).distinct().sorted().toList();
         if (ids.size() > maxSeats) {
-            throw new UnprocessableException("TOO_MANY_SEATS",
-                    "At most " + maxSeats + " seats per hold", Map.of("maxSeats", maxSeats));
+            throw tooManySeats(0, ids.size());
         }
         Event event = eventLookup.resolve(idOrSlug);
-        if (!event.getStatus().isPublic()) {
-            throw new ConflictException(ErrorCodes.SALES_CLOSED, "Sales are closed for this event");
-        }
-        if (event.getSalesEndAt() != null && event.getSalesEndAt().isBefore(Instant.now())) {
-            throw new ConflictException(ErrorCodes.SALES_CLOSED, "Sales have ended for this event");
+        SalesWindow.assertOpen(event);
+
+        // The cap is per user, not per request: counting only this call would let one account
+        // hoard an event eight seats at a time. Seats the caller already holds and is simply
+        // re-posting are not counted twice.
+        List<Long> alreadyMine = seats.findMyHeldSeatIds(event.getId(), user.sub());
+        long extra = ids.stream().filter(id -> !alreadyMine.contains(id)).count();
+        if (alreadyMine.size() + extra > maxSeats) {
+            throw tooManySeats(alreadyMine.size(), (int) extra);
         }
 
         Instant heldUntil = Instant.now().plus(holdDuration);
@@ -91,7 +105,7 @@ public class HoldService {
         List<SeatStatusChange> changes = ids.stream()
                 .map(id -> new SeatStatusChange(id, SeatStatus.HELD.name(), heldUntil)).toList();
         AfterCommit.run(() -> {
-            ids.forEach(id -> redis.opsForValue().set(KEY + id, sub, holdDuration));
+            holdKeys.arm(ids, sub, holdDuration);
             realtime.seatStatusChanged(eventId, changes);
         });
 
@@ -120,19 +134,19 @@ public class HoldService {
         if (ids.isEmpty()) {
             return 0;
         }
-        seats.releaseMyHolds(event.getId(), user.sub());
-        for (Long id : ids) {
-            events.publish(EventTypes.SEAT_RELEASED, "seat", String.valueOf(id),
-                    new SeatReleasedPayload(id, event.getId(), "USER_RELEASED"));
+        // Freeing a seat an unpaid order still covers puts the two aggregates out of step: the
+        // seat map shows it available while existsPendingForSeats keeps every buyer out, and
+        // paying the order charges the card only to refund it. Cancelling the order is the
+        // release path for those seats.
+        List<Long> pending = orders.findPendingSeatIds(ids);
+        if (!pending.isEmpty()) {
+            throw new ConflictException(ErrorCodes.ORDER_PENDING,
+                    "Cancel your pending order to release these seats",
+                    Map.of("seatIds", pending));
         }
-        Long eventId = event.getId();
-        List<SeatStatusChange> changes = ids.stream()
-                .map(id -> new SeatStatusChange(id, SeatStatus.AVAILABLE.name(), null)).toList();
-        AfterCommit.run(() -> {
-            ids.forEach(id -> redis.delete(KEY + id));
-            realtime.seatStatusChanged(eventId, changes);
-        });
-        return ids.size();
+        List<Long> released = seats.releaseSeatsHeldBy(ids, user.sub());
+        publishReleased(event.getId(), released, user.sub(), "USER_RELEASED");
+        return released.size();
     }
 
     /** Called by the Redis keyspace expiry listener for a single seat. */
@@ -152,5 +166,51 @@ public class HoldService {
             return true;
         }
         return false;
+    }
+
+    /**
+     * Force-releases a stuck hold on an operator's behalf. Goes through the same release path
+     * as every other one -- outbox event, realtime broadcast, Redis key -- because a seat that
+     * quietly changes state in the database only is a seat every open seat map still shows as
+     * held. Any unpaid order covering it is cancelled in the same transaction: it could never
+     * be paid now, and while it stands it blocks the next buyer.
+     */
+    @Transactional
+    public Seat adminRelease(Long seatId, String adminSub) {
+        Seat seat = seats.findById(seatId).orElseThrow(() -> new NotFoundException("Seat", seatId));
+        Long eventId = seat.getEventId();
+        String holder = seat.getHeldBy();
+        if (seats.releaseSeat(seatId) > 0) {
+            for (UUID orderId : orders.findPendingOrderIdsForSeat(seatId)) {
+                orderService.cancelForAdminRelease(orderId);
+            }
+            publishReleased(eventId, List.of(seatId), holder, "ADMIN");
+            log.info("Admin {} force-released seat {} (event {}) held by {}",
+                    adminSub, seatId, eventId, holder);
+        }
+        return seats.findById(seatId).orElseThrow(() -> new NotFoundException("Seat", seatId));
+    }
+
+    /** Records the outbox event now and defers the broadcast and key drop until the commit. */
+    private void publishReleased(Long eventId, List<Long> seatIds, String holder, String reason) {
+        if (seatIds.isEmpty()) {
+            return;
+        }
+        for (Long id : seatIds) {
+            events.publish(EventTypes.SEAT_RELEASED, "seat", String.valueOf(id),
+                    new SeatReleasedPayload(id, eventId, reason));
+        }
+        List<SeatStatusChange> changes = seatIds.stream()
+                .map(id -> new SeatStatusChange(id, SeatStatus.AVAILABLE.name(), null)).toList();
+        AfterCommit.run(() -> {
+            holdKeys.dropOwn(seatIds, holder);
+            realtime.seatStatusChanged(eventId, changes);
+        });
+    }
+
+    private UnprocessableException tooManySeats(int alreadyHeld, int requested) {
+        return new UnprocessableException(ErrorCodes.TOO_MANY_SEATS,
+                "At most " + maxSeats + " seats per person for this event",
+                Map.of("maxSeats", maxSeats, "heldSeats", alreadyHeld, "requestedSeats", requested));
     }
 }

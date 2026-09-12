@@ -28,6 +28,15 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
             + "and oi.order.status = com.apextick.booking.order.OrderStatus.PENDING_PAYMENT")
     boolean existsPendingForSeats(@Param("seatIds") Collection<Long> seatIds);
 
+    /** Which of these seats an unpaid order still covers, so a release can refuse them by name. */
+    @Query("select distinct oi.seatId from OrderItem oi where oi.seatId in :seatIds "
+            + "and oi.order.status = com.apextick.booking.order.OrderStatus.PENDING_PAYMENT")
+    List<Long> findPendingSeatIds(@Param("seatIds") Collection<Long> seatIds);
+
+    @Query("select distinct oi.order.id from OrderItem oi where oi.seatId = :seatId "
+            + "and oi.order.status = com.apextick.booking.order.OrderStatus.PENDING_PAYMENT")
+    List<UUID> findPendingOrderIdsForSeat(@Param("seatId") Long seatId);
+
     boolean existsByEventId(Long eventId);
 
     org.springframework.data.domain.Page<Order> findAllByOrderByCreatedAtDesc(org.springframework.data.domain.Pageable pageable);

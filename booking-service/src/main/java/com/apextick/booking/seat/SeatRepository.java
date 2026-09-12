@@ -25,21 +25,7 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
     @Query("select s from Seat s join fetch s.section sec join fetch sec.tier where s.id in :ids order by s.id")
     List<Seat> findByIdsWithLayout(@Param("ids") Collection<Long> ids);
 
-    // ---- single-seat native ops (legacy endpoint, concurrency test, expiry listener) ----
-
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seats
-               SET status     = 'HELD',
-                   held_by    = :userId,
-                   held_until = :heldUntil,
-                   version    = version + 1
-             WHERE id = :seatId
-               AND status = 'AVAILABLE'
-            """, nativeQuery = true)
-    int holdSeat(@Param("seatId") Long seatId,
-                 @Param("userId") String userId,
-                 @Param("heldUntil") Instant heldUntil);
+    // ---- single-seat native ops (expiry listener, admin force-release) ----
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = "UPDATE seats SET status = 'AVAILABLE', held_by = NULL, held_until = NULL "
@@ -48,13 +34,20 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
 
     // ---- multi-seat atomic hold (single UPDATE statement = deadlock-safe, all-or-nothing via tx) ----
 
+    /**
+     * Atomic for rivals, idempotent for the owner. Matching rows the caller already holds
+     * means re-posting a selection the seat map pre-selected (a reload, Back from checkout,
+     * or adding one more seat) refreshes the hold instead of failing with "someone just took
+     * one of those seats" against the caller's own seats.
+     */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
             update Seat s
                set s.status = com.apextick.booking.seat.SeatStatus.HELD,
                    s.heldBy = :sub, s.heldUntil = :until, s.version = s.version + 1
              where s.eventId = :eventId and s.id in :ids
-               and s.status = com.apextick.booking.seat.SeatStatus.AVAILABLE
+               and (s.status = com.apextick.booking.seat.SeatStatus.AVAILABLE
+                    or (s.status = com.apextick.booking.seat.SeatStatus.HELD and s.heldBy = :sub))
             """)
     int holdSeatsAtomically(@Param("eventId") Long eventId, @Param("ids") Collection<Long> ids,
                             @Param("sub") String sub, @Param("until") Instant until);
@@ -73,40 +66,34 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
             + "and s.status = com.apextick.booking.seat.SeatStatus.HELD and s.heldBy = :sub")
     List<Long> findMyHeldSeatIds(@Param("eventId") Long eventId, @Param("sub") String sub);
 
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query("""
-            update Seat s
-               set s.status = com.apextick.booking.seat.SeatStatus.AVAILABLE,
-                   s.heldBy = null, s.heldUntil = null, s.version = s.version + 1
-             where s.eventId = :eventId and s.status = com.apextick.booking.seat.SeatStatus.HELD
-               and s.heldBy = :sub
-            """)
-    int releaseMyHolds(@Param("eventId") Long eventId, @Param("sub") String sub);
-
-    // ---- sweeper (fallback for lost Redis expiries) ----
+    // ---- releases (sweeper fallback, user release, order cancel/expiry) ----
 
     @Query("select s from Seat s where s.status = com.apextick.booking.seat.SeatStatus.HELD "
             + "and s.heldUntil < :cutoff order by s.id")
     List<Seat> findExpiredHolds(@Param("cutoff") Instant cutoff, Pageable pageable);
 
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query("""
-            update Seat s
-               set s.status = com.apextick.booking.seat.SeatStatus.AVAILABLE,
-                   s.heldBy = null, s.heldUntil = null, s.version = s.version + 1
-             where s.id in :ids and s.status = com.apextick.booking.seat.SeatStatus.HELD
-            """)
-    int releaseSeats(@Param("ids") Collection<Long> ids);
+    /**
+     * Releases expired holds and reports which rows actually moved. A seat selected a moment
+     * ago may have been booked or re-held since; broadcasting AVAILABLE or publishing
+     * seat.released for it would show every viewer a seat that is not free, so callers must
+     * act on the returned ids rather than on what they asked for.
+     */
+    @Query(value = """
+            UPDATE seats
+               SET status = 'AVAILABLE', held_by = NULL, held_until = NULL, version = version + 1
+             WHERE id IN (:ids) AND status = 'HELD'
+            RETURNING id
+            """, nativeQuery = true)
+    List<Long> releaseSeats(@Param("ids") Collection<Long> ids);
 
-    // flush-only (no context clear) so callers keep their managed order/event entities attached
-    @Modifying(flushAutomatically = true)
-    @Query("""
-            update Seat s
-               set s.status = com.apextick.booking.seat.SeatStatus.AVAILABLE,
-                   s.heldBy = null, s.heldUntil = null, s.version = s.version + 1
-             where s.id in :ids and s.status = com.apextick.booking.seat.SeatStatus.HELD and s.heldBy = :sub
-            """)
-    int releaseSeatsHeldBy(@Param("ids") Collection<Long> ids, @Param("sub") String sub);
+    /** As {@link #releaseSeats}, but only rows still held by {@code sub}. Returns the ids released. */
+    @Query(value = """
+            UPDATE seats
+               SET status = 'AVAILABLE', held_by = NULL, held_until = NULL, version = version + 1
+             WHERE id IN (:ids) AND status = 'HELD' AND held_by = :sub
+            RETURNING id
+            """, nativeQuery = true)
+    List<Long> releaseSeatsHeldBy(@Param("ids") Collection<Long> ids, @Param("sub") String sub);
 
     @Modifying(flushAutomatically = true)
     @Query("""

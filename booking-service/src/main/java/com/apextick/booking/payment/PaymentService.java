@@ -1,5 +1,6 @@
 package com.apextick.booking.payment;
 
+import com.apextick.booking.catalog.SalesWindow;
 import com.apextick.booking.order.Order;
 import com.apextick.booking.order.OrderRepository;
 import com.apextick.booking.order.OrderService;
@@ -189,6 +190,9 @@ public class PaymentService {
         if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
             throw new ConflictException(ErrorCodes.ORDER_NOT_PAYABLE, "Order is not payable");
         }
+        // Last gate before money moves: an order created while the event was on sale must not
+        // be payable after kickoff, after the sale ends, or once it is marked sold out.
+        SalesWindow.assertOpen(order.getEvent());
         if (!gateway.supports(order.getCurrency())) {
             throw new UnprocessableException("CURRENCY_UNSUPPORTED",
                     gateway.provider() + " does not support " + order.getCurrency());

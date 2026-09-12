@@ -53,8 +53,10 @@ class SeatsLostCompensationTest {
         OrderResponse order = orderService.create(new CreateOrderRequest(eventId, seatIds),
                 "lost-order-" + System.nanoTime(), user);
 
-        // simulate the hold being lost between order creation and payment
-        holdService.releaseMine(SLUG, user);
+        // Lose the hold between order creation and payment the way it really happens: the
+        // Redis TTL lapses and the expiry listener frees the seats. (Not releaseMine -- that
+        // now refuses seats an unpaid order still covers, which is the point of ORDER_PENDING.)
+        seatIds.forEach(holdService::releaseExpired);
 
         mvc.perform(post("/api/orders/" + order.id() + "/pay")
                         .header("Authorization", "Bearer " + TestTokens.user(sub, "lostbuyer", "lost@apextick.local"))
