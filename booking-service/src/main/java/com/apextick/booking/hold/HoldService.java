@@ -150,7 +150,11 @@ public class HoldService {
         return released.size();
     }
 
-    /** Called by the Redis keyspace expiry listener for a single seat. */
+    /**
+     * Called by the Redis keyspace expiry listener for a single seat. The release only fires if
+     * the deadline really has passed: the notification may have been overtaken by the holder
+     * re-posting their selection, which pushes {@code heldUntil} forward and re-arms the key.
+     */
     @Transactional
     public boolean releaseExpired(Long seatId) {
         Seat seat = seats.findById(seatId).orElse(null);
@@ -158,7 +162,7 @@ public class HoldService {
             return false;
         }
         Long eventId = seat.getEventId();
-        int released = seats.releaseSeat(seatId);
+        int released = seats.releaseExpiredSeat(seatId, Instant.now());
         if (released > 0) {
             events.publish(EventTypes.SEAT_RELEASED, "seat", String.valueOf(seatId),
                     new SeatReleasedPayload(seatId, eventId, "EXPIRED"));

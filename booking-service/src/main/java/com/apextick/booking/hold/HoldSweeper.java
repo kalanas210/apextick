@@ -51,10 +51,11 @@ public class HoldSweeper {
             return 0;
         }
         List<Long> ids = expired.stream().map(Seat::getId).toList();
-        // The UPDATE reports which rows it actually moved. A seat selected a moment ago may
-        // have been booked or re-held since, and announcing that one AVAILABLE would show every
-        // viewer a seat that is not free -- and tell the notification service it was released.
-        Set<Long> released = Set.copyOf(seats.releaseSeats(ids));
+        // The UPDATE re-checks the deadline against the same cutoff and reports which rows it
+        // actually moved. A seat selected a moment ago may have been booked, freed or re-held
+        // since, and announcing that one AVAILABLE would show every viewer a seat that is not
+        // free -- and tell the notification service it was released.
+        Set<Long> released = Set.copyOf(seats.releaseSeats(ids, cutoff));
         List<Seat> freed = expired.stream().filter(s -> released.contains(s.getId())).toList();
         for (Seat s : freed) {
             events.publish(EventTypes.SEAT_RELEASED, "seat", String.valueOf(s.getId()),

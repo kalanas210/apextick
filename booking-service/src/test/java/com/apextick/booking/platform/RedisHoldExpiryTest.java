@@ -13,6 +13,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 
@@ -28,9 +29,14 @@ import static org.awaitility.Awaitility.await;
  * prefix, the channel name or Redis's {@code notify-keyspace-events} config would have
  * left the README's headline mechanism dead with the suite green.
  *
- * <p>The hold's {@code held_until} stays five minutes out and the sweeper only releases
- * seats whose deadline has passed, so the keyspace notification is the only thing that
- * can release this seat -- shortening the Redis TTL to one second is the whole trigger.
+ * <p>Redis's TTL and the row's {@code held_until} are two views of one deadline -- the key is
+ * armed for exactly the hold duration -- so the test moves both together rather than only the
+ * TTL. A notification whose deadline has not passed is now deliberately a no-op (see
+ * {@link #an_expiry_that_arrives_after_the_hold_was_extended_leaves_the_seat_held}), so a test
+ * holding {@code held_until} five minutes out while expiring the key after one second would be
+ * asserting something production can never produce. The fallback sweeper still cannot claim
+ * these seats: it only looks at deadlines older than {@code app.hold.expiry-tolerance}, which
+ * the test profile sets well beyond the second this test needs.
  */
 @IntegrationTest
 class RedisHoldExpiryTest {
@@ -51,6 +57,14 @@ class RedisHoldExpiryTest {
         return seatRepository.findAllForEventWithLayout(eventId).stream()
                 .filter(s -> s.getStatus() == SeatStatus.AVAILABLE)
                 .map(Seat::getId).skip(offset).findFirst().orElseThrow();
+    }
+
+    /** Moves the row's half of the deadline, e.g. {@code "1 second"} or {@code "-1 second"}. */
+    private void setHeldUntil(Long seatId, String interval) {
+        jdbc.sql("UPDATE seats SET held_until = now() + CAST(:offset AS interval) WHERE id = :seatId")
+                .param("offset", interval)
+                .param("seatId", seatId)
+                .update();
     }
 
     private long expiredReleaseRows(Long seatId) {
@@ -80,7 +94,9 @@ class RedisHoldExpiryTest {
         assertThat(redis.getExpire(KEY + seatId)).isPositive();
         assertThat(expiredReleaseRows(seatId)).isZero();
 
-        // shorten the TTL to one second; everything after this is the listener's doing
+        // bring the whole deadline forward to one second -- the row's and Redis's, the way a
+        // one-second hold duration would have set them; everything after this is the listener's
+        setHeldUntil(seatId, "1 second");
         redis.opsForValue().set(KEY + seatId, user.sub(), Duration.ofSeconds(1));
 
         await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
@@ -103,6 +119,39 @@ class RedisHoldExpiryTest {
 
         assertThat(seatRepository.findById(seatId).orElseThrow().getStatus())
                 .isEqualTo(SeatStatus.AVAILABLE);
+        assertThat(expiredReleaseRows(seatId)).isZero();
+    }
+
+    /**
+     * Keyspace notifications are fire-and-forget and the listener thread can lag, so an expiry
+     * can land after the holder has already re-posted their selection -- a reload, Back from
+     * checkout, "keep my seats" -- and the idempotent re-hold has pushed the deadline forward
+     * and re-armed the key. Releasing on {@code status = 'HELD'} alone would wipe a hold the
+     * caller was just told (201) they still had: their countdown keeps running, the seat map
+     * hands the seat to the next buyer and their order fails with HOLD_EXPIRED.
+     */
+    @Test
+    void an_expiry_that_arrives_after_the_hold_was_extended_leaves_the_seat_held() {
+        Long seatId = availableSeatId(3);
+        CurrentUser user = new CurrentUser("hold-extender", "extender",
+                "extender@apextick.local", "Hold Extender", Set.of("user"));
+
+        holdService.hold(SLUG, List.of(seatId), user);
+
+        // the first deadline lapses and Redis publishes its expiry...
+        setHeldUntil(seatId, "-1 second");
+        // ...but the holder re-posts the selection before the listener gets there, which
+        // extends the hold and re-arms the key
+        holdService.hold(SLUG, List.of(seatId), user);
+        assertThat(seatRepository.findById(seatId).orElseThrow().getHeldUntil())
+                .isAfter(Instant.now());
+
+        // the late notification must now be a no-op
+        assertThat(holdService.releaseExpired(seatId)).isFalse();
+
+        Seat after = seatRepository.findById(seatId).orElseThrow();
+        assertThat(after.getStatus()).isEqualTo(SeatStatus.HELD);
+        assertThat(after.getHeldBy()).isEqualTo(user.sub());
         assertThat(expiredReleaseRows(seatId)).isZero();
     }
 

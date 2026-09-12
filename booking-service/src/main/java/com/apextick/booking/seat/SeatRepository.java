@@ -27,10 +27,31 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
 
     // ---- single-seat native ops (expiry listener, admin force-release) ----
 
+    /**
+     * Force-releases a held seat whatever its deadline says. Only the admin path may do this:
+     * an operator freeing a stuck seat is deliberately cutting a hold that is still running.
+     */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = "UPDATE seats SET status = 'AVAILABLE', held_by = NULL, held_until = NULL "
-            + "WHERE id = :seatId AND status = 'HELD'", nativeQuery = true)
+    @Query(value = "UPDATE seats SET status = 'AVAILABLE', held_by = NULL, held_until = NULL, "
+            + "version = version + 1 WHERE id = :seatId AND status = 'HELD'", nativeQuery = true)
     int releaseSeat(@Param("seatId") Long seatId);
+
+    /**
+     * The expiry listener's release: the deadline must actually have passed.
+     *
+     * <p>Redis keyspace notifications are fire-and-forget and the listener thread can lag, so a
+     * "seat 42 expired" message can arrive after the holder has already re-posted the selection
+     * and {@link #holdSeatsAtomically} has pushed {@code held_until} forward. Matching on
+     * {@code status = 'HELD'} alone would then wipe a hold the caller was just told (201) it
+     * still had: their countdown keeps running, the seat map hands the seat to someone else and
+     * their order fails with HOLD_EXPIRED. Re-checking the deadline inside the same statement
+     * makes the late notification a no-op instead.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = "UPDATE seats SET status = 'AVAILABLE', held_by = NULL, held_until = NULL, "
+            + "version = version + 1 "
+            + "WHERE id = :seatId AND status = 'HELD' AND held_until <= :now", nativeQuery = true)
+    int releaseExpiredSeat(@Param("seatId") Long seatId, @Param("now") Instant now);
 
     // ---- multi-seat atomic hold (single UPDATE statement = deadlock-safe, all-or-nothing via tx) ----
 
@@ -74,17 +95,21 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
 
     /**
      * Releases expired holds and reports which rows actually moved. A seat selected a moment
-     * ago may have been booked or re-held since; broadcasting AVAILABLE or publishing
+     * ago may have been booked, freed or re-held since; broadcasting AVAILABLE or publishing
      * seat.released for it would show every viewer a seat that is not free, so callers must
      * act on the returned ids rather than on what they asked for.
+     *
+     * <p>Re-checking {@code held_until} against the same cutoff the SELECT used is what catches
+     * the re-held case: a hold refreshed between the two statements has a deadline in the future
+     * again and must survive the sweep.
      */
     @Query(value = """
             UPDATE seats
                SET status = 'AVAILABLE', held_by = NULL, held_until = NULL, version = version + 1
-             WHERE id IN (:ids) AND status = 'HELD'
+             WHERE id IN (:ids) AND status = 'HELD' AND held_until < :cutoff
             RETURNING id
             """, nativeQuery = true)
-    List<Long> releaseSeats(@Param("ids") Collection<Long> ids);
+    List<Long> releaseSeats(@Param("ids") Collection<Long> ids, @Param("cutoff") Instant cutoff);
 
     /** As {@link #releaseSeats}, but only rows still held by {@code sub}. Returns the ids released. */
     @Query(value = """
