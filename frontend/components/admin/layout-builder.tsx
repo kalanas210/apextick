@@ -6,8 +6,7 @@ import type { FormEvent } from "react";
 import { cn } from "@/lib/cn";
 import { apiErrorCode, apiErrorMessage } from "@/lib/api";
 import { formatPrice } from "@/lib/format";
-import { useEvent } from "@/hooks/useBooking";
-import { useApplyLayout } from "@/hooks/useAdmin";
+import { useAdminEvent, useApplyLayout } from "@/hooks/useAdmin";
 import { AdminHeader } from "./admin-shell";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -90,7 +89,7 @@ function buildPreview(tiers: TierDraft[], sections: SectionDraft[]) {
 }
 
 export function LayoutBuilder({ id }: { id: number }) {
-  const { data: event, isLoading, error } = useEvent(String(id));
+  const { data: event, isLoading, error } = useAdminEvent(id);
 
   if (isLoading) {
     return (

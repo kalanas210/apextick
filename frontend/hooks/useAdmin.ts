@@ -49,6 +49,22 @@ export function useAdminEvents(query: AdminEventParams) {
     });
 }
 
+/**
+ * One event for the panel. Same shape as the public `useEvent`, different read
+ * model: the public endpoint only serves what is on sale, and a draft is exactly
+ * what an operator is editing. Its own key, because the two answers differ.
+ */
+export function useAdminEvent(id: number | undefined) {
+    const token = useAccessToken();
+    return useQuery({
+        queryKey: ['admin', 'event', id],
+        enabled: !!token && !!id,
+        retry: retryOn5xx,
+        queryFn: async () =>
+            (await api.get<EventDetail>(`/api/admin/events/${id}`, { headers: authHeaders(token) })).data,
+    });
+}
+
 export function useCreateEvent() {
     const token = useAccessToken();
     const queryClient = useQueryClient();
@@ -67,6 +83,7 @@ export function useUpdateEvent(id: number) {
             (await api.put<EventDetail>(`/api/admin/events/${id}`, body, { headers: authHeaders(token) })).data,
         onSettled: () => {
             queryClient.invalidateQueries({ queryKey: ['admin', 'events'] });
+            queryClient.invalidateQueries({ queryKey: ['admin', 'event', id] });
             queryClient.invalidateQueries({ queryKey: ['event', String(id)] });
         },
     });
@@ -81,6 +98,7 @@ export function useSetEventStatus(id: number) {
                 { headers: authHeaders(token) })).data,
         onSettled: () => {
             queryClient.invalidateQueries({ queryKey: ['admin', 'events'] });
+            queryClient.invalidateQueries({ queryKey: ['admin', 'event', id] });
             queryClient.invalidateQueries({ queryKey: ['event', String(id)] });
             // Going on sale (or off it) changes what the public catalog shows.
             queryClient.invalidateQueries({ queryKey: ['events'] });
@@ -113,6 +131,8 @@ export function useApplyLayout(id: number) {
             (await api.post<LayoutResult>(`/api/admin/events/${id}/layout`, body,
                 { headers: authHeaders(token) })).data,
         onSettled: () => {
+            // The tiers and sections the builder switches on live on the event itself.
+            queryClient.invalidateQueries({ queryKey: ['admin', 'event', id] });
             queryClient.invalidateQueries({ queryKey: ['event', String(id)] });
             queryClient.invalidateQueries({ queryKey: ['admin', 'stats', id] });
             queryClient.invalidateQueries({ queryKey: ['admin', 'seats', id] });
