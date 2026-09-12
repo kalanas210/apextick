@@ -47,7 +47,12 @@ class CatalogSeedTest {
     /**
      * Holds, orders and payments refuse an event that has kicked off or whose sales window is
      * shut, so a demo seeded with fixed past dates would be a catalog nobody can buy from.
-     * Changeset 009 rolls the seeded season forward at migration time; this pins that it did.
+     * Changeset 009 rolls the seeded season forward; this pins that it did, and that its
+     * arithmetic covers every slug in the list.
+     *
+     * <p>It cannot say anything about a demo that has been deployed for a while, because a test
+     * database is always migrated seconds earlier. {@link DemoSeasonRefreshTest} ages one on
+     * purpose and checks the roll-forward heals it.
      */
     @Test
     void every_seeded_event_is_in_the_future_with_an_open_sales_window() {

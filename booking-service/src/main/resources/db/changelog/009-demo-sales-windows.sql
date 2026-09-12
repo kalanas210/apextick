@@ -1,17 +1,26 @@
 --liquibase formatted sql
 
---changeset apextick:009-01-demo-sales-windows context:demo
+--changeset apextick:009-01-demo-sales-windows context:demo runAlways:true runOnChange:true
 -- Holds, orders and payments now refuse an event once it has kicked off, once its sales
 -- window has closed, or before it opens (SalesWindow). The demo catalog in 005 carries
 -- fixed 2026 dates, so on any deployment made after them every fixture would be both
 -- already played and unbuyable -- the guard would be correct and the demo dead.
 --
--- So roll the whole seeded season forward at migration time instead of hard-coding new
--- dates: shift every seeded fixture by the same interval, enough to put the earliest one
--- two weeks out, which keeps the original spacing (group stage, then semis, then finals)
--- and the per-series ordering intact. GREATEST(..., 0) makes it a no-op on a database
--- where the seed is already in the future, so a fresh deployment and an upgrade of a
--- running one land in the same place.
+-- So roll the whole seeded season forward instead of hard-coding new dates: shift every
+-- seeded fixture by the same interval, enough to put the earliest one two weeks out, which
+-- keeps the original spacing (group stage, then semis, then finals) and the per-series
+-- ordering intact.
+--
+-- runAlways is the point of this changeset, not a detail. Run once, it fixes only the day
+-- it ran: the clock keeps moving, and about fourteen days later the headline fixture
+-- (india-pakistan-group-stage) kicks off and starts refusing every hold, order and payment
+-- with SALES_CLOSED, with the rest following one at a time over the seeded season -- a
+-- catalog you can browse and nothing you can buy. Re-running it on every boot re-rolls the
+-- season, so a long-lived demo stays holdable, payable and scannable. GREATEST(..., 0)
+-- keeps it from ever shifting the season backwards, and the shift is recomputed from
+-- min(starts_at) each time, so the result is the same wherever it starts from: idempotent
+-- within a day, self-healing after one. runOnChange rides along so a database migrated by
+-- an earlier revision of this file accepts the new checksum instead of refusing to boot.
 --
 -- Sales then open a week ago and close at the gates, so the demo shows a real, open sales
 -- window rather than two NULLs. Only the twenty events the 005 seed creates are touched;
