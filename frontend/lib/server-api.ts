@@ -60,3 +60,16 @@ export async function apiGetOr<T>(path: string, fallback: T): Promise<T> {
         return fallback;
     }
 }
+
+/**
+ * The same, for a page that has to tell the two apart. An empty catalog and an
+ * unreachable one look identical to `apiGetOr`, and a page that answers "nothing
+ * is on sale" when it simply could not ask is lying to the reader.
+ */
+export async function apiGetSafe<T>(path: string): Promise<{ data: T | null; unavailable: boolean }> {
+    try {
+        return { data: await apiGet<T>(path), unavailable: false };
+    } catch {
+        return { data: null, unavailable: true };
+    }
+}
