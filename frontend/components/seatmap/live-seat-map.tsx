@@ -1,17 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatPrice } from "@/lib/format";
 import { MAX_SEATS_PER_ORDER, quoteOrder } from "@/lib/booking-rules";
-import { apiErrorCode, apiErrorMessage } from "@/lib/api";
+import { apiErrorCode, apiErrorMessage, apiProblem } from "@/lib/api";
+import { findPendingOrder } from "@/lib/orders";
 import { useSeatUpdates, type SeatStatusChange } from "@/lib/realtime";
 import { cn } from "@/lib/cn";
 import {
+  useCancelOrder,
   useCreateOrder,
   useEvent,
   useHoldSeats,
+  useMyOrders,
   useReleaseHold,
   useSeats,
 } from "@/hooks/useBooking";
@@ -50,6 +54,21 @@ export function LiveSeatMap({
   const [notice, setNotice] = useState<string | null>(null);
   const [holdExpiry, setHoldExpiry] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // Seats the API says are locked behind an unpaid order of the buyer's own.
+  const [blockedSeatIds, setBlockedSeatIds] = useState<number[] | null>(null);
+
+  // Fetched only once such a refusal lands: it names the seats but not the order
+  // that covers them, so the buyer's own list is what turns it into a link.
+  const { data: myOrders } = useMyOrders(blockedSeatIds !== null);
+
+  const blockingOrder = useMemo(
+    () =>
+      blockedSeatIds && event
+        ? findPendingOrder(myOrders, event.id, blockedSeatIds)
+        : undefined,
+    [blockedSeatIds, event, myOrders],
+  );
+  const cancelOrder = useCancelOrder(blockingOrder?.id ?? "");
 
   // Live seat flips from other buyers, applied straight into the cache so the
   // map moves without waiting for a refetch.
@@ -133,6 +152,13 @@ export function LiveSeatMap({
 
   const busy = holdSeats.isPending || createOrder.isPending;
 
+  /** Point the buyer at the unpaid order that is holding these seats down. */
+  const showBlockingOrder = (seatIds: number[]) => {
+    setNotice(null);
+    setBlockedSeatIds(seatIds);
+    queryClient.invalidateQueries({ queryKey: ["orders"] });
+  };
+
   /** Hold the picked seats, turn them into an order, and go pay. */
   const reserve = async () => {
     if (!event || selectedSeats.length === 0) return;
@@ -145,6 +171,12 @@ export function LiveSeatMap({
       router.push(`/checkout/${order.id}`);
     } catch (error) {
       const code = apiErrorCode(error);
+      if (code === "ORDER_ALREADY_PENDING") {
+        // The hold succeeded; it is the order that was refused, because an
+        // earlier unpaid one already covers some of these seats.
+        showBlockingOrder(apiProblem(error)?.seatIds ?? seatIds);
+        return;
+      }
       setNotice(
         code === "SEAT_UNAVAILABLE"
           ? "Someone just took one of those seats. Your picks have been refreshed — try again."
@@ -155,9 +187,36 @@ export function LiveSeatMap({
   };
 
   const release = async () => {
-    await releaseHold.mutateAsync().catch(() => undefined);
-    setPicked([]);
-    setHoldExpiry(null);
+    setNotice(null);
+    try {
+      await releaseHold.mutateAsync();
+      setBlockedSeatIds(null);
+      setPicked([]);
+      setHoldExpiry(null);
+    } catch (error) {
+      if (apiErrorCode(error) === "ORDER_PENDING") {
+        // Nothing was released, so the selection, the countdown and this link all
+        // have to survive — clearing them would hide the only way out.
+        showBlockingOrder(apiProblem(error)?.seatIds ?? []);
+        return;
+      }
+      setNotice(apiErrorMessage(error, "We could not release those seats. Please try again."));
+    }
+  };
+
+  /** Cancel the blocking order, which is what puts its seats back on sale. */
+  const cancelBlockingOrder = async () => {
+    if (!blockingOrder) return;
+    try {
+      await cancelOrder.mutateAsync();
+      setBlockedSeatIds(null);
+      setPicked([]);
+      setHoldExpiry(null);
+      setNotice("That order was cancelled and its seats are back on sale.");
+      queryClient.invalidateQueries({ queryKey: ["seats", slug] });
+    } catch (error) {
+      setNotice(apiErrorMessage(error, "We could not cancel that order."));
+    }
   };
 
   if (eventLoading || seatsLoading) {
@@ -266,6 +325,45 @@ export function LiveSeatMap({
               <p className="mt-4 rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-[0.78rem] text-accent">
                 {notice}
               </p>
+            )}
+
+            {blockedSeatIds && (
+              <div
+                role="alert"
+                className="mt-4 rounded-lg border border-accent/30 bg-accent/10 px-3 py-2.5 text-[0.78rem] text-accent"
+              >
+                <p>
+                  These seats are on an order you have not paid for yet. Pay it or
+                  cancel it — they cannot be freed while it stands.
+                </p>
+                <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2">
+                  {blockingOrder ? (
+                    <>
+                      <Link
+                        href={`/checkout/${blockingOrder.id}`}
+                        className="underline underline-offset-4 hover:no-underline"
+                      >
+                        Continue to payment
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={cancelBlockingOrder}
+                        disabled={cancelOrder.isPending}
+                        className="underline underline-offset-4 hover:no-underline disabled:opacity-60"
+                      >
+                        {cancelOrder.isPending ? "Cancelling…" : "Cancel that order"}
+                      </button>
+                    </>
+                  ) : (
+                    <Link
+                      href="/account"
+                      className="underline underline-offset-4 hover:no-underline"
+                    >
+                      Find it in your orders
+                    </Link>
+                  )}
+                </div>
+              </div>
             )}
 
             {selectedSeats.length === 0 ? (

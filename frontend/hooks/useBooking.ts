@@ -98,11 +98,16 @@ export function useOrder(orderId: string) {
     });
 }
 
-export function useMyOrders() {
+/**
+ * The caller's own orders. `enabled` is for screens that only need the list once
+ * something has gone wrong — the seat map asks for it when the API refuses on
+ * account of an unpaid order, not on every visit.
+ */
+export function useMyOrders(enabled = true) {
     const token = useAccessToken();
     return useQuery({
         queryKey: ['orders', 'me'],
-        enabled: !!token,
+        enabled: !!token && enabled,
         queryFn: async () =>
             (await api.get<{ content: Order[] } | Order[]>('/api/orders/me', { headers: authHeaders(token) })).data,
         select: (data) => (Array.isArray(data) ? data : data.content),

@@ -6,12 +6,13 @@ import { Elements } from "@stripe/react-stripe-js";
 import { loadStripe, type Stripe } from "@stripe/stripe-js";
 import { formatPrice } from "@/lib/format";
 import { apiErrorMessage } from "@/lib/api";
-import { useOrder, usePayOrder, usePaymentConfig } from "@/hooks/useBooking";
+import { useCancelOrder, useOrder, usePayOrder, usePaymentConfig } from "@/hooks/useBooking";
 import { RequireAuth } from "@/components/auth/require-auth";
 import { OrderSummary } from "./order-summary";
 import { MockCardForm, type MockCard } from "./mock-card-form";
 import { StripeCardForm } from "./stripe-card-form";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 /** Cache the Stripe.js loader per key so remounts don't refetch the script. */
 const stripeLoaders = new Map<string, Promise<Stripe | null>>();
@@ -40,8 +41,10 @@ function Checkout({ orderId }: { orderId: string }) {
   const { data: order, isLoading, error } = useOrder(orderId);
   const { data: config } = usePaymentConfig();
   const pay = usePayOrder(orderId);
+  const cancel = useCancelOrder(orderId);
 
   const [failure, setFailure] = useState<string | null>(null);
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   // Payment-window countdown; the backend expires the order at the same moment.
@@ -111,6 +114,21 @@ function Checkout({ orderId }: { orderId: string }) {
     }
   };
 
+  /**
+   * Giving the order up is the only thing that puts its seats back on sale — the
+   * seat map refuses to release seats an unpaid order still covers, and says so.
+   */
+  const cancelOrder = async () => {
+    setFailure(null);
+    try {
+      await cancel.mutateAsync();
+      setConfirmingCancel(false);
+    } catch (err) {
+      setConfirmingCancel(false);
+      setFailure(apiErrorMessage(err, "We could not cancel that order."));
+    }
+  };
+
   const expired = order.status === "EXPIRED" || order.status === "CANCELLED";
 
   return (
@@ -171,10 +189,39 @@ function Checkout({ orderId }: { orderId: string }) {
               <p className="mt-4 text-center text-[0.72rem] text-faint">
                 Your seats stay held until the timer runs out.
               </p>
+
+              <div className="mt-5 border-t border-line pt-4 text-center">
+                <button
+                  type="button"
+                  onClick={() => setConfirmingCancel(true)}
+                  disabled={cancel.isPending}
+                  className="text-[0.72rem] text-faint underline-offset-4 transition-colors hover:text-bone hover:underline disabled:opacity-60"
+                >
+                  {cancel.isPending ? "Cancelling…" : "Cancel this order and free the seats"}
+                </button>
+              </div>
             </>
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmingCancel}
+        title="Cancel this order?"
+        description={
+          <>
+            The {order.items.length} seat{order.items.length === 1 ? "" : "s"} on it go
+            straight back on sale, and you will need to pick again. Nothing has been
+            charged.
+          </>
+        }
+        confirmLabel="Cancel order"
+        cancelLabel="Keep it"
+        tone="danger"
+        busy={cancel.isPending}
+        onConfirm={cancelOrder}
+        onCancel={() => setConfirmingCancel(false)}
+      />
 
       <aside className="lg:col-span-5">
         <div className="lg:sticky lg:top-28">
