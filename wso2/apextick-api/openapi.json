@@ -452,22 +452,6 @@
         },
         "type": "object"
       },
-      "HoldSeatResponse": {
-        "properties": {
-          "heldUntil": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "seatId": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "status": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "LayoutRequest": {
         "properties": {
           "sections": {
@@ -1322,6 +1306,36 @@
           "Admin: Events"
         ]
       },
+      "get": {
+        "operationId": "detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventDetailResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Event detail in any status, including drafts and cancellations",
+        "tags": [
+          "Admin: Events"
+        ]
+      },
       "put": {
         "operationId": "update",
         "parameters": [
@@ -1559,6 +1573,14 @@
               "format": "int64",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "admin",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
           }
         ],
         "responses": {
@@ -1783,7 +1805,7 @@
     },
     "/events/{idOrSlug}": {
       "get": {
-        "operationId": "detail",
+        "operationId": "detail_1",
         "parameters": [
           {
             "in": "path",
@@ -1846,7 +1868,7 @@
         ]
       },
       "post": {
-        "operationId": "hold_1",
+        "operationId": "hold",
         "parameters": [
           {
             "in": "path",
@@ -2382,37 +2404,6 @@
           "Payments"
         ],
         "x-auth-type": "None"
-      }
-    },
-    "/seats/{seatId}/hold": {
-      "post": {
-        "operationId": "hold",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "seatId",
-            "required": true,
-            "schema": {
-              "format": "int64",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "*/*": {
-                "schema": {
-                  "$ref": "#/components/schemas/HoldSeatResponse"
-                }
-              }
-            },
-            "description": "OK"
-          }
-        },
-        "tags": [
-          "seat-controller"
-        ]
       }
     },
     "/series": {

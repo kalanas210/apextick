@@ -7,8 +7,13 @@ import { cn } from "@/lib/cn";
 import { apiErrorCode, apiErrorMessage, apiFieldErrors } from "@/lib/api";
 import { formatInstant, formatPrice } from "@/lib/format";
 import { EVENT_LABEL, EVENT_STATUSES } from "@/lib/status";
-import { useEvent } from "@/hooks/useBooking";
-import { useDeleteEvent, useEventStats, useSetEventStatus, useUpdateEvent } from "@/hooks/useAdmin";
+import {
+  useAdminEvent,
+  useDeleteEvent,
+  useEventStats,
+  useSetEventStatus,
+  useUpdateEvent,
+} from "@/hooks/useAdmin";
 import { AdminHeader } from "./admin-shell";
 import { EventForm } from "./event-form";
 import { Button } from "@/components/ui/button";
@@ -18,7 +23,7 @@ import type { EventStatus, EventUpsert } from "@/lib/types";
 
 export function EventEditor({ id }: { id: number }) {
   const router = useRouter();
-  const { data: event, isLoading, error } = useEvent(String(id));
+  const { data: event, isLoading, error } = useAdminEvent(id);
   const stats = useEventStats(id);
   const update = useUpdateEvent(id);
   const setStatus = useSetEventStatus(id);

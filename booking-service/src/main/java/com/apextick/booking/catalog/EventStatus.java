@@ -37,4 +37,14 @@ public enum EventStatus {
     public boolean isPublic() {
         return this != DRAFT && this != CANCELLED;
     }
+
+    /**
+     * Statuses that still accept holds, orders and payments. Deliberately narrower than
+     * {@link #isPublic()}: a sold-out or cancelled event stays visible (with its badge and
+     * its seat map) but must stop selling, which is exactly what the admin status control
+     * is for.
+     */
+    public boolean isPurchasable() {
+        return this == ONSALE || this == SELLING_FAST || this == FINAL_RELEASE;
+    }
 }

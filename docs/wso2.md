@@ -311,6 +311,15 @@ attached to the right operations, and inert. Not yet root-caused further;
 booking-service's own Redis-backed hold limiter is the only rate limiting
 that's actually enforced right now, gateway or not.
 
+`smoke-test.sh`'s step 4 is written against that reality: it bursts 40 holds at
+`POST /events/{idOrSlug}/holds` — the endpoint the SPA and k6 drive, and the one
+`RateLimitInterceptor` buckets at 30/min per subject — so the `429`s it counts
+come from booking-service. What the step proves is that the gateway routes an
+authenticated `POST` with a body and returns a backend `429` intact, not that
+`ApexTickHoldBurst` works. (It used to hit `POST /seats/{seatId}/hold`, which no
+longer exists: that controller was deleted and the path dropped from
+`wso2/apextick-api/openapi.json`, so the burst only ever collected `404`s.)
+
 ## Operational notes
 
 - **H2, single node.** The bundled database is fine here and wrong for a real

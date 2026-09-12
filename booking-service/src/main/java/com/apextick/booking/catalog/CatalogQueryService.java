@@ -93,7 +93,19 @@ public class CatalogQueryService {
 
     @Transactional(readOnly = true)
     public EventDetailResponse detail(String idOrSlug) {
-        Event e = eventLookup.resolve(idOrSlug);
+        return detailOf(eventLookup.resolvePublic(idOrSlug));
+    }
+
+    /**
+     * Admin variant of {@link #detail}: identical payload, but a draft or cancelled event
+     * resolves instead of 404ing. The panel has to be able to open the draft it just created.
+     */
+    @Transactional(readOnly = true)
+    public EventDetailResponse adminDetail(Long id) {
+        return detailOf(eventLookup.resolve(String.valueOf(id)));
+    }
+
+    private EventDetailResponse detailOf(Event e) {
         Long id = e.getId();
 
         SeatRepository.SeatCountView count = seatRepository.countByEventIds(List.of(id), SeatStatus.AVAILABLE)
@@ -129,7 +141,7 @@ public class CatalogQueryService {
 
     @Transactional(readOnly = true)
     public List<SeatResponse> seats(String idOrSlug, String sub) {
-        Event e = eventLookup.resolve(idOrSlug);
+        Event e = eventLookup.resolvePublic(idOrSlug);
         return seatRepository.findAllForEventWithLayout(e.getId()).stream()
                 .map(s -> SeatResponse.from(s, sub)).toList();
     }

@@ -45,10 +45,23 @@ class ApiSecurityTest {
 
     @Test
     void public_seats_endpoint_is_reachable_anonymously() throws Exception {
-        // event 1 is seeded by Liquibase (demo context) with 20 seats
-        mvc.perform(get("/api/events/1/seats"))
+        // a published event from the demo catalog seed
+        mvc.perform(get("/api/events/arsenal-manchester-city/seats"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray());
+    }
+
+    /**
+     * GET /api/events/** is permitAll, so visibility is the service's job, not the filter
+     * chain's: the legacy event 1 is DRAFT and must not be readable by anyone who guesses it.
+     */
+    @Test
+    void a_draft_event_is_not_readable_anonymously() throws Exception {
+        mvc.perform(get("/api/events/1"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+        mvc.perform(get("/api/events/1/seats"))
+                .andExpect(status().isNotFound());
     }
 
     /**

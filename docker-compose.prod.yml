@@ -155,6 +155,13 @@ services:
       APP_CORS_ALLOWED_ORIGINS: https://${SERVER_IP}.nip.io
       APP_PUBLIC_URL: https://${SERVER_IP}.nip.io
       APP_WEB_URL: https://${SERVER_IP}.nip.io
+      # Abuse controls, declared with their application.yml defaults so the demo host
+      # is tunable from .env without editing this file. Unset, they behave exactly as
+      # before; compose forwards nothing a service has not declared.
+      APP_RATE_LIMIT_ENABLED: ${APP_RATE_LIMIT_ENABLED:-true}
+      APP_RATE_LIMIT_HOLD_LIMIT: ${APP_RATE_LIMIT_HOLD_LIMIT:-30}
+      APP_RATE_LIMIT_HOLD_WINDOW: ${APP_RATE_LIMIT_HOLD_WINDOW:-PT1M}
+      APP_HOLD_MAX_SEATS: ${APP_HOLD_MAX_SEATS:-8}
       APP_PAYMENT_PROVIDER: ${APP_PAYMENT_PROVIDER:-mock}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}

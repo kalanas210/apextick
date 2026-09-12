@@ -8,8 +8,7 @@ import { apiErrorMessage } from "@/lib/api";
 import { formatInstant } from "@/lib/format";
 import { pillClass, SEAT_TONE } from "@/lib/status";
 import { useSeatUpdates, type SeatStatusChange } from "@/lib/realtime";
-import { useEvent } from "@/hooks/useBooking";
-import { useAdminSeats, useReleaseSeat } from "@/hooks/useAdmin";
+import { useAdminEvent, useAdminSeats, useReleaseSeat } from "@/hooks/useAdmin";
 import { AdminHeader } from "./admin-shell";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -24,7 +23,7 @@ const PAGE_SIZE = 50;
 
 export function SeatInspector({ id }: { id: number }) {
   const queryClient = useQueryClient();
-  const { data: event } = useEvent(String(id));
+  const { data: event } = useAdminEvent(id);
   const { data: seats, isLoading, error } = useAdminSeats(id);
   const release = useReleaseSeat(id);
   const { notice, show, clear } = useNotice();

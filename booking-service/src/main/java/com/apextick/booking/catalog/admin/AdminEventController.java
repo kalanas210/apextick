@@ -75,6 +75,17 @@ public class AdminEventController {
         return catalog.searchAll(filter, page, size, sort);
     }
 
+    /**
+     * The admin event detail. Same payload as the public {@code GET /api/events/{idOrSlug}},
+     * which 404s anything not on public sale -- so the panel reads its drafts and cancellations
+     * here instead.
+     */
+    @GetMapping("/{id}")
+    @Operation(summary = "Event detail in any status, including drafts and cancellations")
+    public EventDetailResponse detail(@PathVariable Long id) {
+        return catalog.adminDetail(id);
+    }
+
     @PostMapping
     public ResponseEntity<EventDetailResponse> create(@Valid @RequestBody EventUpsertRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(adminEvents.create(request));

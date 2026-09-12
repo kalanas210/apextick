@@ -19,11 +19,11 @@ ApexTick simulates the hardest moment in any ticketing platform: the instant a p
 
 ## Proven under load
 
-An authenticated [k6](https://k6.io) test logs into Keycloak, then fires **5,000 hold attempts from 200 concurrent virtual users** at an event with exactly **300 seats**:
+An authenticated [k6](https://k6.io) test fires **5,000 hold attempts from 200 concurrent virtual users** at an event with exactly **300 seats**. Every virtual user logs into Keycloak as its *own* account, so this is 200 buyers, not 200 threads sharing one login — which is what makes "no seat was held by two people" a statement about people:
 
 | Metric | Result |
 | --- | --- |
-| Concurrent virtual users | 200 |
+| Concurrent virtual users | 200 (one Keycloak identity each) |
 | Total hold attempts | 5,000 |
 | Seats available | 300 |
 | **Holds won** | **300 / 300** |
@@ -34,7 +34,7 @@ An authenticated [k6](https://k6.io) test logs into Keycloak, then fires **5,000
 | Latency (p95) | 233 ms |
 | Latency (p99) | 373 ms |
 
-Every seat was sold exactly once. Every losing request received a clean `409`. No seat was ever held by two people at the same time — and the test *proves* it by reading the service's own seat map back after the storm (`held == 300`, `available == 0`). Numbers from a single local instance against dockerised infrastructure; see [Load testing](#load-testing).
+Every seat was sold exactly once. Every losing request received a clean `409`. No seat was ever held by two people at the same time — and the test *proves* it by reading the service's own seat map back after the storm (`held == 300`, `available == 0`, and every seat's optimistic-lock `version` moved by exactly 1). Numbers from a single local instance against dockerised infrastructure; [Load testing](#load-testing) has the exact commands, including the one-off step that seeds the 200 accounts.
 
 ## Architecture
 
@@ -120,7 +120,7 @@ There are no `synchronized` blocks, no application-level mutexes, and no distrib
 - **PCI-conscious payments** — the Stripe adapter never sees a raw card number: it creates a PaymentIntent and returns a `client_secret` for the browser to confirm, treating the signed `payment_intent.succeeded` webhook as the source of truth. Webhooks are idempotent, and a charge that lands after its seats were lost is automatically refunded.
 - **Stateless JWT security** — Keycloak issues OIDC tokens the API validates statelessly; roles map from `realm_access.roles` to `ROLE_*`. Auth keeps working containerized by fetching signing keys over the internal network while validating the public issuer.
 - **One-command infrastructure** — the whole backend, its dependencies, the Keycloak realm, and an optional observability stack start with `docker compose up`. Every secret, including the realm's client secrets, comes from a git-ignored `.env`, and the production stack refuses to start while any credential is unset.
-- **Verified** — 86 booking-service tests, most of them full-stack **Testcontainers** integration tests covering concurrency, expiry, the outbox, orders, payments, webhooks, admin, security and rate-limiting; GreenMail tests for the notification service's SMTP path (an authenticated login, and refusing a server that doesn't offer STARTTLS); Vitest unit tests for the frontend's money and status helpers. CI also fails when the gateway's OpenAPI contract drifts from the code.
+- **Verified** — 157 booking-service tests, most of them full-stack **Testcontainers** integration tests covering concurrency, expiry, the outbox, orders, payments, webhooks, admin, security and rate-limiting; GreenMail tests for the notification service's SMTP path (an authenticated login, and refusing a server that doesn't offer STARTTLS); Vitest unit tests for the frontend's money and status helpers, and for the admin hooks' bearer tokens and cache keys. CI also fails when the gateway's OpenAPI contract drifts from the code.
 
 ## Tech stack
 
@@ -268,25 +268,58 @@ docker compose --profile observability up
 | Prometheus | http://localhost:9090 | Scrapes `booking-service:8081/actuator/prometheus` every 5 s |
 | Grafana | http://localhost:3001 | Login `admin` / `admin`; the **ApexTick — Booking Service** dashboard is auto-provisioned |
 
-The dashboard visualises the flash sale directly from HTTP metrics: seat-hold outcomes (200 won vs 409 rejected), request throughput per endpoint, p50/p95/p99 latency, the HikariCP connection pool, and JVM heap/threads/CPU. Run the load test with the profile up to watch it move.
+The dashboard visualises the flash sale directly from HTTP metrics: seat-hold outcomes (`201` won vs `409` rejected — selected on `method="POST"`, since releasing a hold is a `DELETE` on the same URI template), request throughput per endpoint, p50/p95/p99 latency, the HikariCP connection pool, and JVM heap/threads/CPU. Run the load test with the profile up to watch it move.
 
 ## Load testing
 
-The k6 script authenticates against Keycloak and drives the real, JWT-secured hold endpoint. It discovers the target event's available seats automatically, so no seat ids are hard-coded.
+The k6 script drives the real, JWT-secured hold endpoint the SPA uses, `POST /api/events/{slug}/holds`. It discovers the target event's seats through the admin API, so no seat ids are hard-coded — which is also why it needs an admin account as well as a buyer.
 
-It logs in with the password grant on the confidential `apextick-loadtest` client, and takes the account and the client secret from the environment — it has no built-in credentials and refuses to start without them:
+Everyone logs in with the password grant on the confidential `apextick-loadtest` client. There are no built-in credentials; the script refuses to start without all five:
+
+| Variable | What it is |
+| --- | --- |
+| `LOADTEST_USER` / `LOADTEST_PASSWORD` | a buyer account — and the password every pool account shares |
+| `LOADTEST_CLIENT_SECRET` | `apextick-loadtest`'s secret, from `.env` |
+| `LOADTEST_ADMIN_USER` / `LOADTEST_ADMIN_PASSWORD` | an account with the `admin` realm role — `teardown` reads `/api/admin/seats` with it to check holders and versions. Grant it once with `scripts/grant-admin.sh <user>` |
+
+**One virtual user is one person.** Each VU logs in as its own Keycloak account, so `VUS` is capped to the size of the identity pool — the per-user rate limiter, the per-user seat cap and `held_by` all then behave like a real crowd. Seed the pool once (idempotent):
 
 ```bash
 cd load-test
-export LOADTEST_USER=kalana LOADTEST_PASSWORD=12345
-export LOADTEST_CLIENT_SECRET=$(sed -n 's/^LOADTEST_CLIENT_SECRET=//p' ../.env)
-: "${LOADTEST_CLIENT_SECRET:=dev-loadtest-secret}"   # docker-compose.yml's fallback, for an older .env
-k6 run booking-load-test.js
-# tune anything via env:
-k6 run -e VUS=200 -e ITERATIONS=5000 -e EVENT_SLUG=india-australia-semi-final booking-load-test.js
+export LOADTEST_PASSWORD=12345
+./seed-loadtest-users.sh 200            # creates loadtest-01 … loadtest-200 in the realm
 ```
 
-After the run, `teardown` reads the seat map back and asserts every targeted seat is now `HELD` and none is left `AVAILABLE` — the invariant is a threshold, so a correctness violation fails the run. Re-running needs the seats reset (restart with a fresh volume, or release the holds).
+Seeding runs two Keycloak admin calls per account, so 200 of them take a few minutes — once, not per run.
+
+```bash
+export LOADTEST_USER=kalana LOADTEST_PASSWORD=12345
+export LOADTEST_ADMIN_USER=kalana LOADTEST_ADMIN_PASSWORD=12345
+export LOADTEST_CLIENT_SECRET=$(sed -n 's/^LOADTEST_CLIENT_SECRET=//p' ../.env)
+: "${LOADTEST_CLIENT_SECRET:=dev-loadtest-secret}"   # docker-compose.yml's fallback, for an older .env
+k6 run -e LOADTEST_USER_COUNT=200 booking-load-test.js
+# tune anything via env:
+k6 run -e LOADTEST_USER_COUNT=200 -e ITERATIONS=5000 -e EVENT_SLUG=india-australia-semi-final booking-load-test.js
+```
+
+The storm itself lasts seconds, but `setup` logs all 200 accounts in before the first hold and Keycloak hashes passwords slowly, so expect a quiet minute first — the script raises k6's 60-second setup allowance to match the pool size.
+
+**How big must the pool be?** Two service-side limits set the floor, and the script computes both instead of assuming:
+
+- **`app.hold.max-seats`** caps how many seats *one person* may hold on *one event* (default 8), so N accounts can win at most `N × 8` seats. Selling out 300 seats needs `ceil(300 / 8) = 38` accounts. Below that a sell-out is arithmetically impossible, and the script says so rather than failing: it drops to a "capped run" that still proves no double-booking, no stranger holding a seat and no identity over the cap. A request from someone already at their cap answers `422 TOO_MANY_SEATS`, which is counted in `holds_capped` as a correct rejection, not a failed request. `setup` probes the running service for the real cap and refuses to start if it disagrees with the run's arithmetic.
+- **`app.rate-limit.hold.limit`** allows 30 holds per subject per minute, and the 5,000 attempts land in about three seconds — so each account gets ~30, full stop. Covering 300 seats with random draws needs roughly `300 × ln(300) ≈ 1,700` attempts to even *reach* every seat, which is why `ITERATIONS` stays at 5,000; that in turn wants `5000 / 30 ≈ 167` accounts. 200 clears it, and `setup` warns when the pool is small enough to be throttled.
+
+A smaller pool works if you lift the limiter for the run instead:
+
+```bash
+./seed-loadtest-users.sh 40
+(cd .. && APP_RATE_LIMIT_HOLD_LIMIT=100000 docker compose up -d booking-service)
+k6 run -e LOADTEST_USER_COUNT=40 booking-load-test.js
+```
+
+`APP_RATE_LIMIT_ENABLED`, `APP_RATE_LIMIT_HOLD_LIMIT`, `APP_RATE_LIMIT_HOLD_WINDOW` and `APP_HOLD_MAX_SEATS` are declared in `docker-compose.yml` at their `application.yml` defaults, so overriding them from the shell or `.env` actually reaches the container — Compose forwards nothing a service has not declared.
+
+After the run, `teardown` reads the seat map back and asserts every targeted seat is `HELD`, none is left `AVAILABLE`, every holder is one of the pool identities, no identity is over the cap, and every seat's optimistic-lock `version` moved by exactly 1 — a seat two people both won would have been written twice. The invariants are k6 checks under a `rate==1.0` threshold, so a correctness violation fails the run. Re-running needs the seats reset (restart with a fresh volume, or release the holds).
 
 ## Testing
 
@@ -296,7 +329,7 @@ After the run, `teardown` reads the seat map back and asserts every targeted sea
 (cd frontend && npm ci --ignore-scripts && npm test)
 ```
 
-booking-service runs 86 tests, most of them full-stack Testcontainers integration tests: seat concurrency (1 winner / 199 losers), multi-seat all-or-nothing holds, Redis-driven expiry, the hold sweeper, the transactional outbox, the order/payment flow, Stripe signature verification and mapping, seats-lost compensation, the admin API, security, and rate limiting. Its verify also exports the served OpenAPI document to `target/openapi/api-docs.json`, which CI normalises and compares with the committed gateway contract. notification-service runs 8 (GreenMail, including an authenticated SMTP server and one that refuses STARTTLS); the frontend runs 42 Vitest unit tests.
+booking-service runs 157 tests, most of them full-stack Testcontainers integration tests: seat concurrency (1 winner / 199 losers) over the real hold endpoint, multi-seat all-or-nothing holds, the sales window and per-user seat cap, Redis-driven expiry, the hold sweeper, the transactional outbox, the order/payment flow, Stripe signature verification and mapping, seats-lost compensation, the admin API, security, and rate limiting. Its verify also exports the served OpenAPI document to `target/openapi/api-docs.json`, which CI normalises and compares with the committed gateway contract. notification-service runs 8 (GreenMail, including an authenticated SMTP server and one that refuses STARTTLS); the frontend runs 68 Vitest unit tests.
 
 ## Project structure
 
