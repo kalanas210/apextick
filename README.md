@@ -290,8 +290,10 @@ export LOADTEST_PASSWORD=12345
 ./seed-loadtest-users.sh 200            # creates loadtest-01 … loadtest-200 in the realm
 ```
 
+Seeding runs two Keycloak admin calls per account, so 200 of them take a few minutes — once, not per run.
+
 ```bash
-export LOADTEST_USER=kalana
+export LOADTEST_USER=kalana LOADTEST_PASSWORD=12345
 export LOADTEST_ADMIN_USER=kalana LOADTEST_ADMIN_PASSWORD=12345
 export LOADTEST_CLIENT_SECRET=$(sed -n 's/^LOADTEST_CLIENT_SECRET=//p' ../.env)
 : "${LOADTEST_CLIENT_SECRET:=dev-loadtest-secret}"   # docker-compose.yml's fallback, for an older .env
@@ -299,6 +301,8 @@ k6 run -e LOADTEST_USER_COUNT=200 booking-load-test.js
 # tune anything via env:
 k6 run -e LOADTEST_USER_COUNT=200 -e ITERATIONS=5000 -e EVENT_SLUG=india-australia-semi-final booking-load-test.js
 ```
+
+The storm itself lasts seconds, but `setup` logs all 200 accounts in before the first hold and Keycloak hashes passwords slowly, so expect a quiet minute first — the script raises k6's 60-second setup allowance to match the pool size.
 
 **How big must the pool be?** Two service-side limits set the floor, and the script computes both instead of assuming:
 

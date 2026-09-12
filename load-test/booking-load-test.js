@@ -83,6 +83,9 @@ import { Counter } from 'k6/metrics';
 //      export LOADTEST_ADMIN_USER=kalana LOADTEST_ADMIN_PASSWORD=...
 //      export LOADTEST_CLIENT_SECRET=$(sed -n 's/^LOADTEST_CLIENT_SECRET=//p' ../.env)
 //      k6 run -e LOADTEST_USER_COUNT=200 booking-load-test.js
+//    The storm itself takes seconds, but setup logs all 200 accounts in first and
+//    Keycloak hashes passwords slowly, so expect a quiet minute before the first hold
+//    (options.setupTimeout is sized from the pool for exactly that reason).
 //
 // Why 200 and not 38: the hold endpoint is rate-limited per subject (30/min by
 // default) -- a deliberate abuse control with its own test (booking-service
@@ -167,13 +170,10 @@ const POOL = USER_COUNT > 1
 
 // One identity per VU (see the header): more VUs than accounts would make two VUs
 // share a subject, and the double-booking detector depends on that never happening.
+// (setup() says so out loud if the clamp bites -- this file is the init context, which
+// k6 re-runs for every VU, so warning from here would print the same line N times.)
 const REQUESTED_VUS = Number(__ENV.VUS || POOL.length);
 const VUS = Math.min(REQUESTED_VUS, POOL.length);
-if (REQUESTED_VUS > POOL.length) {
-  console.warn(`VUS=${REQUESTED_VUS} but the identity pool has ${POOL.length} account(s): running `
-    + `${VUS} VU(s) so that no two virtual users share a login. Seed a bigger pool with `
-    + `./seed-loadtest-users.sh ${REQUESTED_VUS} to run the full storm.`);
-}
 
 // How many seats this pool is physically allowed to win, and whether that is a sell-out.
 const POOL_CAPACITY = POOL.length * HOLD_MAX_SEATS;
@@ -197,6 +197,12 @@ const holdsCapped = new Counter('holds_capped');       // caller at app.hold.max
 const holdsThrottled = new Counter('holds_throttled'); // rate-limited (429)
 
 export const options = {
+  // setup() logs the WHOLE pool in, one blocking password grant per identity, and
+  // Keycloak hashes passwords deliberately slowly. k6 allows setup 60s by default, which
+  // the 200-account headline run can walk straight through -- and it aborts with "setup()
+  // execution timed out", which reads like a broken test rather than a slow login. Budget
+  // 2s per account so a genuinely wedged Keycloak still fails instead of hanging.
+  setupTimeout: `${Math.max(60, POOL.length * 2 + 30)}s`,
   summaryTrendStats: ['avg', 'p(95)', 'p(99)', 'max'],
   scenarios: {
     flash_sale: {
@@ -314,6 +320,12 @@ function adminSeats(adminToken, eventId) {
 }
 
 export function setup() {
+  if (REQUESTED_VUS > POOL.length) {
+    console.warn(`VUS=${REQUESTED_VUS} but the identity pool has ${POOL.length} account(s): running `
+      + `${VUS} VU(s) so that no two virtual users share a login. Seed a bigger pool with `
+      + `./seed-loadtest-users.sh ${REQUESTED_VUS} to run the full storm.`);
+  }
+
   const admin = identity(ADMIN_USERNAME, ADMIN_PASSWORD);
   const identities = POOL.map((name) => identity(name, PASSWORD));
 
