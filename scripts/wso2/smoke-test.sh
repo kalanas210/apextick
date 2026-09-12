@@ -138,17 +138,35 @@ else
   if [ -z "$SEAT" ]; then
     note "skipped" "no AVAILABLE seat to hammer — reset the demo data"
   else
-    throttled=0
+    # POST /events/{idOrSlug}/holds is the endpoint the SPA and k6 drive, and the one
+    # booking-service's Redis limiter buckets (30/min per subject by default -- see
+    # security/ratelimit/RateLimitInterceptor). Re-posting a seat you already hold is
+    # idempotent, so the first ~30 answer 201 and the rest 429. WSO2's own
+    # ApexTickHoldBurst policy is inert (docs/wso2.md, "Known limitations"), so what
+    # this step proves is that a 429 raised behind the gateway reaches the client
+    # intact -- and that the gateway routes an authenticated POST with a body at all.
+    throttled=0; reached=0
     for _ in $(seq 1 40); do
       code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
-        -H "Authorization: Bearer $TOKEN" "$GATEWAY/seats/$SEAT/hold")
-      [ "$code" = "429" ] && throttled=$((throttled+1))
+        -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+        -d "{\"seatIds\":[$SEAT]}" "$GATEWAY/events/$EVENT_SLUG/holds")
+      case "$code" in
+        429)         throttled=$((throttled+1)) ;;
+        201|409|422) reached=$((reached+1)) ;;
+      esac
     done
     if [ "$throttled" -gt 0 ]; then
-      ok "burst of 40 holds" "$throttled rejected with 429"
+      ok "burst of 40 holds" "$reached reached the service, $throttled throttled with 429"
+    elif [ "$reached" -gt 0 ]; then
+      bad "burst of 40 holds" "$reached reached the service, nothing was throttled"
     else
-      bad "burst of 40 holds" "nothing was throttled"
+      bad "burst of 40 holds" "nothing reached the service (last status $code)"
     fi
+    # Put the demo data back: release everything this account now holds on the event.
+    # (A 409 ORDER_PENDING here would mean an unpaid order covers the seat; nothing to
+    # do about it from a smoke test, so the status is not asserted.)
+    curl -s -o /dev/null -X DELETE -H "Authorization: Bearer $TOKEN" \
+      "$GATEWAY/events/$EVENT_SLUG/holds"
   fi
 fi
 
