@@ -192,4 +192,36 @@ class AdminErrorHandlingTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.timeZone").value("Asia/Colombo"));
     }
+
+    /**
+     * A stand's side is the only thing that places it on the seat map, and the column
+     * holds one character: "north" used to reach the database and come back as a 500
+     * with the layout half-written. Reject it, and accept the compass point in any case.
+     */
+    @Test
+    void a_section_on_an_unknown_side_is_rejected_before_the_layout_is_written() throws Exception {
+        long eventId = createEvent("error-side-" + System.nanoTime());
+        Map<String, Object> tier = Map.of("code", "std", "name", "Standard", "price", 100);
+
+        Map<String, Object> bad = Map.of("tiers", List.of(tier),
+                "sections", List.of(Map.of("code", "main", "name", "Main", "tierCode", "std",
+                        "side", "north", "rows", 2, "seatsPerRow", 2)));
+        mvc.perform(post("/api/admin/events/" + eventId + "/layout").header("Authorization", adminToken())
+                        .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(bad)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("INVALID_SECTION"));
+
+        // the refusal left nothing behind, so the real layout still applies
+        Map<String, Object> good = Map.of("tiers", List.of(tier),
+                "sections", List.of(Map.of("code", "main", "name", "Main", "tierCode", "std",
+                        "side", "N", "rows", 2, "seatsPerRow", 2)));
+        mvc.perform(post("/api/admin/events/" + eventId + "/layout").header("Authorization", adminToken())
+                        .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(good)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.seatsCreated").value(4));
+
+        mvc.perform(get("/api/admin/events/" + eventId).header("Authorization", adminToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sections[0].side").value("n"));
+    }
 }
