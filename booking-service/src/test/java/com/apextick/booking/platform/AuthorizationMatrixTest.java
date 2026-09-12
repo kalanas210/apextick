@@ -13,6 +13,7 @@ import com.apextick.booking.support.IntegrationTest;
 import com.apextick.booking.support.TestTokens;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -29,9 +30,12 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -147,6 +151,19 @@ class AuthorizationMatrixTest {
     void an_admin_can_read_any_customers_order(String method, String template) throws Exception {
         mvc.perform(call(method, template).header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void the_order_list_never_leaks_another_customers_order() throws Exception {
+        // the by-id checks above only cover guessing an id; the list is the other way in,
+        // and it is filtered by sub in a different query (OrderService.mine)
+        mvc.perform(get("/api/orders/me").header("Authorization", "Bearer " + intruderToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[*].id").value(not(hasItem(orderId))));
+
+        mvc.perform(get("/api/orders/me").header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[*].id").value(hasItem(orderId)));
     }
 
     // ---- the admin API -----------------------------------------------------------
