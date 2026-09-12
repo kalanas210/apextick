@@ -28,10 +28,18 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
             + "and oi.order.status = com.apextick.booking.order.OrderStatus.PENDING_PAYMENT")
     boolean existsPendingForSeats(@Param("seatIds") Collection<Long> seatIds);
 
-    /** Which of these seats an unpaid order still covers, so a release can refuse them by name. */
+    /**
+     * Which of these seats <em>this buyer's</em> own unpaid order still covers, so a release can
+     * refuse them by name. Scoped to the caller on purpose: a stranger's abandoned order can
+     * still name a seat this buyer now holds -- the expiry listener frees the seat the moment
+     * the hold lapses while the order waits up to a sweeper tick to be cancelled -- and telling
+     * this buyer to cancel an order they do not own and cannot see would strand their seats.
+     */
     @Query("select distinct oi.seatId from OrderItem oi where oi.seatId in :seatIds "
+            + "and oi.order.userSub = :userSub "
             + "and oi.order.status = com.apextick.booking.order.OrderStatus.PENDING_PAYMENT")
-    List<Long> findPendingSeatIds(@Param("seatIds") Collection<Long> seatIds);
+    List<Long> findPendingSeatIds(@Param("seatIds") Collection<Long> seatIds,
+                                  @Param("userSub") String userSub);
 
     @Query("select distinct oi.order.id from OrderItem oi where oi.seatId = :seatId "
             + "and oi.order.status = com.apextick.booking.order.OrderStatus.PENDING_PAYMENT")

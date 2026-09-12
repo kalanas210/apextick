@@ -137,8 +137,9 @@ public class HoldService {
         // Freeing a seat an unpaid order still covers puts the two aggregates out of step: the
         // seat map shows it available while existsPendingForSeats keeps every buyer out, and
         // paying the order charges the card only to refund it. Cancelling the order is the
-        // release path for those seats.
-        List<Long> pending = orders.findPendingSeatIds(ids);
+        // release path for those seats -- which only works for the caller's own orders, so the
+        // guard asks about those alone.
+        List<Long> pending = orders.findPendingSeatIds(ids, user.sub());
         if (!pending.isEmpty()) {
             throw new ConflictException(ErrorCodes.ORDER_PENDING,
                     "Cancel your pending order to release these seats",
