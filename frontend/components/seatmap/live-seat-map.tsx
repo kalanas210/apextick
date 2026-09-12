@@ -8,6 +8,7 @@ import { formatPrice } from "@/lib/format";
 import { MAX_SEATS_PER_ORDER, quoteOrder } from "@/lib/booking-rules";
 import { apiErrorCode, apiErrorMessage, apiProblem } from "@/lib/api";
 import { findPendingOrder } from "@/lib/orders";
+import { salesState } from "@/lib/sales-window";
 import { useSeatUpdates, type SeatStatusChange } from "@/lib/realtime";
 import { cn } from "@/lib/cn";
 import {
@@ -98,12 +99,20 @@ export function LiveSeatMap({
     mine.map((s) => s.heldUntil).filter((v): v is string => Boolean(v)).sort()[0] ??
     null;
 
-  // Countdown ticker, only while a server-side hold is actually running.
+  // The same answer the API's SalesWindow gives, asked before the buyer picks
+  // rather than after: a fixture that has sold out, closed, or kicked off stops
+  // offering seats here instead of refusing the Reserve click.
+  const sales = useMemo(() => (event ? salesState(event, now) : null), [event, now]);
+  const salesOpen = sales?.open ?? true;
+
+  // Countdown ticker: while a server-side hold is running, and while a sales
+  // window is still ahead — that one has to unlock the map on its own.
+  const ticking = Boolean(heldUntil) || sales?.code === "not-yet-open";
   useEffect(() => {
-    if (!heldUntil) return;
+    if (!ticking) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [heldUntil]);
+  }, [ticking]);
 
   const sections = useMemo(
     () => (event && seats ? buildSections(event, seats) : []),
@@ -140,6 +149,9 @@ export function LiveSeatMap({
   const toggle = (id: string) => {
     const seat = byId.get(id);
     if (!seat || seat.state !== "available") return;
+    // The stands are already inert when sales are shut; this covers the remove
+    // buttons in the selection list, which a surviving hold still renders.
+    if (!salesOpen && !selected.includes(id)) return;
     if (!selected.includes(id) && selected.length >= MAX_SEATS_PER_ORDER) {
       setNotice(`That is the ${MAX_SEATS_PER_ORDER} seat limit for a single order.`);
       return;
@@ -161,7 +173,7 @@ export function LiveSeatMap({
 
   /** Hold the picked seats, turn them into an order, and go pay. */
   const reserve = async () => {
-    if (!event || selectedSeats.length === 0) return;
+    if (!event || selectedSeats.length === 0 || !salesOpen) return;
     setNotice(null);
     const seatIds = selected.map(Number);
     try {
@@ -182,6 +194,10 @@ export function LiveSeatMap({
           ? "Someone just took one of those seats. Your picks have been refreshed — try again."
           : apiErrorMessage(error, "We could not hold those seats. Please try again."),
       );
+      if (code === "SALES_CLOSED" || code === "SALES_NOT_OPEN") {
+        // The window shut under us — refetch the event so the map says so too.
+        queryClient.invalidateQueries({ queryKey: ["event", slug] });
+      }
       queryClient.invalidateQueries({ queryKey: ["seats", slug] });
     }
   };
@@ -253,6 +269,7 @@ export function LiveSeatMap({
         onToggle={toggle}
         highlighted={isLinkedSection(sec, { section: initialSection, tier: initialTier })}
         className={className}
+        locked={!salesOpen}
       />
     );
   };
@@ -267,6 +284,18 @@ export function LiveSeatMap({
     <div className="grid gap-10 lg:grid-cols-12 lg:gap-12">
       {/* Map */}
       <div className="lg:col-span-7 xl:col-span-8">
+        {sales && !sales.open && (
+          <div
+            role="status"
+            className="mb-6 rounded-xl border border-line-2 bg-ink-2 px-4 py-3.5"
+          >
+            <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-bone/80">
+              {sales.title}
+            </p>
+            <p className="mt-1.5 text-[0.82rem] text-muted">{sales.detail}</p>
+          </div>
+        )}
+
         <div className="mb-6">
           <Legend tiers={legendTiers} />
         </div>
@@ -287,8 +316,17 @@ export function LiveSeatMap({
         </div>
 
         <p className="mt-6 text-center text-[0.76rem] text-faint">
-          Live availability — {event.availableSeats} of {event.totalSeats} seats open.
-          Updates stream in as other buyers pick.
+          {salesOpen ? (
+            <>
+              Live availability — {event.availableSeats} of {event.totalSeats} seats
+              open. Updates stream in as other buyers pick.
+            </>
+          ) : (
+            <>
+              {event.availableSeats} of {event.totalSeats} seats are unsold. The map is
+              read-only while the fixture is not selling.
+            </>
+          )}
         </p>
       </div>
 
@@ -368,10 +406,25 @@ export function LiveSeatMap({
 
             {selectedSeats.length === 0 ? (
               <div className="py-12 text-center">
-                <p className="text-[0.9rem] text-muted">Tap an open seat to begin.</p>
-                <p className="mt-2 text-[0.76rem] text-faint">
-                  Gold, premium, and standard stands are color coded above.
-                </p>
+                {salesOpen ? (
+                  <>
+                    <p className="text-[0.9rem] text-muted">Tap an open seat to begin.</p>
+                    <p className="mt-2 text-[0.76rem] text-faint">
+                      Gold, premium, and standard stands are color coded above.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[0.9rem] text-muted">{sales?.title}</p>
+                    <p className="mt-2 text-[0.76rem] text-faint">{sales?.detail}</p>
+                    <Link
+                      href="/events"
+                      className="mt-5 inline-block text-[0.76rem] text-muted underline underline-offset-4 transition-colors hover:text-bone"
+                    >
+                      Browse other fixtures
+                    </Link>
+                  </>
+                )}
               </div>
             ) : (
               <>
@@ -419,7 +472,12 @@ export function LiveSeatMap({
                   </div>
                 </dl>
 
-                {authLoading ? null : isAuthenticated ? (
+                {!salesOpen ? (
+                  <p className="mt-6 rounded-lg border border-line-2 px-3 py-2.5 text-center text-[0.78rem] text-muted">
+                    {sales?.detail || sales?.title}
+                    {heldUntil && " Your hold stands until the timer runs out."}
+                  </p>
+                ) : authLoading ? null : isAuthenticated ? (
                   <button
                     type="button"
                     onClick={reserve}
@@ -458,9 +516,11 @@ export function LiveSeatMap({
                   </button>
                 )}
 
-                <p className="mt-3 text-center text-[0.72rem] text-faint">
-                  Seats are held for a few minutes while you pay.
-                </p>
+                {salesOpen && (
+                  <p className="mt-3 text-center text-[0.72rem] text-faint">
+                    Seats are held for a few minutes while you pay.
+                  </p>
+                )}
               </>
             )}
           </div>
