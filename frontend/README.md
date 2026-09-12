@@ -1,12 +1,15 @@
 # ApexTick
 
-A real time ticket booking experience for the biggest nights in world sport. This is the public marketing and seat selection frontend: a flagship, type led interface built on mock data so the whole thing runs on its own with no backend.
+A real time ticket booking experience for the biggest nights in world sport. This is the public marketing and seat selection frontend: a flagship, type led interface that renders whatever is in the booking service's catalog, from the home page down to the seat.
 
-Three flagship series are modelled as distinct brand worlds inside one design system:
+Each series is its own brand world inside one design system — its colour, cities and
+photography come from the catalog, so a series an operator adds arrives with its own
+look rather than a fallback one. The demo season ships four:
 
 - ICC T20 World Cup 2026 (cricket, international)
 - Indian Premier League (cricket, franchise)
 - Premier League (football, English matchday)
+- FIFA World Cup (football, international)
 
 ## Stack
 
@@ -50,8 +53,8 @@ components/
   home/              home page sections
   fixtures/          fixture card, listing explorer, tier panel
   seatmap/           seat map, stadium diagram, tier colors
-data/                typed mock data for series, fixtures, teams, tiers
-lib/                 formatting, color, seat generation, class helpers
+data/                curated photography ids (the only data still in the repo)
+lib/                 API clients (browser and server), formatting, colour, class helpers
 ```
 
 ## Design system
@@ -64,12 +67,19 @@ lib/                 formatting, color, seat generation, class helpers
 
 ## Data
 
-Fixture copy — names, imagery, blurbs, and the marketing pages built on them — comes
-from `data/events.ts`. Team crests are typographic monograms generated in code, not
-official logos.
+Every page is the booking service's catalog. Fixtures, series, teams, tiers, stands,
+prices, availability, photography and copy are read from the API — so an event an
+operator creates, prices and publishes in the admin panel is on the home page, in the
+grid, on its own page and on the seat map immediately, and nothing on screen claims a
+number the API would contradict. Team crests fall back to typographic monograms
+generated in code; they are not official logos.
 
-Everything in the booking flow is live against the booking service: the seat map
-reads real availability (and streams changes over STOMP), holds and orders hit the
-API, and checkout takes a real payment through Stripe or the backend's offline mock
-gateway. Sign-in is Keycloak (authorization code + PKCE), so this app never handles
-a password.
+The three storefront routes render on the server and are always dynamic: availability
+changes by the second and an event can be pulled from sale at any moment. In the
+browser the API is same-origin behind Caddy (or `NEXT_PUBLIC_API_URL`); on the server
+it is `API_INTERNAL_URL`, the service name on the compose network.
+
+The booking flow is live too: the seat map streams changes over STOMP, holds and
+orders hit the API, and checkout takes a real payment through Stripe or the backend's
+offline mock gateway. Sign-in is Keycloak (authorization code + PKCE), so this app
+never handles a password.
