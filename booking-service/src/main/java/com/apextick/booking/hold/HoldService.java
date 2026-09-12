@@ -78,6 +78,13 @@ public class HoldService {
         Event event = eventLookup.resolve(idOrSlug);
         SalesWindow.assertOpen(event);
 
+        // Counting the caller's seats and then holding more is a check-then-act, so queue this
+        // account's own concurrent requests for this event behind one another before counting.
+        // Without it two tabs asking for eight disjoint seats each would both read zero and both
+        // commit, and the cap below would be advisory. Rivals are not affected: the lock is per
+        // (event, user) and Postgres drops it when this transaction ends.
+        seats.lockHoldsOf(holdCapLockKey(event.getId(), user.sub()));
+
         // The cap is per user, not per request: counting only this call would let one account
         // hoard an event eight seats at a time. Seats the caller already holds and is simply
         // re-posting are not counted twice.
@@ -211,6 +218,14 @@ public class HoldService {
             holdKeys.dropOwn(seatIds, holder);
             realtime.seatStatusChanged(eventId, changes);
         });
+    }
+
+    /**
+     * Advisory-lock key for one account's holds on one event. A collision between two different
+     * (event, user) pairs only costs them a moment of needless queuing, never correctness.
+     */
+    private static long holdCapLockKey(Long eventId, String sub) {
+        return (Long.hashCode(eventId) & 0xffff_ffffL) << 32 | (sub.hashCode() & 0xffff_ffffL);
     }
 
     private UnprocessableException tooManySeats(int alreadyHeld, int requested) {

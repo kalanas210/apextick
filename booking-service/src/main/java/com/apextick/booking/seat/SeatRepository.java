@@ -87,6 +87,21 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
             + "and s.status = com.apextick.booking.seat.SeatStatus.HELD and s.heldBy = :sub")
     List<Long> findMyHeldSeatIds(@Param("eventId") Long eventId, @Param("sub") String sub);
 
+    /**
+     * Serialises one account's holds on one event against each other, so the per-user seat cap
+     * cannot be beaten by sending two requests at once.
+     *
+     * <p>Reading {@link #findMyHeldSeatIds} and then holding more is a check-then-act, and under
+     * READ COMMITTED neither transaction sees the other's uncommitted rows -- two tabs asking
+     * for a full allowance of disjoint seats each would both read the same count and both
+     * commit. Row locks cannot close it either: an account holding nothing yet has no rows to
+     * lock. A transaction-scoped advisory lock keyed on (event, user) can. Rivals for the same
+     * seats are unaffected -- only this account's own concurrent requests queue up -- and
+     * Postgres drops the lock at commit or rollback.
+     */
+    @Query(value = "select pg_advisory_xact_lock(:key) is null", nativeQuery = true)
+    boolean lockHoldsOf(@Param("key") long key);
+
     // ---- releases (sweeper fallback, user release, order cancel/expiry) ----
 
     @Query("select s from Seat s where s.status = com.apextick.booking.seat.SeatStatus.HELD "
