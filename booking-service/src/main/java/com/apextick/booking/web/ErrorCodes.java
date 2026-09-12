@@ -6,8 +6,11 @@ public final class ErrorCodes {
     public static final String VALIDATION_FAILED = "VALIDATION_FAILED";
     public static final String SEAT_UNAVAILABLE = "SEAT_UNAVAILABLE";
     public static final String SALES_CLOSED = "SALES_CLOSED";
+    public static final String SALES_NOT_OPEN = "SALES_NOT_OPEN";
+    public static final String TOO_MANY_SEATS = "TOO_MANY_SEATS";
     public static final String HOLD_EXPIRED = "HOLD_EXPIRED";
     public static final String ORDER_ALREADY_PENDING = "ORDER_ALREADY_PENDING";
+    public static final String ORDER_PENDING = "ORDER_PENDING";
     public static final String ORDER_NOT_PAYABLE = "ORDER_NOT_PAYABLE";
     public static final String IDEMPOTENCY_KEY_REUSED = "IDEMPOTENCY_KEY_REUSED";
     public static final String IDEMPOTENCY_KEY_MISSING = "IDEMPOTENCY_KEY_MISSING";
