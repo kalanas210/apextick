@@ -42,7 +42,7 @@ function instant(iso: string | null | undefined): number | null {
 /** What the fixture-detail row says about selling right now. */
 export function salesState(
   event: Pick<EventDetail, "status" | "startsAt"> &
-    Partial<Pick<EventDetail, "salesStartAt" | "salesEndAt">>,
+    Partial<Pick<EventDetail, "salesStartAt" | "salesEndAt" | "availableSeats">>,
   now: number = Date.now(),
 ): SalesState {
   if (!PURCHASABLE.includes(event.status)) {
@@ -51,7 +51,14 @@ export function salesState(
         open: false,
         code: "sold-out",
         title: "Sold out",
-        detail: "Every seat for this fixture has gone. Seats reappear here if an order is cancelled.",
+        // `sold-out` is a status an operator sets, not a count the API derives, so
+        // the map underneath can still be showing unsold seats. Saying "every seat
+        // has gone" over a map of open seats reads as a bug; only claim it when the
+        // count agrees.
+        detail:
+          event.availableSeats === 0
+            ? "Every seat for this fixture has gone. Seats reappear here if an order is cancelled."
+            : "This fixture is marked sold out, so the seats still showing here are not on sale.",
       };
     }
     if (event.status === "cancelled") {

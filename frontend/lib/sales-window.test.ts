@@ -28,6 +28,16 @@ describe("salesState", () => {
     expect(state.detail).toBe("");
   });
 
+  it("only claims every seat has gone when the count says so", () => {
+    const map = (availableSeats: number) =>
+      salesState(event({ status: "sold-out", availableSeats }), NOW).detail;
+    expect(map(0)).toMatch(/^Every seat/);
+    // An operator can flip a fixture to sold-out with seats still unsold; the
+    // banner sits directly above a map that would contradict the other wording.
+    expect(map(37)).not.toMatch(/^Every seat/);
+    expect(salesState(event({ status: "sold-out" }), NOW).detail).not.toMatch(/^Every seat/);
+  });
+
   it("refuses every status the API will not sell", () => {
     const refused: EventStatus[] = ["sold-out", "cancelled", "draft"];
     expect(refused.map((status) => salesState(event({ status }), NOW).code)).toEqual([

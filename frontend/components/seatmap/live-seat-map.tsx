@@ -105,14 +105,17 @@ export function LiveSeatMap({
   const sales = useMemo(() => (event ? salesState(event, now) : null), [event, now]);
   const salesOpen = sales?.open ?? true;
 
-  // Countdown ticker: while a server-side hold is running, and while a sales
-  // window is still ahead — that one has to unlock the map on its own.
-  const ticking = Boolean(heldUntil) || sales?.code === "not-yet-open";
+  // Countdown ticker: every second while a server-side hold is running, because
+  // that number is read off the screen. A sales window that is still ahead also
+  // has to unlock the map on its own, but nothing counts it down and the wait can
+  // be months — a slow tick there keeps a parked tab from re-rendering the whole
+  // map once a second for no one.
+  const tick = heldUntil ? 1000 : sales?.code === "not-yet-open" ? 15_000 : 0;
   useEffect(() => {
-    if (!ticking) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
+    if (!tick) return;
+    const id = setInterval(() => setNow(Date.now()), tick);
     return () => clearInterval(id);
-  }, [ticking]);
+  }, [tick]);
 
   const sections = useMemo(
     () => (event && seats ? buildSections(event, seats) : []),
