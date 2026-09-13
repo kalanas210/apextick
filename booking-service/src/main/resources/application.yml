@@ -104,6 +104,13 @@ app:
       webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
       # Comma-separated allow-list (e.g. usd,gbp,inr); empty accepts every currency.
       supported-currencies: ${STRIPE_SUPPORTED_CURRENCIES:}
+    refund-retry:
+      # How often refunds a provider refused are asked for again, how long one waits after a
+      # refusal, and after how many refusals it is left for someone to retry from the admin console.
+      interval: ${APP_REFUND_RETRY_INTERVAL:PT5M}
+      backoff: ${APP_REFUND_RETRY_BACKOFF:PT10M}
+      max-attempts: ${APP_REFUND_RETRY_MAX_ATTEMPTS:12}
+      batch: ${APP_REFUND_RETRY_BATCH:50}
   storage:
     s3:
       # false keeps ticket PDFs in memory, so the service runs with no object store

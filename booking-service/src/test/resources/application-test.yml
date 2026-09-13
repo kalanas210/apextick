@@ -29,6 +29,10 @@ app:
     sweeper-interval: PT30S
   payment:
     provider: mock
+    # Off the schedule in tests: RefundReconcilerTest drives the reconciler itself, and a pass
+    # landing mid-test would retry refunds another test is still looking at.
+    refund-retry:
+      interval: PT24H
   rate-limit:
     enabled: false
     hold:
