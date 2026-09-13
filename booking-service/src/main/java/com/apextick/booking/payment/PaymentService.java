@@ -47,8 +47,8 @@ public class PaymentService {
     static final Duration ABANDONED_AFTER = Duration.ofMinutes(2);
 
     /** A charge already settled one way or the other: hearing about it again changes nothing. */
-    private static final Set<PaymentStatus> SETTLED =
-            EnumSet.of(PaymentStatus.SUCCEEDED, PaymentStatus.REFUNDED, PaymentStatus.REFUND_REQUIRED);
+    private static final Set<PaymentStatus> SETTLED = EnumSet.of(PaymentStatus.SUCCEEDED, PaymentStatus.REFUNDED,
+            PaymentStatus.REFUND_REQUIRED, PaymentStatus.DISPUTED);
 
     private final PaymentRepository payments;
     private final OrderRepository orders;
@@ -181,10 +181,35 @@ public class PaymentService {
                     p.setUpdatedAt(now);
                 }
             }
+            // refunded in full in Stripe itself: its dashboard, or the refund asked for here reported back
+            case REFUNDED -> refunds.recordProviderRefund(p);
+            case CHARGEBACK -> dispute(p, result, now);
             default -> { /* PENDING / other: leave the payment as-is until a terminal event */ }
         }
         event.setOutcome(result.outcome() == PaymentOutcome.SUCCEEDED ? p.getStatus().name() : result.outcome().name());
         event.setProcessedAt(Instant.now());
+    }
+
+    /**
+     * The cardholder disputed the charge with their bank, so the money is being clawed back whatever
+     * happens here. The tickets it bought stop admitting anyone, and a refund still owed on it stops
+     * being asked for: paying that as well would return the money twice.
+     */
+    private void dispute(Payment p, PaymentResult result, Instant now) {
+        if (p.getStatus() != PaymentStatus.SUCCEEDED && p.getStatus() != PaymentStatus.REFUND_REQUIRED) {
+            log.warn("{} dispute {} on payment {} left alone: the payment is {}",
+                    p.getProvider(), result.externalEventId(), p.getId(), p.getStatus());
+            return;
+        }
+        p.setStatus(PaymentStatus.DISPUTED);
+        p.setFailureCode(result.failureCode() == null ? "dispute" : "dispute:" + result.failureCode());
+        p.setUpdatedAt(now);
+        // the payment's lock is held already, so the order's comes second, as on every path that settles a charge
+        UUID orderId = p.getOrder().getId();
+        Order order = orders.findByIdForUpdate(orderId).orElseThrow(() -> new NotFoundException("Order", orderId));
+        if (order.getStatus() == OrderStatus.PAID) {
+            orderService.markDisputed(order);
+        }
     }
 
     /** Whether the provider took exactly the sum, in exactly the currency, the payment was recorded for. */

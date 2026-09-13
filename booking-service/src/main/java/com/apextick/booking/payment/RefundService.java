@@ -41,6 +41,8 @@ public class RefundService {
     /** As much of a provider's refusal as the payments table keeps. */
     private static final int ERROR_LIMIT = 512;
 
+    private static final String DASHBOARD_REFUND = "Refunded in the payment provider's dashboard";
+
     private final PaymentRepository payments;
     private final OrderRepository orders;
     private final OrderService orderService;
@@ -99,6 +101,31 @@ public class RefundService {
                           String reason, String message) {
         owe(p, amount, currency, reason, message);
         record(p, gateway.refund(p.getProviderRef(), amount, currency, refundKey(p)));
+    }
+
+    /**
+     * The provider reports a charge refunded in full. Usually that is the refund asked for here,
+     * reported back, and it changes nothing; a refund still owed has gone through after all. A
+     * refund nobody here asked for was made in the provider's own dashboard, so the order it paid
+     * for is refunded the way the box office would have refunded it. Callers hold the payment's lock.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordProviderRefund(Payment p) {
+        switch (p.getStatus()) {
+            case REFUND_REQUIRED -> refunded(p, p.getRefundRef(), Instant.now());
+            case SUCCEEDED -> {
+                UUID orderId = p.getOrder().getId();
+                Order order = orders.findByIdForUpdate(orderId)
+                        .orElseThrow(() -> new NotFoundException("Order", orderId));
+                if (order.getStatus() == OrderStatus.PAID) {
+                    orderService.markRefunded(order, null, DASHBOARD_REFUND);
+                }
+                owe(p, p.getAmount(), p.getCurrency(), "provider_refund", DASHBOARD_REFUND);
+                refunded(p, null, Instant.now());
+            }
+            default -> log.info("{} reported payment {} refunded while it was {}; nothing to change",
+                    p.getProvider(), p.getId(), p.getStatus());
+        }
     }
 
     private UUID decide(UUID orderId, String reason, CurrentUser admin) {
@@ -181,16 +208,22 @@ public class RefundService {
                     owedAmount(p), owedCurrency(p), p.getFailureCode(), p.getRefundAttempts(), result.rawJson());
             return;
         }
+        refunded(p, result.providerRef(), now);
+    }
+
+    /** The refund went through: record it, and tell the customer their money is on its way. */
+    private void refunded(Payment p, String refundRef, Instant now) {
         p.setStatus(PaymentStatus.REFUNDED);
-        p.setRefundRef(result.providerRef());
+        p.setRefundRef(refundRef);
         p.setRefundedAt(now);
         p.setRefundError(null);
+        p.setUpdatedAt(now);
         Order order = p.getOrder();
         domainEvents.publish(EventTypes.PAYMENT_REFUNDED, "payment", p.getId().toString(),
                 new PaymentRefundedPayload(p.getId().toString(), order.getId().toString(), order.getOrderNumber(),
                         order.getUserSub(), order.getUserEmail(), order.getUserName(), order.getEvent().getId(),
                         order.getEvent().getName(), owedAmount(p), owedCurrency(p), p.getFailureCode(),
-                        result.providerRef(), now));
+                        refundRef, now));
     }
 
     /** What is owed back; a charge refunded before this was recorded owes all of itself. */
