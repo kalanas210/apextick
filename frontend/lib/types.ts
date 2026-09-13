@@ -10,11 +10,11 @@ export type Currency = 'INR' | 'GBP' | 'USD';
 /** Serialized as the hyphenated code, not the enum name. */
 export type EventStatus =
     | 'onsale' | 'selling-fast' | 'final-release' | 'sold-out' | 'draft' | 'cancelled';
-export type OrderStatus = 'PENDING_PAYMENT' | 'PAID' | 'CANCELLED' | 'EXPIRED';
+export type OrderStatus = 'PENDING_PAYMENT' | 'PAID' | 'CANCELLED' | 'EXPIRED' | 'REFUNDED';
 export type TicketStatus = 'ISSUED' | 'USED' | 'CANCELLED';
 export type PaymentStatus =
     | 'INITIATED' | 'REQUIRES_ACTION' | 'REDIRECTED' | 'SUCCEEDED'
-    | 'FAILED' | 'CANCELLED' | 'REFUND_REQUIRED' | 'REFUNDED';
+    | 'FAILED' | 'CANCELLED' | 'REFUND_REQUIRED' | 'REFUNDED' | 'DISPUTED';
 
 export interface Seat {
     id: number;
@@ -163,6 +163,10 @@ export interface Order {
     cancelReason: string | null;
     items: OrderItem[];
     ticketIds: string[];
+    userEmail: string | null;
+    userName: string | null;
+    cancelledAt: string | null;
+    refundedAt: string | null;
 }
 
 export interface Ticket {
@@ -318,4 +322,58 @@ export interface AdminSeat {
     heldBy: string | null;
     heldUntil: string | null;
     version: number;
+}
+
+/** A ticket as the box office sees it. Never its QR token. */
+export interface AdminTicket {
+    id: string;
+    status: TicketStatus;
+    seatId: number;
+    seatLabel: string;
+    sectionName: string;
+    tierName: string;
+    issuedAt: string;
+    usedAt: string | null;
+    /** The gate it was admitted at, when the scanner named one. */
+    usedGate: string | null;
+}
+
+/** A payment attempt, with the provider's reference and where its refund stands. */
+export interface AdminPayment {
+    id: string;
+    provider: string;
+    status: PaymentStatus;
+    amount: number;
+    currency: Currency;
+    /** Find it by this in the provider's own dashboard. */
+    providerRef: string | null;
+    cardBrand: string | null;
+    cardLast4: string | null;
+    failureCode: string | null;
+    failureMessage: string | null;
+    createdAt: string;
+    confirmedAt: string | null;
+    refundAmount: number | null;
+    refundCurrency: string | null;
+    refundRef: string | null;
+    refundedAt: string | null;
+    refundAttempts: number;
+    refundLastAttemptAt: string | null;
+    /** What the provider said the last time it refused the refund. */
+    refundError: string | null;
+}
+
+/** Why the console cannot refund an order. */
+export type RefundBlocker = 'NOT_PAID' | 'NO_SETTLED_PAYMENT' | 'TICKETS_USED';
+
+/** GET /api/admin/orders/{id}: one order in full, for the box office. */
+export interface AdminOrderDetail {
+    order: Order;
+    userSub: string;
+    refundedBy: string | null;
+    refundReason: string | null;
+    /** `null` when the order can be refunded. */
+    refundBlockedBy: RefundBlocker | null;
+    tickets: AdminTicket[];
+    payments: AdminPayment[];
 }

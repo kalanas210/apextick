@@ -1,10 +1,11 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { QueryClient } from '@tanstack/react-query';
 import { api, authHeaders, retryOn5xx } from '@/lib/api';
 import { useAccessToken } from './useSession';
 import type {
-    AdminSeat, EventDetail, EventStats, EventSummary, EventUpsert, LayoutInput, LayoutResult,
+    AdminOrderDetail, AdminSeat, EventDetail, EventStats, EventSummary, EventUpsert, LayoutInput, LayoutResult,
     Order, PageResponse, Series, Team,
 } from '@/lib/types';
 
@@ -17,7 +18,11 @@ export interface AdminEventParams {
 }
 
 export interface AdminOrderParams {
+    /** An order number, or part of the customer's email or name. */
+    q?: string;
     status?: string;
+    /** Only the orders the box office still owes a refund on. */
+    refundRequired?: boolean;
     page?: number;
     size?: number;
 }
@@ -166,8 +171,65 @@ export function useAdminOrders(query: AdminOrderParams) {
         queryFn: async () =>
             (await api.get<PageResponse<Order>>('/api/admin/orders', {
                 headers: authHeaders(token),
-                params: params({ ...query }),
+                params: params({
+                    q: query.q,
+                    status: query.status,
+                    refundRequired: query.refundRequired ? 'true' : undefined,
+                    page: query.page,
+                    size: query.size,
+                }),
             })).data,
+    });
+}
+
+/** One order in full, for the box office: its tickets, its payments, and whether it can be refunded. */
+export function useAdminOrder(id: string | undefined) {
+    const token = useAccessToken();
+    return useQuery({
+        queryKey: ['admin', 'order', id],
+        enabled: !!token && !!id,
+        retry: retryOn5xx,
+        queryFn: async () =>
+            (await api.get<AdminOrderDetail>(`/api/admin/orders/${id}`, { headers: authHeaders(token) })).data,
+    });
+}
+
+/** A refund voids tickets, frees seats and takes revenue off an event, so every view of those refreshes. */
+function refreshAfterRefund(queryClient: QueryClient) {
+    queryClient.invalidateQueries({ queryKey: ['admin', 'orders'] });
+    queryClient.invalidateQueries({ queryKey: ['admin', 'stats'] });
+    queryClient.invalidateQueries({ queryKey: ['admin', 'seats'] });
+    // Other browsers hear about the freed seats over STOMP; this tab asks directly.
+    queryClient.invalidateQueries({ queryKey: ['seats'] });
+}
+
+/** Refunds a paid order in full. The answer is the order as it now stands, shown at once. */
+export function useRefundOrder(id: string) {
+    const token = useAccessToken();
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (reason: string) =>
+            (await api.post<AdminOrderDetail>(`/api/admin/orders/${id}/refund`, { reason },
+                { headers: authHeaders(token) })).data,
+        onSuccess: (detail: AdminOrderDetail) => queryClient.setQueryData(['admin', 'order', id], detail),
+        // refused because the order moved on meanwhile -- a ticket scanned, a refund already made:
+        // show the operator what it looks like now
+        onError: () => queryClient.invalidateQueries({ queryKey: ['admin', 'order', id] }),
+        onSettled: () => refreshAfterRefund(queryClient),
+    });
+}
+
+/** Asks the payment provider again for every refund still owed on the order. */
+export function useRetryRefund(id: string) {
+    const token = useAccessToken();
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async () =>
+            (await api.post<AdminOrderDetail>(`/api/admin/orders/${id}/refund/retry`, null,
+                { headers: authHeaders(token) })).data,
+        onSuccess: (detail: AdminOrderDetail) => queryClient.setQueryData(['admin', 'order', id], detail),
+        onError: () => queryClient.invalidateQueries({ queryKey: ['admin', 'order', id] }),
+        onSettled: () => refreshAfterRefund(queryClient),
     });
 }
 

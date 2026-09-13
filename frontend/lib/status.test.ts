@@ -6,9 +6,13 @@ import {
   ORDER_LABEL,
   ORDER_STATUSES,
   ORDER_TONE,
+  PAYMENT_LABEL,
+  PAYMENT_TONE,
   SEAT_TONE,
+  TICKET_LABEL,
   TICKET_TONE,
 } from "./status";
+import type { PaymentStatus, TicketStatus } from "./types";
 
 describe("status vocabulary", () => {
   it("lists every event status exactly once, in lifecycle order", () => {
@@ -32,12 +36,19 @@ describe("status vocabulary", () => {
       expect(ORDER_LABEL[s]).toBeTruthy();
       expect(ORDER_TONE[s]).toBeTruthy();
     }
+    for (const s of Object.keys(PAYMENT_LABEL) as PaymentStatus[]) {
+      expect(PAYMENT_TONE[s]).toBeTruthy();
+    }
+    for (const s of Object.keys(TICKET_TONE) as TicketStatus[]) {
+      expect(TICKET_LABEL[s]).toBeTruthy();
+    }
   });
 
   it("styles every pill with both a border and a text colour", () => {
     const tones = [
       ...Object.values(EVENT_TONE),
       ...Object.values(ORDER_TONE),
+      ...Object.values(PAYMENT_TONE),
       ...Object.values(SEAT_TONE),
       ...Object.values(TICKET_TONE),
     ];
@@ -47,7 +58,14 @@ describe("status vocabulary", () => {
     }
   });
 
-  it("calls a paid order confirmed", () => {
+  it("calls a paid order confirmed, and a refunded one refunded", () => {
     expect(ORDER_LABEL.PAID).toBe("Confirmed");
+    expect(ORDER_LABEL.REFUNDED).toBe("Refunded");
+  });
+
+  it("shows a refund still owed in the same alarm as a dispute, not as a settled refund", () => {
+    expect(PAYMENT_LABEL.REFUND_REQUIRED).toBe("Refund owed");
+    expect(PAYMENT_TONE.REFUND_REQUIRED).toBe(PAYMENT_TONE.DISPUTED);
+    expect(PAYMENT_TONE.REFUND_REQUIRED).not.toBe(PAYMENT_TONE.REFUNDED);
   });
 });

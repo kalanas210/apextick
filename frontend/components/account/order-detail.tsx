@@ -34,6 +34,13 @@ const STATUS_COPY: Record<OrderStatus, { label: string; tone: string; blurb: str
     tone: "border-line-2 text-faint",
     blurb: "The payment window closed, so the seats were released.",
   },
+  REFUNDED: {
+    label: "Refunded",
+    tone: "border-line-strong text-muted",
+    // The order is refunded the moment the box office decides; the money can take longer, and
+    // the email that says it is on its way is only sent once the card company has accepted it.
+    blurb: "This order was refunded, so its tickets no longer admit anyone. We email you as soon as the money is on its way back to your card.",
+  },
 };
 
 export function OrderDetail({ orderId }: { orderId: string }) {
