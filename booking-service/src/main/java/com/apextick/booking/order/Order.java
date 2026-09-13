@@ -17,6 +17,7 @@ import jakarta.persistence.Version;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.BatchSize;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -101,8 +102,10 @@ public class Order {
     @Version
     private Long version;
 
+    // A page of orders loads its items fifty orders at a time, not with one query per order.
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("id asc")
+    @BatchSize(size = 50)
     private List<OrderItem> items = new ArrayList<>();
 
     public void addItem(OrderItem item) {

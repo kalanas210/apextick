@@ -18,6 +18,11 @@ import com.apextick.booking.ticket.TicketStatus;
 import com.apextick.booking.web.ConflictException;
 import com.apextick.booking.web.ErrorCodes;
 import com.apextick.booking.web.NotFoundException;
+import com.apextick.booking.web.PageResponse;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -27,7 +32,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-/** The box office's view of an order, and the refund it can give. */
+/** The box office's view of orders: finding one, seeing it whole, and the refund it can give. */
 @Service
 public class AdminOrderService {
 
@@ -45,6 +50,25 @@ public class AdminOrderService {
         this.refunds = refunds;
         this.readOnly = new TransactionTemplate(txManager);
         this.readOnly.setReadOnly(true);
+    }
+
+    /**
+     * Orders newest first, narrowed by status, by part of an order number or the customer's email or
+     * name, and to those still owed a refund. Each row names its tickets, which the list used to leave
+     * empty, with every ticket on the page looked up in one query.
+     */
+    public PageResponse<OrderResponse> list(OrderStatus status, String text, boolean refundOwed, Pageable pageable) {
+        return readOnly.execute(s -> {
+            Pageable newestFirst = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
+                    Sort.by(Sort.Direction.DESC, "createdAt"));
+            Page<Order> page = orders.findAll(OrderSearch.matching(status, text, refundOwed), newestFirst);
+            Map<UUID, Map<Long, UUID>> ticketsByOrder = page.isEmpty() ? Map.of()
+                    : tickets.findIssuedForOrders(page.map(Order::getId).getContent()).stream()
+                    .collect(Collectors.groupingBy(TicketRepository.IssuedTicket::getOrderId,
+                            Collectors.toMap(TicketRepository.IssuedTicket::getItemId,
+                                    TicketRepository.IssuedTicket::getTicketId)));
+            return PageResponse.of(page, o -> OrderResponse.of(o, ticketsByOrder.getOrDefault(o.getId(), Map.of())));
+        });
     }
 
     public AdminOrderDetailResponse detail(UUID orderId) {

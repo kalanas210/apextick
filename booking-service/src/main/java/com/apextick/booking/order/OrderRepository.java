@@ -3,7 +3,10 @@ package com.apextick.booking.order;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -14,7 +17,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-public interface OrderRepository extends JpaRepository<Order, UUID> {
+public interface OrderRepository extends JpaRepository<Order, UUID>, JpaSpecificationExecutor<Order> {
 
     Optional<Order> findByIdAndUserSub(UUID id, String userSub);
 
@@ -30,6 +33,11 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     Optional<Order> findByUserSubAndIdempotencyKey(String userSub, String idempotencyKey);
 
     Page<Order> findByUserSubOrderByCreatedAtDesc(String userSub, Pageable pageable);
+
+    /** The admin console's search, with each order's event fetched alongside it rather than one by one. */
+    @Override
+    @EntityGraph(attributePaths = "event")
+    Page<Order> findAll(Specification<Order> spec, Pageable pageable);
 
     @Query("select o.id from Order o where o.status = com.apextick.booking.order.OrderStatus.PENDING_PAYMENT "
             + "and o.expiresAt < :now order by o.expiresAt")
@@ -57,10 +65,6 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     List<UUID> findPendingOrderIdsForSeat(@Param("seatId") Long seatId);
 
     boolean existsByEventId(Long eventId);
-
-    org.springframework.data.domain.Page<Order> findAllByOrderByCreatedAtDesc(org.springframework.data.domain.Pageable pageable);
-
-    org.springframework.data.domain.Page<Order> findByStatusOrderByCreatedAtDesc(OrderStatus status, org.springframework.data.domain.Pageable pageable);
 
     @Query("select coalesce(sum(o.total), 0) from Order o where o.event.id = :eventId and o.status = com.apextick.booking.order.OrderStatus.PAID")
     java.math.BigDecimal paidRevenueForEvent(@Param("eventId") Long eventId);

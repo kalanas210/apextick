@@ -1756,6 +1756,23 @@
           },
           {
             "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refundRequired",
+            "required": false,
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
             "name": "pageable",
             "required": true,
             "schema": {
@@ -1775,6 +1792,7 @@
             "description": "OK"
           }
         },
+        "summary": "Orders, newest first: by status, by order number or customer, or those still owed a refund",
         "tags": [
           "Admin: Orders"
         ]
