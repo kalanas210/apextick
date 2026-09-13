@@ -270,4 +270,30 @@ class NotificationEmailTest {
                 .untilAsserted(() -> assertThat(processed.findById(eventId)).isPresent());
         assertThat(greenMail.getReceivedMessages()).isEmpty();
     }
+
+    /** A 3-D Secure challenge left unanswered used to fail in silence while the order ran out its window. */
+    @Test
+    void a_payment_that_failed_after_the_buyer_left_sends_them_back_to_finish_paying() throws Exception {
+        String orderId = UUID.randomUUID().toString();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("paymentId", UUID.randomUUID().toString());
+        payload.put("orderId", orderId);
+        payload.put("orderNumber", "APX-FAILED1");
+        payload.put("userEmail", "unpaid@apextick.local");
+        payload.put("userName", "Fan");
+        payload.put("eventName", "World Cup Final");
+        payload.put("total", new BigDecimal("105.00"));
+        payload.put("currency", "USD");
+        payload.put("failureCode", "insufficient_funds");
+        payload.put("expiresAt", "2026-07-19T14:32:00Z");
+        publish("payment.failed", envelope(UUID.randomUUID(), "payment.failed", payload));
+
+        assertThat(greenMail.waitForIncomingEmail(15_000, 1)).isTrue();
+        MimeMessage mail = greenMail.getReceivedMessages()[0];
+        assertThat(mail.getSubject()).contains("APX-FAILED1").contains("did not go through");
+        assertThat((String) mail.getContent())
+                .contains("insufficient funds")
+                .contains("14:32 UTC on 19 Jul")
+                .contains("href=\"https://tickets.apextick.test/checkout/" + orderId + "\"");
+    }
 }

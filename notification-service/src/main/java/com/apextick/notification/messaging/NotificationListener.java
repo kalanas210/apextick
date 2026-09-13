@@ -4,6 +4,7 @@ import com.apextick.notification.log.NotificationLogService;
 import com.apextick.notification.messaging.payload.BookingConfirmedPayload;
 import com.apextick.notification.messaging.payload.EventCancelledPayload;
 import com.apextick.notification.messaging.payload.OrderCancelledPayload;
+import com.apextick.notification.messaging.payload.PaymentFailedPayload;
 import com.apextick.notification.messaging.payload.PaymentRefundedPayload;
 import com.apextick.notification.messaging.payload.SeatEventPayload;
 import com.apextick.notification.service.NotificationService;
@@ -54,6 +55,18 @@ public class NotificationListener {
         EventEnvelope<PaymentRefundedPayload> env = parser.parse(message.getBody(), PaymentRefundedPayload.class);
         try {
             service.handlePaymentRefunded(env);
+        } catch (RuntimeException e) {
+            logs.recordFailed(env.eventId(), env.type(),
+                    env.payload() == null ? null : env.payload().userEmail(), e.getMessage());
+            throw e;
+        }
+    }
+
+    @RabbitListener(queues = RabbitTopologyConfig.Q_PAYMENT_FAILED)
+    public void onPaymentFailed(Message message) {
+        EventEnvelope<PaymentFailedPayload> env = parser.parse(message.getBody(), PaymentFailedPayload.class);
+        try {
+            service.handlePaymentFailed(env);
         } catch (RuntimeException e) {
             logs.recordFailed(env.eventId(), env.type(),
                     env.payload() == null ? null : env.payload().userEmail(), e.getMessage());

@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { formatPrice } from "@/lib/format";
-import { apiErrorMessage } from "@/lib/api";
+import { apiErrorMessage, apiStatus } from "@/lib/api";
 import { useOrder, useOrderTickets } from "@/hooks/useBooking";
 import { RequireAuth } from "@/components/auth/require-auth";
 import { TicketCard } from "./ticket-card";
@@ -86,9 +86,13 @@ function Order({ orderId }: { orderId: string }) {
   if (error || !order) {
     return (
       <div className="rounded-2xl border border-line bg-ink-2 p-8 text-center">
-        <h2 className="font-display text-xl tracking-tight">Order not found</h2>
+        <h2 className="font-display text-xl tracking-tight">
+          {!error || apiStatus(error) === 404 ? "Order not found" : "Could not load this order"}
+        </h2>
         <p className="mx-auto mt-2 max-w-sm text-[0.86rem] text-muted">
-          {apiErrorMessage(error, "That order does not exist, or it is not yours.")}
+          {!error || apiStatus(error) === 404
+            ? "That order does not exist, or it is not yours."
+            : apiErrorMessage(error, "The booking service did not answer. Try again in a moment.")}
         </p>
         <div className="mt-6 flex justify-center">
           <Button href="/account" size="md">

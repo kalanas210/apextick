@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head><meta charset="UTF-8"/><title>Payment not completed</title></head>
+<body style="font-family: Arial, Helvetica, sans-serif; color: #1a1a1a;">
+<h2>Your payment did not go through</h2>
+<p>We could not take <strong th:text="${amount}">USD 0.00</strong> for order
+   <strong th:text="${failed.orderNumber}">APX-XXXX</strong>
+   (<span th:text="${failed.eventName}">Event</span>). You have not been charged.</p>
+<p th:text="${why}">Why it failed.</p>
+<p th:if="${heldUntil}">Your seats are held until <strong th:text="${heldUntil}">14:32 UTC</strong>. You can try
+   again, with the same card or another, before then:</p>
+<p th:unless="${heldUntil}">You can try again, with the same card or another, while the order is still open:</p>
+<p><a th:href="${checkoutUrl}" th:text="${checkoutUrl}">finish paying</a></p>
+<p>If you have paid for this order since, with this card or another, you can ignore this email. If the order has
+   closed by the time you get there, its seats went back on sale and you can pick them again.</p>
+</body>
+</html>

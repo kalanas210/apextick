@@ -232,6 +232,8 @@ class StripeWebhookApiTest extends PaymentGatewaySpies {
 
         assertThat(paymentStatus(c)).isEqualTo("FAILED");
         assertThat(orderStatus(c)).isEqualTo("PENDING_PAYMENT");
+        // the buyer may have left mid 3-D Secure: they are told, with the way back to the order
+        assertThat(published("payment.failed", c.paymentId())).isEqualTo(1);
     }
 
     @Test
@@ -464,5 +466,17 @@ class StripeWebhookApiTest extends PaymentGatewaySpies {
         assertThat(paymentStatus(c)).isEqualTo("FAILED");
         assertThat(orderStatus(c)).isEqualTo("PENDING_PAYMENT");
         assertThat(outcomeRecorded("evt_intent_cancelled")).isEqualTo("CANCELLED");
+    }
+
+    @Test
+    void a_charge_that_fails_once_its_order_has_closed_sends_nobody_back_to_pay() throws Exception {
+        Charge c = pendingStripeOrder("webhook-declined-late");
+        jdbc.sql("UPDATE orders SET status = 'EXPIRED' WHERE id = :id").param("id", c.orderId()).update();
+
+        deliver(event(c, "evt_declined_late", "payment_intent.payment_failed")).andExpect(status().isOk());
+
+        assertThat(paymentStatus(c)).isEqualTo("FAILED");
+        // the order is gone, so an email saying "try again" would only lead the buyer to a dead end
+        assertThat(published("payment.failed", c.paymentId())).isZero();
     }
 }
