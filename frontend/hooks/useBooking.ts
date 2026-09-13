@@ -1,7 +1,9 @@
 'use client';
 
+import { useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, authHeaders } from '@/lib/api';
+import { api, apiErrorCode, apiStatus, authHeaders } from '@/lib/api';
+import { settlesAttempt } from '@/lib/payment-attempt';
 import { useAccessToken } from './useSession';
 import type {
     EventDetail, Hold, Order, Payment, PaymentConfig, Seat, Ticket,
@@ -148,11 +150,22 @@ export interface PayInput {
 export function usePayOrder(orderId: string) {
     const token = useAccessToken();
     const queryClient = useQueryClient();
+    // One key per payment attempt rather than per request. A resend of the same attempt has to
+    // reach the API with the key it already carries, or the API cannot tell it from a second
+    // charge; the key is only dropped once the API has answered for that attempt.
+    const attemptKey = useRef<string | null>(null);
     return useMutation({
-        mutationFn: async (input: PayInput) =>
-            (await api.post<Payment>(`/api/orders/${orderId}/pay`, input, {
-                headers: { ...authHeaders(token), 'Idempotency-Key': idempotencyKey() },
-            })).data,
+        mutationFn: async (input: PayInput) => {
+            attemptKey.current ??= idempotencyKey();
+            return (await api.post<Payment>(`/api/orders/${orderId}/pay`, input, {
+                headers: { ...authHeaders(token), 'Idempotency-Key': attemptKey.current },
+            })).data;
+        },
+        onError: (error) => {
+            if (settlesAttempt(apiStatus(error), apiErrorCode(error))) {
+                attemptKey.current = null;
+            }
+        },
         onSettled: () => {
             queryClient.invalidateQueries({ queryKey: ['order', orderId] });
             queryClient.invalidateQueries({ queryKey: ['tickets', orderId] });
