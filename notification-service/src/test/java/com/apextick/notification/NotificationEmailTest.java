@@ -217,4 +217,57 @@ class NotificationEmailTest {
                 .doesNotContain("a refund has been requested")
                 .doesNotContain("(EXPIRED)");
     }
+
+    private Map<String, Object> eventCancelledPayload(String email, boolean refundDue) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("eventId", 1);
+        payload.put("eventName", "World Cup Final");
+        payload.put("startsAt", "2026-07-19T19:00:00Z");
+        payload.put("timeZone", "America/New_York");
+        payload.put("venue", "MetLife Stadium");
+        payload.put("reason", "Floodlight failure");
+        payload.put("orderId", UUID.randomUUID().toString());
+        payload.put("orderNumber", "APX-CALLED1");
+        payload.put("userEmail", email);
+        payload.put("userName", "Fan");
+        payload.put("total", new BigDecimal("210.00"));
+        payload.put("currency", "USD");
+        payload.put("refundDue", refundDue);
+        return payload;
+    }
+
+    @Test
+    void a_cancelled_event_tells_each_buyer_what_happens_to_their_own_order() throws Exception {
+        publish("event.cancelled", envelope(UUID.randomUUID(), "event.cancelled",
+                eventCancelledPayload("paid-fan@apextick.local", true)));
+
+        assertThat(greenMail.waitForIncomingEmail(15_000, 1)).isTrue();
+        MimeMessage mail = greenMail.getReceivedMessages()[0];
+        assertThat(mail.getSubject()).isEqualTo("World Cup Final has been cancelled");
+        assertThat((String) mail.getContent())
+                // on the event's own clock: 19:00 UTC is 15:00 in New York in July
+                .contains("Sun 19 Jul 2026, 15:00")
+                .contains("Floodlight failure")
+                .contains("refunded in full")
+                .contains("USD 210.00");
+    }
+
+    /** A buyer whose unpaid order went down with its event hears it once, from event.cancelled. */
+    @Test
+    void an_order_cancelled_with_its_event_sends_no_second_email() throws Exception {
+        UUID eventId = UUID.randomUUID();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("orderId", UUID.randomUUID().toString());
+        payload.put("orderNumber", "APX-CALLED2");
+        payload.put("userSub", "buyer-sub");
+        payload.put("userEmail", "unpaid-fan@apextick.local");
+        payload.put("eventId", 1);
+        payload.put("seatIds", List.of(12));
+        payload.put("reason", "EVENT_CANCELLED");
+        publish("order.cancelled", envelope(eventId, "order.cancelled", payload));
+
+        await().atMost(Duration.ofSeconds(10))
+                .untilAsserted(() -> assertThat(processed.findById(eventId)).isPresent());
+        assertThat(greenMail.getReceivedMessages()).isEmpty();
+    }
 }
