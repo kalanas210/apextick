@@ -7,6 +7,7 @@ import com.apextick.booking.order.OrderService;
 import com.apextick.booking.order.dto.CreateOrderRequest;
 import com.apextick.booking.order.dto.OrderResponse;
 import com.apextick.booking.payment.PaymentGatewaySpies;
+import com.apextick.booking.payment.model.RefundResult;
 import com.apextick.booking.security.CurrentUser;
 import com.apextick.booking.seat.Seat;
 import com.apextick.booking.seat.SeatRepository;
@@ -20,6 +21,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -27,6 +29,9 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -53,13 +58,13 @@ class StripeWebhookApiTest extends PaymentGatewaySpies {
     @Autowired TicketRepository ticketRepository;
     @Autowired JdbcClient jdbc;
 
-    /** An order waiting on a Stripe charge. */
-    private record Pending(UUID orderId, UUID paymentId, String intentId, long amountMinor, String currency,
-                           List<Long> seatIds) {
+    /** A Stripe charge for an order, as the pay endpoint leaves it while the buyer finishes paying. */
+    private record Charge(UUID orderId, UUID paymentId, String intentId, long amountMinor, String currency,
+                          List<Long> seatIds) {
     }
 
-    /** Seats held, an order created, and the intent the pay endpoint would have created for it. */
-    private Pending pendingStripeOrder(String buyer) {
+    /** Seats held and an order created, with the intent the pay endpoint would have made for it. */
+    private Charge pendingStripeOrder(String buyer) {
         Long eventId = eventRepository.findBySlug(SLUG).orElseThrow().getId();
         List<Long> seatIds = seatRepository.findAllForEventWithLayout(eventId).stream()
                 .filter(s -> s.getStatus() == SeatStatus.AVAILABLE).map(Seat::getId).limit(2).toList();
@@ -67,7 +72,16 @@ class StripeWebhookApiTest extends PaymentGatewaySpies {
         holdService.hold(SLUG, seatIds, user);
         OrderResponse order = orderService.create(new CreateOrderRequest(eventId, seatIds),
                 "webhook-order-" + UUID.randomUUID(), user);
+        return stripeCharge(UUID.fromString(order.id()), order.total(), order.currency(), seatIds);
+    }
 
+    /** A second intent for the same order: another tab, or a 3-D Secure challenge finished late. */
+    private Charge anotherChargeFor(Charge first) {
+        return stripeCharge(first.orderId(), StripeAmounts.fromMinorUnits(first.amountMinor(), first.currency()),
+                first.currency(), first.seatIds());
+    }
+
+    private Charge stripeCharge(UUID orderId, BigDecimal amount, String currency, List<Long> seatIds) {
         UUID paymentId = UUID.randomUUID();
         String intentId = "pi_" + paymentId.toString().replace("-", "");
         jdbc.sql("""
@@ -75,17 +89,17 @@ class StripeWebhookApiTest extends PaymentGatewaySpies {
                                               provider_ref, created_at)
                         VALUES (:id, :orderId, 'STRIPE', 'REQUIRES_ACTION', :amount, :currency, :key, :ref, now())
                         """)
-                .param("id", paymentId).param("orderId", UUID.fromString(order.id()))
-                .param("amount", order.total()).param("currency", order.currency())
+                .param("id", paymentId).param("orderId", orderId)
+                .param("amount", amount).param("currency", currency)
                 .param("key", "pay-" + paymentId).param("ref", intentId)
                 .update();
-        return new Pending(UUID.fromString(order.id()), paymentId, intentId,
-                StripeAmounts.toMinorUnits(order.total(), order.currency()), order.currency(), seatIds);
+        return new Charge(orderId, paymentId, intentId, StripeAmounts.toMinorUnits(amount, currency), currency,
+                seatIds);
     }
 
-    private String event(Pending p, String eventId, String type) {
-        return StripeWebhooks.paymentIntentEvent(eventId, type, p.intentId(), p.amountMinor(), p.currency(),
-                p.paymentId().toString());
+    private String event(Charge c, String eventId, String type) {
+        return StripeWebhooks.paymentIntentEvent(eventId, type, c.intentId(), c.amountMinor(), c.currency(),
+                c.paymentId().toString());
     }
 
     private ResultActions deliver(String payload) throws Exception {
@@ -99,19 +113,24 @@ class StripeWebhookApiTest extends PaymentGatewaySpies {
     }
 
     /** The hold lapses and the expiry listener frees the seats, the way it happens mid-3-D Secure. */
-    private void loseTheHold(Pending p) {
+    private void loseTheHold(Charge c) {
         jdbc.sql("UPDATE seats SET held_until = now() - INTERVAL '1 minute' WHERE id IN (:ids)")
-                .param("ids", p.seatIds()).update();
-        p.seatIds().forEach(holdService::releaseExpired);
+                .param("ids", c.seatIds()).update();
+        c.seatIds().forEach(holdService::releaseExpired);
     }
 
-    private String orderStatus(Pending p) {
-        return orderRepository.findById(p.orderId()).orElseThrow().getStatus().name();
+    private String orderStatus(Charge c) {
+        return orderRepository.findById(c.orderId()).orElseThrow().getStatus().name();
     }
 
-    private String paymentStatus(Pending p) {
+    private String paymentStatus(Charge c) {
         return jdbc.sql("SELECT status FROM payments WHERE id = :id")
-                .param("id", p.paymentId()).query(String.class).single();
+                .param("id", c.paymentId()).query(String.class).single();
+    }
+
+    private String failureCode(Charge c) {
+        return jdbc.sql("SELECT failure_code FROM payments WHERE id = :id")
+                .param("id", c.paymentId()).query(String.class).single();
     }
 
     private long deliveriesRecorded(String eventId) {
@@ -124,74 +143,135 @@ class StripeWebhookApiTest extends PaymentGatewaySpies {
                 .param("id", eventId).query(String.class).single();
     }
 
+    private static String refundKeyOf(Charge c) {
+        return "refund:" + c.paymentId();
+    }
+
     @Test
     void a_delivery_whose_signature_does_not_verify_is_refused_and_changes_nothing() throws Exception {
-        Pending p = pendingStripeOrder("webhook-forged");
+        Charge c = pendingStripeOrder("webhook-forged");
 
-        deliver(event(p, "evt_forged", "payment_intent.succeeded"), "whsec_somebody_else")
+        deliver(event(c, "evt_forged", "payment_intent.succeeded"), "whsec_somebody_else")
                 .andExpect(status().isBadRequest());
 
-        assertThat(orderStatus(p)).isEqualTo("PENDING_PAYMENT");
-        assertThat(paymentStatus(p)).isEqualTo("REQUIRES_ACTION");
+        assertThat(orderStatus(c)).isEqualTo("PENDING_PAYMENT");
+        assertThat(paymentStatus(c)).isEqualTo("REQUIRES_ACTION");
         assertThat(deliveriesRecorded("evt_forged")).isZero();
     }
 
     @Test
     void an_event_type_nothing_acts_on_is_acknowledged_and_ignored() throws Exception {
-        Pending p = pendingStripeOrder("webhook-ignored");
+        Charge c = pendingStripeOrder("webhook-ignored");
 
-        deliver(event(p, "evt_ignored", "payment_intent.created")).andExpect(status().isOk());
+        deliver(event(c, "evt_ignored", "payment_intent.created")).andExpect(status().isOk());
 
-        assertThat(paymentStatus(p)).isEqualTo("REQUIRES_ACTION");
+        assertThat(paymentStatus(c)).isEqualTo("REQUIRES_ACTION");
         assertThat(deliveriesRecorded("evt_ignored")).isZero();
     }
 
     @Test
     void a_succeeded_charge_books_the_seats_and_issues_the_tickets() throws Exception {
-        Pending p = pendingStripeOrder("webhook-paid");
+        Charge c = pendingStripeOrder("webhook-paid");
 
-        deliver(event(p, "evt_paid", "payment_intent.succeeded")).andExpect(status().isOk());
+        deliver(event(c, "evt_paid", "payment_intent.succeeded")).andExpect(status().isOk());
 
-        assertThat(orderStatus(p)).isEqualTo("PAID");
-        assertThat(paymentStatus(p)).isEqualTo("SUCCEEDED");
-        assertThat(ticketRepository.findByOrderId(p.orderId())).hasSize(2);
-        assertThat(seatRepository.findByIdsWithLayout(p.seatIds()))
+        assertThat(orderStatus(c)).isEqualTo("PAID");
+        assertThat(paymentStatus(c)).isEqualTo("SUCCEEDED");
+        assertThat(ticketRepository.findByOrderId(c.orderId())).hasSize(2);
+        assertThat(seatRepository.findByIdsWithLayout(c.seatIds()))
                 .allMatch(s -> s.getStatus() == SeatStatus.BOOKED);
         assertThat(outcomeRecorded("evt_paid")).isEqualTo("SUCCEEDED");
     }
 
     @Test
     void a_redelivered_event_is_applied_once() throws Exception {
-        Pending p = pendingStripeOrder("webhook-redelivered");
-        String payload = event(p, "evt_redelivered", "payment_intent.succeeded");
+        Charge c = pendingStripeOrder("webhook-redelivered");
+        String payload = event(c, "evt_redelivered", "payment_intent.succeeded");
 
         deliver(payload).andExpect(status().isOk());
         deliver(payload).andExpect(status().isOk());
 
         assertThat(deliveriesRecorded("evt_redelivered")).isEqualTo(1);
-        assertThat(ticketRepository.findByOrderId(p.orderId())).hasSize(2);
+        assertThat(ticketRepository.findByOrderId(c.orderId())).hasSize(2);
     }
 
     @Test
     void a_failed_charge_leaves_the_order_payable() throws Exception {
-        Pending p = pendingStripeOrder("webhook-declined");
+        Charge c = pendingStripeOrder("webhook-declined");
 
-        deliver(event(p, "evt_declined", "payment_intent.payment_failed")).andExpect(status().isOk());
+        deliver(event(c, "evt_declined", "payment_intent.payment_failed")).andExpect(status().isOk());
 
-        assertThat(paymentStatus(p)).isEqualTo("FAILED");
-        assertThat(orderStatus(p)).isEqualTo("PENDING_PAYMENT");
+        assertThat(paymentStatus(c)).isEqualTo("FAILED");
+        assertThat(orderStatus(c)).isEqualTo("PENDING_PAYMENT");
     }
 
     @Test
-    void a_charge_whose_seats_were_lost_is_refunded_and_its_order_cancelled() throws Exception {
-        Pending p = pendingStripeOrder("webhook-lost");
-        loseTheHold(p);
+    void a_charge_whose_seats_were_lost_is_refunded_once_and_its_order_cancelled() throws Exception {
+        Charge c = pendingStripeOrder("webhook-lost");
+        loseTheHold(c);
+        String payload = event(c, "evt_lost", "payment_intent.succeeded");
 
-        deliver(event(p, "evt_lost", "payment_intent.succeeded")).andExpect(status().isOk());
+        deliver(payload).andExpect(status().isOk());
+        deliver(payload).andExpect(status().isOk());
 
-        verify(stripe).refund(eq(p.intentId()), any(), eq(p.currency()), any());
-        assertThat(orderStatus(p)).isEqualTo("CANCELLED");
-        assertThat(paymentStatus(p)).isEqualTo("REFUND_REQUIRED");
-        assertThat(ticketRepository.findByOrderId(p.orderId())).isEmpty();
+        verify(stripe, times(1)).refund(eq(c.intentId()), any(), eq(c.currency()), eq(refundKeyOf(c)));
+        assertThat(orderStatus(c)).isEqualTo("CANCELLED");
+        assertThat(paymentStatus(c)).isEqualTo("REFUNDED");
+        assertThat(failureCode(c)).isEqualTo("seats_lost");
+        assertThat(outcomeRecorded("evt_lost")).isEqualTo("REFUNDED");
+        assertThat(ticketRepository.findByOrderId(c.orderId())).isEmpty();
+    }
+
+    /**
+     * The payment window closed while the buyer was still in a 3-D Secure challenge, and the charge
+     * went through anyway. There is nothing left for it to buy, so it is refunded and the delivery
+     * acknowledged. Refusing it with a 409 only had Stripe redeliver it for days, the customer
+     * charged the whole time.
+     */
+    @Test
+    void a_charge_that_lands_after_its_order_expired_is_refunded_instead_of_refused() throws Exception {
+        Charge c = pendingStripeOrder("webhook-late");
+        orderService.expire(c.orderId());
+        String payload = event(c, "evt_late", "payment_intent.succeeded");
+
+        deliver(payload).andExpect(status().isOk());
+        deliver(payload).andExpect(status().isOk());
+
+        verify(stripe, times(1)).refund(eq(c.intentId()), any(), eq(c.currency()), eq(refundKeyOf(c)));
+        assertThat(orderStatus(c)).isEqualTo("EXPIRED");
+        assertThat(paymentStatus(c)).isEqualTo("REFUNDED");
+        assertThat(failureCode(c)).isEqualTo("order_closed");
+        assertThat(deliveriesRecorded("evt_late")).isEqualTo(1);
+    }
+
+    @Test
+    void a_second_charge_for_an_order_that_is_already_paid_is_refunded() throws Exception {
+        Charge first = pendingStripeOrder("webhook-twice");
+        Charge second = anotherChargeFor(first);
+
+        deliver(event(first, "evt_first_charge", "payment_intent.succeeded")).andExpect(status().isOk());
+        deliver(event(second, "evt_second_charge", "payment_intent.succeeded")).andExpect(status().isOk());
+
+        verify(stripe).refund(eq(second.intentId()), any(), eq(second.currency()), eq(refundKeyOf(second)));
+        verify(stripe, never()).refund(eq(first.intentId()), any(), any(), any());
+        assertThat(paymentStatus(second)).isEqualTo("REFUNDED");
+        assertThat(failureCode(second)).isEqualTo("duplicate_charge");
+        assertThat(paymentStatus(first)).isEqualTo("SUCCEEDED");
+        assertThat(orderStatus(first)).isEqualTo("PAID");
+        assertThat(ticketRepository.findByOrderId(first.orderId())).hasSize(2);
+    }
+
+    @Test
+    void a_refund_the_provider_refuses_is_left_marked_as_still_owed() throws Exception {
+        doReturn(new RefundResult(false, null, "{\"error\":{\"code\":\"charge_disputed\"}}"))
+                .when(stripe).refund(any(), any(), any(), any());
+        Charge c = pendingStripeOrder("webhook-refused");
+        loseTheHold(c);
+
+        deliver(event(c, "evt_refused", "payment_intent.succeeded")).andExpect(status().isOk());
+
+        assertThat(paymentStatus(c)).isEqualTo("REFUND_REQUIRED");
+        assertThat(orderStatus(c)).isEqualTo("CANCELLED");
+        assertThat(outcomeRecorded("evt_refused")).isEqualTo("REFUND_REQUIRED");
     }
 }

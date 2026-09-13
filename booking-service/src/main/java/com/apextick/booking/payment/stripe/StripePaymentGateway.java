@@ -196,8 +196,8 @@ public class StripePaymentGateway implements PaymentGateway {
                     .setPaymentIntent(providerRef)
                     .setAmount(StripeAmounts.toMinorUnits(amount, currency))
                     .build();
-            String idem = idempotencyKey == null ? null : idempotencyKey + ":refund";
-            Refund refund = Refund.create(params, options(idem));
+            // the caller's key names this refund, so asking again can only return the same refund
+            Refund refund = Refund.create(params, options(idempotencyKey));
             return new RefundResult(true, refund.getId(), null);
         } catch (StripeException e) {
             log.error("Stripe refund failed for intent {}", providerRef, e);

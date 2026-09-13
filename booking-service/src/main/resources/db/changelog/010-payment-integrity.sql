@@ -15,3 +15,11 @@ UPDATE payments p
 CREATE UNIQUE INDEX uq_payments_order_idempotency_key ON payments (order_id, idempotency_key)
   WHERE idempotency_key IS NOT NULL;
 --rollback DROP INDEX uq_payments_order_idempotency_key;
+
+--changeset apextick:010-02-payment-refunds
+-- A refund used to be requested and its answer thrown away, so every compensated charge read
+-- REFUND_REQUIRED whether the money had gone back or not. The provider's refund id and the time
+-- it was accepted now sit on the payment, and REFUND_REQUIRED means only what it says.
+ALTER TABLE payments ADD COLUMN refund_ref VARCHAR(128);
+ALTER TABLE payments ADD COLUMN refunded_at TIMESTAMPTZ;
+--rollback ALTER TABLE payments DROP COLUMN refunded_at, DROP COLUMN refund_ref;
