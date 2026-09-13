@@ -1,26 +1,19 @@
 import Link from "next/link";
 import { Logo } from "./logo";
-import { seriesList } from "@/data/events";
+import { FooterSeries } from "./footer-series";
 import { ArrowUpRight } from "@/components/ui/icons";
 
 const EXPLORE = [
   { href: "/events", label: "All fixtures" },
   { href: "/#series", label: "Series" },
   { href: "/#experience", label: "The experience" },
-  { href: "/events/india-pakistan-group-stage/seats", label: "Seat map" },
+  { href: "/events", label: "Seat map" },
 ];
 
 const ACCOUNT = [
   { href: "/signin", label: "Sign in" },
   { href: "/register", label: "Create account" },
   { href: "/forgot-password", label: "Reset password" },
-];
-
-const SUPPORT = [
-  { href: "#", label: "Help center" },
-  { href: "#", label: "Venue guides" },
-  { href: "#", label: "Accessibility" },
-  { href: "#", label: "Contact" },
 ];
 
 function Column({
@@ -60,35 +53,12 @@ export function Footer() {
               Real-time tickets for the biggest nights in world sport. Pick your
               seat, feel the room, never miss the moment.
             </p>
-            <div className="mt-7 flex items-center gap-2.5">
-              <span className="rounded-full border border-line-2 px-3 py-1 font-mono text-[0.62rem] uppercase tracking-[0.18em] text-faint">
-                Live since 2019
-              </span>
-              <span className="rounded-full border border-line-2 px-3 py-1 font-mono text-[0.62rem] uppercase tracking-[0.18em] text-faint">
-                12 nations
-              </span>
-            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-10 sm:grid-cols-4 lg:col-span-8">
-            <div>
-              <h3 className="kicker mb-5">Series</h3>
-              <ul className="space-y-3">
-                {seriesList.map((s) => (
-                  <li key={s.id}>
-                    <Link
-                      href={`/events?series=${s.id}`}
-                      className="text-[0.92rem] text-muted transition-colors hover:text-bone"
-                    >
-                      {s.shortName}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
+          <div className="grid grid-cols-2 gap-10 sm:grid-cols-3 lg:col-span-8">
+            <FooterSeries />
             <Column title="Explore" links={EXPLORE} />
             <Column title="Account" links={ACCOUNT} />
-            <Column title="Support" links={SUPPORT} />
           </div>
         </div>
 

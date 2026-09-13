@@ -1,85 +1,37 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatPrice } from "@/lib/format";
-import { apiErrorCode, apiErrorMessage } from "@/lib/api";
+import { MAX_SEATS_PER_ORDER, quoteOrder } from "@/lib/booking-rules";
+import { apiErrorCode, apiErrorMessage, apiProblem } from "@/lib/api";
+import { findPendingOrder } from "@/lib/orders";
+import { salesState } from "@/lib/sales-window";
 import { useSeatUpdates, type SeatStatusChange } from "@/lib/realtime";
 import { cn } from "@/lib/cn";
 import {
+  useCancelOrder,
   useCreateOrder,
   useEvent,
   useHoldSeats,
+  useMyOrders,
   useReleaseHold,
   useSeats,
 } from "@/hooks/useBooking";
 import { useSession } from "@/hooks/useSession";
-import type { EventDetail, Seat as ApiSeat } from "@/lib/types";
+import type { Seat as ApiSeat } from "@/lib/types";
 import { Legend, Pitch, Stand, mmss, type MapSeat } from "./parts";
+import { buildSections, bySide, isLinkedSection, type MapSection } from "./sections";
 import { Clock } from "@/components/ui/icons";
-
-const MAX_SEATS = 8;
-
-interface MapSection {
-  sectionId: number;
-  sectionName: string;
-  side: "n" | "s" | "e" | "w";
-  tierId: string;
-  seats: MapSeat[];
-}
-
-/** Folds API seats into the sections described by the event, ready to render. */
-function buildSections(event: EventDetail, seats: ApiSeat[]): MapSection[] {
-  const tierNameByCode = new Map(event.tiers.map((t) => [t.code, t.name]));
-  const sectionById = new Map(event.sections.map((s) => [s.id, s]));
-  const grouped = new Map<number, MapSeat[]>();
-
-  for (const seat of seats) {
-    const section = sectionById.get(seat.sectionId);
-    if (!section) continue;
-    const state: MapSeat["state"] =
-      seat.status === "BOOKED" ? "sold"
-        // a seat this user is holding stays pickable — it is already theirs
-        : seat.status === "HELD" && !seat.mine ? "held"
-          : "available";
-    const list = grouped.get(seat.sectionId) ?? [];
-    list.push({
-      id: String(seat.id),
-      label: seat.label,
-      col: seat.col ?? list.length,
-      sectionName: section.name,
-      tierId: seat.tierCode,
-      tierName: tierNameByCode.get(seat.tierCode) ?? seat.tierCode,
-      state,
-      price: seat.price,
-    });
-    grouped.set(seat.sectionId, list);
-  }
-
-  return event.sections
-    .filter((s) => grouped.has(s.id))
-    .map((s) => ({
-      sectionId: s.id,
-      sectionName: s.name,
-      side: s.side,
-      tierId: s.tierCode,
-      seats: (grouped.get(s.id) ?? []).sort(
-        (a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }),
-      ),
-    }));
-}
 
 export function LiveSeatMap({
   slug,
-  home,
-  away,
   initialTier,
   initialSection,
 }: {
   slug: string;
-  home: string;
-  away: string;
   initialTier?: string;
   initialSection?: string;
 }) {
@@ -99,6 +51,21 @@ export function LiveSeatMap({
   const [notice, setNotice] = useState<string | null>(null);
   const [holdExpiry, setHoldExpiry] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // Seats the API says are locked behind an unpaid order of the buyer's own.
+  const [blockedSeatIds, setBlockedSeatIds] = useState<number[] | null>(null);
+
+  // Fetched only once such a refusal lands: it names the seats but not the order
+  // that covers them, so the buyer's own list is what turns it into a link.
+  const { data: myOrders } = useMyOrders(blockedSeatIds !== null);
+
+  const blockingOrder = useMemo(
+    () =>
+      blockedSeatIds && event
+        ? findPendingOrder(myOrders, event.id, blockedSeatIds)
+        : undefined,
+    [blockedSeatIds, event, myOrders],
+  );
+  const cancelOrder = useCancelOrder(blockingOrder?.id ?? "");
 
   // Live seat flips from other buyers, applied straight into the cache so the
   // map moves without waiting for a refetch.
@@ -128,12 +95,23 @@ export function LiveSeatMap({
     mine.map((s) => s.heldUntil).filter((v): v is string => Boolean(v)).sort()[0] ??
     null;
 
-  // Countdown ticker, only while a server-side hold is actually running.
+  // The same answer the API's SalesWindow gives, asked before the buyer picks
+  // rather than after: a fixture that has sold out, closed, or kicked off stops
+  // offering seats here instead of refusing the Reserve click.
+  const sales = useMemo(() => (event ? salesState(event, now) : null), [event, now]);
+  const salesOpen = sales?.open ?? true;
+
+  // Countdown ticker: every second while a server-side hold is running, because
+  // that number is read off the screen. A sales window that is still ahead also
+  // has to unlock the map on its own, but nothing counts it down and the wait can
+  // be months — a slow tick there keeps a parked tab from re-rendering the whole
+  // map once a second for no one.
+  const tick = heldUntil ? 1000 : sales?.code === "not-yet-open" ? 15_000 : 0;
   useEffect(() => {
-    if (!heldUntil) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
+    if (!tick) return;
+    const id = setInterval(() => setNow(Date.now()), tick);
     return () => clearInterval(id);
-  }, [heldUntil]);
+  }, [tick]);
 
   const sections = useMemo(
     () => (event && seats ? buildSections(event, seats) : []),
@@ -159,9 +137,9 @@ export function LiveSeatMap({
     .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
 
   const currency = event?.currency ?? "USD";
-  const subtotal = selectedSeats.reduce((sum, s) => sum + s.price, 0);
-  const fee = Math.round(subtotal * 0.05);
-  const total = subtotal + fee;
+  // priced exactly as the order will be, so checkout shows the same total
+  const { subtotal, fee, total } = quoteOrder(selectedSeats.map((s) => s.price));
+  const money = (value: number) => formatPrice(value, currency, { keepMinorUnits: true });
 
   const secondsLeft = heldUntil
     ? Math.max(0, Math.floor((new Date(heldUntil).getTime() - now) / 1000))
@@ -170,8 +148,11 @@ export function LiveSeatMap({
   const toggle = (id: string) => {
     const seat = byId.get(id);
     if (!seat || seat.state !== "available") return;
-    if (!selected.includes(id) && selected.length >= MAX_SEATS) {
-      setNotice(`That is the ${MAX_SEATS} seat limit for a single order.`);
+    // The stands are already inert when sales are shut; this covers the remove
+    // buttons in the selection list, which a surviving hold still renders.
+    if (!salesOpen && !selected.includes(id)) return;
+    if (!selected.includes(id) && selected.length >= MAX_SEATS_PER_ORDER) {
+      setNotice(`That is the ${MAX_SEATS_PER_ORDER} seat limit for a single order.`);
       return;
     }
     setNotice(null);
@@ -182,9 +163,16 @@ export function LiveSeatMap({
 
   const busy = holdSeats.isPending || createOrder.isPending;
 
+  /** Point the buyer at the unpaid order that is holding these seats down. */
+  const showBlockingOrder = (seatIds: number[]) => {
+    setNotice(null);
+    setBlockedSeatIds(seatIds);
+    queryClient.invalidateQueries({ queryKey: ["orders"] });
+  };
+
   /** Hold the picked seats, turn them into an order, and go pay. */
   const reserve = async () => {
-    if (!event || selectedSeats.length === 0) return;
+    if (!event || selectedSeats.length === 0 || !salesOpen) return;
     setNotice(null);
     const seatIds = selected.map(Number);
     try {
@@ -194,19 +182,60 @@ export function LiveSeatMap({
       router.push(`/checkout/${order.id}`);
     } catch (error) {
       const code = apiErrorCode(error);
+      if (code === "ORDER_ALREADY_PENDING") {
+        // The hold succeeded; it is the order that was refused, because an
+        // earlier unpaid one already covers some of these seats.
+        showBlockingOrder(apiProblem(error)?.seatIds ?? seatIds);
+        return;
+      }
       setNotice(
         code === "SEAT_UNAVAILABLE"
           ? "Someone just took one of those seats. Your picks have been refreshed — try again."
           : apiErrorMessage(error, "We could not hold those seats. Please try again."),
       );
+      if (code === "SALES_CLOSED" || code === "SALES_NOT_OPEN") {
+        // The window shut under us — refetch the event so the map says so too.
+        queryClient.invalidateQueries({ queryKey: ["event", slug] });
+      }
       queryClient.invalidateQueries({ queryKey: ["seats", slug] });
     }
   };
 
   const release = async () => {
-    await releaseHold.mutateAsync().catch(() => undefined);
-    setPicked([]);
-    setHoldExpiry(null);
+    setNotice(null);
+    try {
+      await releaseHold.mutateAsync();
+      setBlockedSeatIds(null);
+      setPicked([]);
+      setHoldExpiry(null);
+    } catch (error) {
+      if (apiErrorCode(error) === "ORDER_PENDING") {
+        // Nothing was released, so the selection, the countdown and this link all
+        // have to survive — clearing them would hide the only way out.
+        showBlockingOrder(apiProblem(error)?.seatIds ?? []);
+        return;
+      }
+      setNotice(apiErrorMessage(error, "We could not release those seats. Please try again."));
+    }
+  };
+
+  /** Cancel the blocking order, which is what puts its seats back on sale. */
+  const cancelBlockingOrder = async () => {
+    if (!blockingOrder) return;
+    try {
+      await cancelOrder.mutateAsync();
+      setBlockedSeatIds(null);
+      // `null`, not `[]`: cancelling frees the order's seats but not any others
+      // the buyer is still holding (the re-hold path leaves some off the order).
+      // Handing the selection back to the server's `mine` keeps those on screen
+      // with their timer and their Release link, which now works.
+      setPicked(null);
+      setHoldExpiry(null);
+      setNotice("That order was cancelled and its seats are back on sale.");
+      queryClient.invalidateQueries({ queryKey: ["seats", slug] });
+    } catch (error) {
+      setNotice(apiErrorMessage(error, "We could not cancel that order."));
+    }
   };
 
   if (eventLoading || seatsLoading) {
@@ -231,25 +260,28 @@ export function LiveSeatMap({
     );
   }
 
-  const isHighlighted = (sectionCode: string, tierCode: string) =>
-    (!!initialSection && sectionCode === initialSection) ||
-    (!!initialTier && tierCode === initialTier);
+  // The pitch is labelled from the event itself, so a fixture with no teams on
+  // it (a concert, a one-sided event) still reads sensibly.
+  const homeLabel = event.home?.short ?? event.name;
+  const awayLabel = event.away?.short ?? "";
 
-  const renderStand = (side: MapSection["side"], className?: string) => {
-    const sec = sections.find((s) => s.side === side);
-    if (!sec) return null;
-    return (
+  // Every stand on a side, not just the first: a ground with two stands north
+  // had the second one missing from the map while its seats stayed on sale.
+  const sides = bySide(sections);
+  const renderStands = (stands: MapSection[], className?: string) =>
+    stands.map((sec) => (
       <Stand
+        key={sec.sectionId}
         name={sec.sectionName}
         seats={sec.seats}
         tierId={sec.tierId}
         selectedIds={selectedSet}
         onToggle={toggle}
-        highlighted={isHighlighted(String(sec.sectionId), sec.tierId)}
+        highlighted={isLinkedSection(sec, { section: initialSection, tier: initialTier })}
         className={className}
+        locked={!salesOpen}
       />
-    );
-  };
+    ));
 
   const usedTierCodes = Array.from(new Set(sections.map((s) => s.tierId)));
   const legendTiers = usedTierCodes.map((code) => ({
@@ -261,6 +293,18 @@ export function LiveSeatMap({
     <div className="grid gap-10 lg:grid-cols-12 lg:gap-12">
       {/* Map */}
       <div className="lg:col-span-7 xl:col-span-8">
+        {sales && !sales.open && (
+          <div
+            role="status"
+            className="mb-6 rounded-xl border border-line-2 bg-ink-2 px-4 py-3.5"
+          >
+            <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-bone/80">
+              {sales.title}
+            </p>
+            <p className="mt-1.5 text-[0.82rem] text-muted">{sales.detail}</p>
+          </div>
+        )}
+
         <div className="mb-6">
           <Legend tiers={legendTiers} />
         </div>
@@ -270,19 +314,40 @@ export function LiveSeatMap({
           style={{ "--seat": "clamp(0.95rem, 3vw, 1.12rem)" } as CSSProperties}
         >
           <div className="mx-auto flex min-w-[300px] max-w-2xl flex-col items-center gap-3">
-            {renderStand("n", "w-full")}
+            {sides.n.length > 0 && (
+              <div className="flex w-full flex-col gap-3 sm:flex-row">
+                {renderStands(sides.n, "flex-1")}
+              </div>
+            )}
             <div className="flex w-full flex-col items-stretch gap-3 sm:flex-row sm:justify-center">
-              {renderStand("w")}
-              <Pitch home={home} away={away} />
-              {renderStand("e")}
+              {sides.w.length > 0 && (
+                <div className="flex flex-col gap-3">{renderStands(sides.w)}</div>
+              )}
+              <Pitch home={homeLabel} away={awayLabel} />
+              {sides.e.length > 0 && (
+                <div className="flex flex-col gap-3">{renderStands(sides.e)}</div>
+              )}
             </div>
-            {renderStand("s", "w-full")}
+            {sides.s.length > 0 && (
+              <div className="flex w-full flex-col gap-3 sm:flex-row">
+                {renderStands(sides.s, "flex-1")}
+              </div>
+            )}
           </div>
         </div>
 
         <p className="mt-6 text-center text-[0.76rem] text-faint">
-          Live availability — {event.availableSeats} of {event.totalSeats} seats open.
-          Updates stream in as other buyers pick.
+          {salesOpen ? (
+            <>
+              Live availability — {event.availableSeats} of {event.totalSeats} seats
+              open. Updates stream in as other buyers pick.
+            </>
+          ) : (
+            <>
+              {event.availableSeats} of {event.totalSeats} seats are unsold. The map is
+              read-only while the fixture is not selling.
+            </>
+          )}
         </p>
       </div>
 
@@ -293,7 +358,7 @@ export function LiveSeatMap({
             <p className="sr-only" aria-live="polite">
               {selectedSeats.length === 0
                 ? "No seats selected."
-                : `${selectedSeats.length} seat${selectedSeats.length === 1 ? "" : "s"} selected. Total ${formatPrice(total, currency)}.`}
+                : `${selectedSeats.length} seat${selectedSeats.length === 1 ? "" : "s"} selected. Total ${money(total)}.`}
             </p>
 
             <div className="flex items-center justify-between">
@@ -321,12 +386,66 @@ export function LiveSeatMap({
               </p>
             )}
 
+            {blockedSeatIds && (
+              <div
+                role="alert"
+                className="mt-4 rounded-lg border border-accent/30 bg-accent/10 px-3 py-2.5 text-[0.78rem] text-accent"
+              >
+                <p>
+                  These seats are on an order you have not paid for yet. Pay it or
+                  cancel it — they cannot be freed while it stands.
+                </p>
+                <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2">
+                  {blockingOrder ? (
+                    <>
+                      <Link
+                        href={`/checkout/${blockingOrder.id}`}
+                        className="underline underline-offset-4 hover:no-underline"
+                      >
+                        Continue to payment
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={cancelBlockingOrder}
+                        disabled={cancelOrder.isPending}
+                        className="underline underline-offset-4 hover:no-underline disabled:opacity-60"
+                      >
+                        {cancelOrder.isPending ? "Cancelling…" : "Cancel that order"}
+                      </button>
+                    </>
+                  ) : (
+                    <Link
+                      href="/account"
+                      className="underline underline-offset-4 hover:no-underline"
+                    >
+                      Find it in your orders
+                    </Link>
+                  )}
+                </div>
+              </div>
+            )}
+
             {selectedSeats.length === 0 ? (
               <div className="py-12 text-center">
-                <p className="text-[0.9rem] text-muted">Tap an open seat to begin.</p>
-                <p className="mt-2 text-[0.76rem] text-faint">
-                  Gold, premium, and standard stands are color coded above.
-                </p>
+                {salesOpen ? (
+                  <>
+                    <p className="text-[0.9rem] text-muted">Tap an open seat to begin.</p>
+                    <p className="mt-2 text-[0.76rem] text-faint">
+                      Gold, premium, and standard stands are color coded above.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[0.9rem] text-muted">{sales?.title}</p>
+                    <p className="mt-2 text-[0.76rem] text-faint">{sales?.detail}</p>
+                    <Link
+                      href="/events"
+                      className="mt-5 inline-block text-[0.76rem] text-muted underline underline-offset-4 transition-colors hover:text-bone"
+                    >
+                      Browse other fixtures
+                    </Link>
+                  </>
+                )}
               </div>
             ) : (
               <>
@@ -342,7 +461,7 @@ export function LiveSeatMap({
                       </span>
                       <span className="flex items-center gap-3">
                         <span className="tnum text-[0.84rem] text-bone">
-                          {formatPrice(s.price, currency)}
+                          {money(s.price)}
                         </span>
                         <button
                           type="button"
@@ -362,19 +481,24 @@ export function LiveSeatMap({
                     <dt>
                       Subtotal<span className="tnum"> ({selectedSeats.length})</span>
                     </dt>
-                    <dd className="tnum text-bone">{formatPrice(subtotal, currency)}</dd>
+                    <dd className="tnum text-bone">{money(subtotal)}</dd>
                   </div>
                   <div className="flex justify-between text-muted">
                     <dt>Booking fee</dt>
-                    <dd className="tnum text-bone">{formatPrice(fee, currency)}</dd>
+                    <dd className="tnum text-bone">{money(fee)}</dd>
                   </div>
                   <div className="mt-1 flex items-baseline justify-between border-t border-line pt-3">
                     <dt className="font-display text-base text-bone">Total</dt>
-                    <dd className="tnum text-xl text-bone">{formatPrice(total, currency)}</dd>
+                    <dd className="tnum text-xl text-bone">{money(total)}</dd>
                   </div>
                 </dl>
 
-                {authLoading ? null : isAuthenticated ? (
+                {!salesOpen ? (
+                  <p className="mt-6 rounded-lg border border-line-2 px-3 py-2.5 text-center text-[0.78rem] text-muted">
+                    {sales?.detail || sales?.title}
+                    {heldUntil && " Your hold stands until the timer runs out."}
+                  </p>
+                ) : authLoading ? null : isAuthenticated ? (
                   <button
                     type="button"
                     onClick={reserve}
@@ -413,9 +537,11 @@ export function LiveSeatMap({
                   </button>
                 )}
 
-                <p className="mt-3 text-center text-[0.72rem] text-faint">
-                  Seats are held for a few minutes while you pay.
-                </p>
+                {salesOpen && (
+                  <p className="mt-3 text-center text-[0.72rem] text-faint">
+                    Seats are held for a few minutes while you pay.
+                  </p>
+                )}
               </>
             )}
           </div>

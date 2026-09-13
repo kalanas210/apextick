@@ -19,11 +19,11 @@ ApexTick simulates the hardest moment in any ticketing platform: the instant a p
 
 ## Proven under load
 
-An authenticated [k6](https://k6.io) test logs into Keycloak, then fires **5,000 hold attempts from 200 concurrent virtual users** at an event with exactly **300 seats**:
+An authenticated [k6](https://k6.io) test fires **5,000 hold attempts from 200 concurrent virtual users** at an event with exactly **300 seats**. Every virtual user logs into Keycloak as its *own* account, so this is 200 buyers, not 200 threads sharing one login — which is what makes "no seat was held by two people" a statement about people:
 
 | Metric | Result |
 | --- | --- |
-| Concurrent virtual users | 200 |
+| Concurrent virtual users | 200 (one Keycloak identity each) |
 | Total hold attempts | 5,000 |
 | Seats available | 300 |
 | **Holds won** | **300 / 300** |
@@ -34,7 +34,7 @@ An authenticated [k6](https://k6.io) test logs into Keycloak, then fires **5,000
 | Latency (p95) | 233 ms |
 | Latency (p99) | 373 ms |
 
-Every seat was sold exactly once. Every losing request received a clean `409`. No seat was ever held by two people at the same time — and the test *proves* it by reading the service's own seat map back after the storm (`held == 300`, `available == 0`). Numbers from a single local instance against dockerised infrastructure; see [Load testing](#load-testing).
+Every seat was sold exactly once. Every losing request received a clean `409`. No seat was ever held by two people at the same time — and the test *proves* it by reading the service's own seat map back after the storm (`held == 300`, `available == 0`, and every seat's optimistic-lock `version` moved by exactly 1). Numbers from a single local instance against dockerised infrastructure; [Load testing](#load-testing) has the exact commands, including the one-off step that seeds the 200 accounts.
 
 ## Architecture
 
@@ -103,10 +103,12 @@ There are no `synchronized` blocks, no application-level mutexes, and no distrib
 | **Live seat map** | WebSocket / STOMP (`/api/ws`) with Redis pub/sub fan-out, so every browser sees a seat flip in real time — across multiple service instances. |
 | **Orders** | Idempotent order creation (`Idempotency-Key`), a payment window, and a sweeper that expires unpaid orders and releases their seats. |
 | **Payments** | Pluggable `PaymentGateway` — **mock** (offline, deterministic test cards) and **Stripe** (PaymentIntents + signed webhook + refund). Switch with `APP_PAYMENT_PROVIDER`. |
-| **Tickets** | On payment a QR-tokened ticket is issued per seat, rendered to a PDF and cached in S3/MinIO (off the payment path, regenerated on demand); admins verify tickets at the gate. |
+| **Tickets** | On payment a QR-tokened ticket is issued per seat, rendered to a PDF and cached in S3/MinIO (off the payment path, regenerated on demand); stewards scan them at the gate, where each admits once, and only to its own event. |
 | **Transactional outbox** | Domain events are written in the same transaction as the state change and published to RabbitMQ only after commit — no phantom events on rollback. |
 | **Async notifications** | An independent service consumes booking events (idempotently, with a DLQ) and sends templated email via Mailpit/SMTP. |
-| **Admin API** | Events & layout management, live event stats, orders, seat release, ticket verification — all `ROLE_ADMIN`. |
+| **Admin panel** | A `/admin` area behind the `admin` realm role: event CRUD, a one-shot seating-layout builder with a live seat/revenue preview, live event stats, an orders console, seat release, and a gate scanner that reads QR codes with the browser's own `BarcodeDetector`, which a steward holding only the `scanner` role can open without the rest of the panel. |
+| **Admin API** | Events & layout management, live event stats, orders, seat release — all `ROLE_ADMIN`. |
+| **Gate API** | `/api/gate/**`, for the `scanner` role and admins: every scan checked against the event its gate admits to, admission as a single conditional `UPDATE` so two turnstiles can never both let one ticket in, each scan recorded with its gate and steward, a live admissions count across gates, and an admin-only undo that must give a reason. |
 | **Rate limiting** | Redis fixed-window limits on hold/order/pay, returning `429` + `Retry-After`. |
 | **Observability** | Micrometer → Prometheus, with a provisioned Grafana dashboard. |
 | **Errors** | RFC-7807 `application/problem+json` everywhere, with a correlation id per request. |
@@ -116,10 +118,10 @@ There are no `synchronized` blocks, no application-level mutexes, and no distrib
 - **Lock-free atomic concurrency**, proven at 300/300 holds with zero double-bookings under load.
 - **Self-expiring holds** — a held seat is written to Redis with a TTL. When the key expires, a Redis keyspace notification triggers the seat's release back to `AVAILABLE` — no polling loop on the happy path.
 - **Event-driven decoupling** — the booking service writes to a **transactional outbox** and publishes to a RabbitMQ topic exchange after commit; the notification service consumes independently, idempotently, with a dead-letter queue for poison messages.
-- **PCI-conscious payments** — the Stripe adapter never sees a raw card number: it creates a PaymentIntent and returns a `client_secret` for the browser to confirm, treating the signed `payment_intent.succeeded` webhook as the source of truth. Webhooks are idempotent, and a charge that lands after its seats were lost is automatically refunded.
+- **PCI-conscious payments** — the Stripe adapter never sees a raw card number: it creates a PaymentIntent and returns a `client_secret` for the browser to confirm, treating the signed `payment_intent.succeeded` webhook as the source of truth. Webhooks are idempotent, and a charge that cannot buy its order (its seats lost, the order expired or already paid, a sum other than the payment's) is refunded under a key that lets it be refunded only once. Pay attempts racing on one order take turns on the order's row, so the order is charged once however many tabs race for it.
 - **Stateless JWT security** — Keycloak issues OIDC tokens the API validates statelessly; roles map from `realm_access.roles` to `ROLE_*`. Auth keeps working containerized by fetching signing keys over the internal network while validating the public issuer.
-- **One-command infrastructure** — the whole backend, its dependencies, the Keycloak realm, and an optional observability stack start with `docker compose up`. Every secret is externalized to a git-ignored `.env`.
-- **Verified** — 51 tests, most of them full-stack **Testcontainers** integration tests covering concurrency, expiry, the outbox, orders, payments, webhooks, admin, security and rate-limiting.
+- **One-command infrastructure** — the whole backend, its dependencies, the Keycloak realm, and an optional observability stack start with `docker compose up`. Every secret, including the realm's client secrets, comes from a git-ignored `.env`, and the production stack refuses to start while any credential is unset.
+- **Verified** — 188 booking-service tests, most of them full-stack **Testcontainers** integration tests covering concurrency, expiry, the outbox, orders, racing and resent payments, signed webhooks delivered over HTTP, turnstiles racing on one ticket, admin, security and rate-limiting; GreenMail tests for the notification service's SMTP path (an authenticated login, and refusing a server that doesn't offer STARTTLS); Vitest unit tests for the frontend's money, status and gate-refusal helpers, and for the admin and gate hooks' bearer tokens and cache keys. CI also fails when the gateway's OpenAPI contract drifts from the code.
 
 ## Tech stack
 
@@ -135,7 +137,7 @@ There are no `synchronized` blocks, no application-level mutexes, and no distrib
 | API Gateway | WSO2 API Manager | Edge auth, subscription enforcement, throttling — a published contract instead of a bare service |
 | Payments | Stripe | PaymentIntents, webhooks, refunds (mock provider for offline demos) |
 | Observability | Micrometer + Prometheus + Grafana | Metrics, scraping, dashboards |
-| Frontend | Next.js (React) | App Router, OIDC login, live seat map |
+| Frontend | Next.js (React) | App Router, OIDC login, API-driven catalog, live seat map |
 | Load testing | k6 | Scriptable concurrency + correctness verification |
 | Containerization | Docker Compose | Reproducible, one-command environment |
 
@@ -169,12 +171,18 @@ Default demo login: **`kalana` / `12345`**.
 
 Interactive OpenAPI docs (Swagger UI) are served at **http://localhost:8081/swagger-ui.html**. Use **Authorize** to paste a Keycloak access token, then try the secured endpoints from the browser.
 
-Grab a token from the command line via the direct-grant flow:
+Grab a token from the command line with the password grant. The SPA's own
+client (`apextick-web`) is public and only does authorization code + PKCE, so
+this goes through the confidential `apextick-loadtest` client, whose secret is
+`LOADTEST_CLIENT_SECRET` in `.env`:
 
 ```bash
+LOADTEST_CLIENT_SECRET=$(sed -n 's/^LOADTEST_CLIENT_SECRET=//p' .env)
+: "${LOADTEST_CLIENT_SECRET:=dev-loadtest-secret}"   # docker-compose.yml's fallback, for an older .env
 curl -s http://localhost:8180/realms/apextick/protocol/openid-connect/token \
-  -d grant_type=password -d client_id=apextick-web \
-  -d username=kalana -d password=12345 | jq -r .access_token
+  -d grant_type=password -d client_id=apextick-loadtest \
+  -d "client_secret=$LOADTEST_CLIENT_SECRET" \
+  -d username=kalana -d password=12345 | jq -er .access_token
 ```
 
 ### 4. (Optional) Run the frontend
@@ -189,11 +197,60 @@ Open **http://localhost:3000**, log in, and book a seat. Sign-in, the seat map,
 holds, checkout and tickets all run against the live API.
 
 The frontend finds the API automatically (same-origin behind Caddy, `:8081` locally).
+Its storefront pages render on the server, which reads the catalog over
+`API_INTERNAL_URL` — set for you in both compose files, since inside the network the
+public origin need not resolve.
 If that port is taken, point it somewhere else:
 
 ```bash
 NEXT_PUBLIC_API_URL=http://localhost:18081 npm run dev
 ```
+
+### 5. (Optional) Open the admin panel
+
+**http://localhost:3000/admin** — event CRUD, the seating-layout builder, live
+stats, the orders console, seat release, and the gate scanner.
+
+It is gated on the `admin` realm role. The realm **defines** that role but
+grants it to nobody: the seeded `kalana` account is a plain customer, and its
+password is published here, so making it an administrator would hand
+`/api/admin/**` to anyone who can read this file. Grant the role deliberately,
+to whoever should hold it:
+
+```bash
+scripts/grant-admin.sh                 # grants to kalana
+scripts/grant-admin.sh someone-else
+```
+
+Gate stewards need only the `scanner` role. It opens the gate API and the
+scanner at `/admin/scan` and nothing else, so a turnstile device that goes
+missing is not an admin session. The script creates the role first on a realm
+imported before it existed:
+
+```bash
+scripts/grant-role.sh scanner someone-else
+```
+
+The script patches the realm through Keycloak's Admin API, so it works on a
+stack that is already running — which matters, because Keycloak reads
+`keycloak/import/apextick-realm.json` only when the realm does not yet exist in
+its database, and recreating the container to force a re-import would drop every
+account registered since.
+
+Realm roles are baked into the access token when it is issued, so sign out and
+back in afterwards.
+
+On a deployment anyone else can reach, change the demo password too — it is a
+seed for local development, not a credential.
+
+The gate scanner reads QR codes through the browser's native `BarcodeDetector`
+(Chromium, on a secure origin — HTTPS or `localhost`); everywhere else it falls
+back to pasting the token, which is also how it is demoed without a camera.
+Each device is set once to the event its gate admits to, and a gate name. A
+ticket for any other event is turned away unspent, a repeat scan says when and
+at which gate the ticket was first let in, and every scan — refusals included —
+lands on the ticket's record, which is also where an admin's undo of a mistaken
+admission goes, with its reason.
 
 ## Payments
 
@@ -211,8 +268,13 @@ The active gateway is chosen by `APP_PAYMENT_PROVIDER` (`mock` by default):
   ```bash
   curl -X POST localhost:8081/api/orders/<ORDER_ID>/pay \
     -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" \
+    -H "Idempotency-Key: <A NEW UUID>" \
     -d '{"paymentMethodId":"pm_card_visa"}'
   ```
+
+`POST /api/orders/{id}/pay` requires an `Idempotency-Key`, and a key names one payment attempt. Sending the same key again returns that attempt's result instead of charging a second time, so retrying after a dropped connection is safe; trying another card takes a new key. One attempt runs per order at a time, and a second one started meanwhile is refused with `409 PAYMENT_IN_PROGRESS`.
+
+A webhook is checked before its charge books anything. A charge whose order has expired or been cancelled, one for an order another charge already paid, one whose seats were lost, and one for a different amount or currency than its payment are all refunded and the delivery acknowledged, so Stripe never keeps redelivering an event while the customer stays charged. Each refund goes out under a key derived from its payment, so retries and redeliveries refund once, and the payment then reads `REFUNDED`, or `REFUND_REQUIRED` if Stripe refused the refund. A webhook that lands before the pay request has recorded the intent's id still finds its payment through the payment id stamped on the intent.
 
 `GET /api/payments/config` tells the frontend which provider is active and returns the Stripe publishable key.
 
@@ -229,29 +291,68 @@ docker compose --profile observability up
 | Prometheus | http://localhost:9090 | Scrapes `booking-service:8081/actuator/prometheus` every 5 s |
 | Grafana | http://localhost:3001 | Login `admin` / `admin`; the **ApexTick — Booking Service** dashboard is auto-provisioned |
 
-The dashboard visualises the flash sale directly from HTTP metrics: seat-hold outcomes (200 won vs 409 rejected), request throughput per endpoint, p50/p95/p99 latency, the HikariCP connection pool, and JVM heap/threads/CPU. Run the load test with the profile up to watch it move.
+The dashboard visualises the flash sale directly from HTTP metrics: seat-hold outcomes (`201` won vs `409` rejected — selected on `method="POST"`, since releasing a hold is a `DELETE` on the same URI template), request throughput per endpoint, p50/p95/p99 latency, the HikariCP connection pool, and JVM heap/threads/CPU. Run the load test with the profile up to watch it move.
 
 ## Load testing
 
-The k6 script authenticates against Keycloak and drives the real, JWT-secured hold endpoint. It discovers the target event's available seats automatically, so no seat ids are hard-coded.
+The k6 script drives the real, JWT-secured hold endpoint the SPA uses, `POST /api/events/{slug}/holds`. It discovers the target event's seats through the admin API, so no seat ids are hard-coded — which is also why it needs an admin account as well as a buyer.
+
+Everyone logs in with the password grant on the confidential `apextick-loadtest` client. There are no built-in credentials; the script refuses to start without all five:
+
+| Variable | What it is |
+| --- | --- |
+| `LOADTEST_USER` / `LOADTEST_PASSWORD` | a buyer account — and the password every pool account shares |
+| `LOADTEST_CLIENT_SECRET` | `apextick-loadtest`'s secret, from `.env` |
+| `LOADTEST_ADMIN_USER` / `LOADTEST_ADMIN_PASSWORD` | an account with the `admin` realm role — `teardown` reads `/api/admin/seats` with it to check holders and versions. Grant it once with `scripts/grant-admin.sh <user>` |
+
+**One virtual user is one person.** Each VU logs in as its own Keycloak account, so `VUS` is capped to the size of the identity pool — the per-user rate limiter, the per-user seat cap and `held_by` all then behave like a real crowd. Seed the pool once (idempotent):
 
 ```bash
 cd load-test
-k6 run booking-load-test.js
-# tune anything via env:
-k6 run -e VUS=200 -e ITERATIONS=5000 -e EVENT_SLUG=india-australia-semi-final booking-load-test.js
+export LOADTEST_PASSWORD=12345
+./seed-loadtest-users.sh 200            # creates loadtest-01 … loadtest-200 in the realm
 ```
 
-After the run, `teardown` reads the seat map back and asserts every targeted seat is now `HELD` and none is left `AVAILABLE` — the invariant is a threshold, so a correctness violation fails the run. Re-running needs the seats reset (restart with a fresh volume, or release the holds).
+Seeding runs two Keycloak admin calls per account, so 200 of them take a few minutes — once, not per run.
+
+```bash
+export LOADTEST_USER=kalana LOADTEST_PASSWORD=12345
+export LOADTEST_ADMIN_USER=kalana LOADTEST_ADMIN_PASSWORD=12345
+export LOADTEST_CLIENT_SECRET=$(sed -n 's/^LOADTEST_CLIENT_SECRET=//p' ../.env)
+: "${LOADTEST_CLIENT_SECRET:=dev-loadtest-secret}"   # docker-compose.yml's fallback, for an older .env
+k6 run -e LOADTEST_USER_COUNT=200 booking-load-test.js
+# tune anything via env:
+k6 run -e LOADTEST_USER_COUNT=200 -e ITERATIONS=5000 -e EVENT_SLUG=india-australia-semi-final booking-load-test.js
+```
+
+The storm itself lasts seconds, but `setup` logs all 200 accounts in before the first hold and Keycloak hashes passwords slowly, so expect a quiet minute first — the script raises k6's 60-second setup allowance to match the pool size.
+
+**How big must the pool be?** Two service-side limits set the floor, and the script computes both instead of assuming:
+
+- **`app.hold.max-seats`** caps how many seats *one person* may hold on *one event* (default 8), so N accounts can win at most `N × 8` seats. Selling out 300 seats needs `ceil(300 / 8) = 38` accounts. Below that a sell-out is arithmetically impossible, and the script says so rather than failing: it drops to a "capped run" that still proves no double-booking, no stranger holding a seat and no identity over the cap. A request from someone already at their cap answers `422 TOO_MANY_SEATS`, which is counted in `holds_capped` as a correct rejection, not a failed request. `setup` probes the running service for the real cap and refuses to start if it disagrees with the run's arithmetic.
+- **`app.rate-limit.hold.limit`** allows 30 holds per subject per minute, and the 5,000 attempts land in about three seconds — so each account gets ~30, full stop. Covering 300 seats with random draws needs roughly `300 × ln(300) ≈ 1,700` attempts to even *reach* every seat, which is why `ITERATIONS` stays at 5,000; that in turn wants `5000 / 30 ≈ 167` accounts. 200 clears it, and `setup` warns when the pool is small enough to be throttled.
+
+A smaller pool works if you lift the limiter for the run instead:
+
+```bash
+./seed-loadtest-users.sh 40
+(cd .. && APP_RATE_LIMIT_HOLD_LIMIT=100000 docker compose up -d booking-service)
+k6 run -e LOADTEST_USER_COUNT=40 booking-load-test.js
+```
+
+`APP_RATE_LIMIT_ENABLED`, `APP_RATE_LIMIT_HOLD_LIMIT`, `APP_RATE_LIMIT_HOLD_WINDOW` and `APP_HOLD_MAX_SEATS` are declared in `docker-compose.yml` at their `application.yml` defaults, so overriding them from the shell or `.env` actually reaches the container — Compose forwards nothing a service has not declared.
+
+After the run, `teardown` reads the seat map back and asserts every targeted seat is `HELD`, none is left `AVAILABLE`, every holder is one of the pool identities, no identity is over the cap, and every seat's optimistic-lock `version` moved by exactly 1 — a seat two people both won would have been written twice. The invariants are k6 checks under a `rate==1.0` threshold, so a correctness violation fails the run. Re-running needs the seats reset (restart with a fresh volume, or release the holds).
 
 ## Testing
 
 ```bash
-cd booking-service
-./mvnw verify   # needs Docker for Testcontainers
+(cd booking-service && ./mvnw verify)        # needs Docker for Testcontainers
+(cd notification-service && ./mvnw verify)
+(cd frontend && npm ci --ignore-scripts && npm test)
 ```
 
-51 tests run, most of them full-stack Testcontainers integration tests: seat concurrency (1 winner / 199 losers), multi-seat all-or-nothing holds, Redis-driven expiry, the hold sweeper, the transactional outbox, the order/payment flow, Stripe signature verification and mapping, seats-lost compensation, the admin API, security, and rate limiting.
+booking-service runs 188 tests, most of them full-stack Testcontainers integration tests: seat concurrency (1 winner / 199 losers) over the real hold endpoint, multi-seat all-or-nothing holds, the sales window and per-user seat cap, Redis-driven expiry, the hold sweeper, the transactional outbox, the order/payment flow, pay attempts racing on one order and resent under the same key, Stripe signature verification and mapping, signed Stripe webhooks delivered over HTTP (redelivered, late, duplicate, unmatched and mis-priced charges), refunds for charges an order can no longer take, the gate (twelve turnstiles racing on one ticket let it in once; scans for another event, at a cancelled event and repeat scans refused and recorded; an admin's undo, and a steward refused one), the admin API, security, and rate limiting. Its verify also exports the served OpenAPI document to `target/openapi/api-docs.json`, which CI normalises and compares with the committed gateway contract. notification-service runs 8 (GreenMail, including an authenticated SMTP server and one that refuses STARTTLS); the frontend runs 91 Vitest unit tests.
 
 ## Project structure
 
@@ -259,9 +360,10 @@ cd booking-service
 apextick/
 ├── booking-service/        # Spring Boot — seats, holds, orders, payments, tickets, admin
 ├── notification-service/   # Spring Boot — independent RabbitMQ consumer, own DB, email
-├── frontend/               # Next.js — live seat map, checkout, orders, tickets
+├── frontend/               # Next.js — storefront, live seat map, checkout, tickets, /admin panel
 ├── load-test/              # k6 authenticated flash-sale + correctness test
 ├── keycloak/import/        # auto-imported apextick realm (client, roles, demo user)
+├── scripts/                # WSO2 gateway setup, grant-role.sh / grant-admin.sh
 ├── infra/                  # Prometheus + Grafana provisioning, Terraform (AWS)
 ├── caddy/                  # TLS edge reverse proxy
 ├── wso2/                   # API Manager config + the published API contract
@@ -293,15 +395,63 @@ CI builds the three service images and pushes them to GHCR once the test run for
 that commit is green; the production stack pulls those tags.
 
 ```bash
-cp .env.example .env            # set SERVER_IP, passwords, Stripe keys
+cp .env.example .env            # set SERVER_IP, every credential, Stripe keys
 docker compose -f docker-compose.prod.yml up -d
 ```
+
+The production file has no fallback for any credential: it refuses to start
+until `.env` sets the database, RabbitMQ, Keycloak admin, MinIO, WSO2 and
+Grafana passwords and the two realm client secrets (`WSO2_KM_CLIENT_SECRET`,
+`LOADTEST_CLIENT_SECRET`). The check only catches a missing value, so replace
+every `changeme`, `minioadmin`, `admin` and `dev-*` value with
+`openssl rand -hex 32`.
 
 Caddy is the only thing published (80/443). It terminates TLS with an
 automatically-provisioned certificate for `https://<SERVER_IP>.nip.io` and routes
 by path — `/api` to the WSO2 gateway (which then reaches the booking service),
-`/realms` to Keycloak, everything else to the frontend — so the app, API and
-Keycloak ports stay closed at the security group.
+the apextick realm's `/realms`, `/resources` and `/js` to Keycloak (minus the
+master realm and the client-registration API), everything else (including the
+`/admin` panel) to the frontend. The security group in
+`infra/` opens only 80/443 to the world and SSH to `admin_cidr`, a required
+Terraform variable:
+
+```bash
+cd infra && terraform apply -var admin_cidr=<your-ip>/32
+```
+
+Keycloak's own admin console is not published. Reach it over an SSH tunnel to
+its loopback-only port (`ssh -L 8180:localhost:8180 ubuntu@<host>`) after the
+`kcadm` step described next to the keycloak service in
+`docker-compose.prod.yml`, repeated whenever Keycloak is recreated. Production
+Keycloak still runs `start-dev` with its data inside the container: recreating
+it (which any change to its environment does) drops self-registered users.
+
+### Upgrading a running deployment
+
+`git pull` alone changes nothing that is already running. On the server:
+
+1. **Keycloak** — the first `up -d` of this compose file recreates it (new
+   environment, new loopback port), which re-imports the realm and drops
+   registered accounts. To keep them, deploy the other services with
+   `--no-deps` and patch the realm through the Admin API instead;
+   `keycloak/README.md` has both paths and the tested block.
+2. **Images and the rest** —
+   `docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d`
+   (plain `up -d` doesn't fetch new `:latest` images).
+3. **Caddy** — it only reads its config at start. This release recreates it
+   (its mount changed); after a later Caddyfile-only change run
+   `docker compose -f docker-compose.prod.yml restart caddy`. Then check the
+   edge: `curl -s -o /dev/null -w '%{http_code}\n' https://<SERVER_IP>.nip.io/realms/master/.well-known/openid-configuration`
+   must print `404`.
+4. **The gateway** — `scripts/wso2/setup.sh` pushes the regenerated API
+   contract (anonymous catalogue reads and the Stripe webhook) and the rotated
+   key-manager secret; `scripts/wso2/smoke-test.sh` confirms it.
+5. **RabbitMQ** — delete the queue booking-service no longer declares, which
+   otherwise keeps filling:
+   `docker exec apextick-rabbitmq rabbitmqctl delete_queue seat-held-notifications`.
+6. **Terraform** — `terraform plan -var admin_cidr=<your-ip>/32` must show
+   in-place changes only (security-group rules, `metadata_options`,
+   `user_data_replace_on_change`); stop if it plans a replacement.
 
 Prometheus and Grafana are an opt-in profile bound to loopback:
 

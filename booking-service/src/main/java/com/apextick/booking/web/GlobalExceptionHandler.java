@@ -6,6 +6,7 @@ import com.apextick.booking.security.ratelimit.RateLimitExceededException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -64,6 +65,32 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header("Retry-After", String.valueOf(ex.getRetryAfterSeconds()))
                 .body(body);
+    }
+
+    /**
+     * Unparseable enum codes -- ?status=NOPE, a bad sport, a status patch carrying a
+     * value no EventStatus knows -- reach us as IllegalArgumentException. That is bad
+     * input, not a server fault, so it is a 400. The net is broad (NumberFormatException
+     * is an IllegalArgumentException too), so the stack trace is logged: a genuine bug
+     * that lands here is still visible in the logs rather than silently downgraded.
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
+    ProblemDetail handleIllegalArgument(IllegalArgumentException ex) {
+        log.warn("Rejected request with invalid argument", ex);
+        return problem(HttpStatus.BAD_REQUEST, ex.getMessage() == null ? "Invalid request" : ex.getMessage(),
+                ErrorCodes.VALIDATION_FAILED, Map.of());
+    }
+
+    /**
+     * A foreign key or unique constraint that got past the service-level guards.
+     * Reporting it as a conflict tells the caller their request clashed with existing
+     * data, which is nearly always what a constraint violation means here.
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    ProblemDetail handleDataIntegrity(DataIntegrityViolationException ex) {
+        log.warn("Request violated a database constraint", ex);
+        return problem(HttpStatus.CONFLICT, "The request conflicts with existing data",
+                ErrorCodes.CONFLICT, Map.of());
     }
 
     @ExceptionHandler(Exception.class)

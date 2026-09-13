@@ -13,7 +13,7 @@ import java.nio.charset.StandardCharsets;
 public class HoldExpiryListener implements MessageListener {
 
     private static final Logger log = LoggerFactory.getLogger(HoldExpiryListener.class);
-    private static final String KEY_PREFIX = "seat-hold:";
+    private static final String KEY_PREFIX = SeatHoldKeys.PREFIX;
 
     private final HoldService holdService;
 

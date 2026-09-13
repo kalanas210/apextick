@@ -1,8 +1,10 @@
 package com.apextick.booking.order;
 
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -16,6 +18,15 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
 
     Optional<Order> findByIdAndUserSub(UUID id, String userSub);
 
+    /**
+     * The order, with its row locked until the transaction ends. A payment takes this lock before
+     * it decides anything, so two attempts on one order take turns instead of both concluding
+     * they are the first.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select o from Order o where o.id = :id")
+    Optional<Order> findByIdForUpdate(@Param("id") UUID id);
+
     Optional<Order> findByUserSubAndIdempotencyKey(String userSub, String idempotencyKey);
 
     Page<Order> findByUserSubOrderByCreatedAtDesc(String userSub, Pageable pageable);
@@ -27,6 +38,23 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     @Query("select count(oi) > 0 from OrderItem oi where oi.seatId in :seatIds "
             + "and oi.order.status = com.apextick.booking.order.OrderStatus.PENDING_PAYMENT")
     boolean existsPendingForSeats(@Param("seatIds") Collection<Long> seatIds);
+
+    /**
+     * Which of these seats <em>this buyer's</em> own unpaid order still covers, so a release can
+     * refuse them by name. Scoped to the caller on purpose: a stranger's abandoned order can
+     * still name a seat this buyer now holds -- the expiry listener frees the seat the moment
+     * the hold lapses while the order waits up to a sweeper tick to be cancelled -- and telling
+     * this buyer to cancel an order they do not own and cannot see would strand their seats.
+     */
+    @Query("select distinct oi.seatId from OrderItem oi where oi.seatId in :seatIds "
+            + "and oi.order.userSub = :userSub "
+            + "and oi.order.status = com.apextick.booking.order.OrderStatus.PENDING_PAYMENT")
+    List<Long> findPendingSeatIds(@Param("seatIds") Collection<Long> seatIds,
+                                  @Param("userSub") String userSub);
+
+    @Query("select distinct oi.order.id from OrderItem oi where oi.seatId = :seatId "
+            + "and oi.order.status = com.apextick.booking.order.OrderStatus.PENDING_PAYMENT")
+    List<UUID> findPendingOrderIdsForSeat(@Param("seatId") Long seatId);
 
     boolean existsByEventId(Long eventId);
 

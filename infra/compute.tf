@@ -27,10 +27,18 @@ resource "aws_instance" "app" {
   vpc_security_group_ids      = [aws_security_group.ec2.id]
   key_name                    = aws_key_pair.main.key_name
   user_data                   = file("${path.module}/user-data.sh")
-  user_data_replace_on_change = true
+  user_data_replace_on_change = false
 
   root_block_device {
     volume_size = 30
+  }
+
+  # IMDSv2 only: the metadata service answers only callers that first PUT
+  # for a session token, which a server-side request forgery (a plain GET
+  # to 169.254.169.254) can't do. Updates in place, no replacement.
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
   }
 
   tags = { Name = "apextick-server" }
@@ -44,7 +52,14 @@ resource "aws_instance" "app" {
     # persistent storage). The AMI this instance actually boots from stays
     # pinned to whatever it was created with; bump it deliberately (remove
     # this line for one apply) if a rebuild is ever genuinely wanted.
-    ignore_changes = [ami]
+    #
+    # user_data is ignored for the same reason. cloud-init only runs it on
+    # the first boot, so an edit to user-data.sh can't reach this server
+    # anyway: all a diff could do is stop/start it or, with
+    # user_data_replace_on_change, rebuild it and lose those same volumes.
+    # Apply bootstrap changes to the running box over SSH; the script still
+    # seeds any future instance.
+    ignore_changes = [ami, user_data]
   }
 }
 

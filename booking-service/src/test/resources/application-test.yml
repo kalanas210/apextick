@@ -10,7 +10,12 @@ app:
   hold:
     duration: PT5M
     max-seats: 8
-    expiry-tolerance: PT2S
+    # Wider than production's PT2S on purpose: every test class shares one database and the
+    # scheduled fallback sweeper keeps ticking through all of them, so a short tolerance lets
+    # it free a seat a test meant the Redis expiry listener to free. One minute keeps the
+    # sweeper off deadlines that have only just passed; HoldSweeperTest drives it directly with
+    # an hour-old hold, so the fallback path is still covered.
+    expiry-tolerance: PT1M
     sweeper-interval: PT30S
     sweeper-batch: 500
   outbox:

@@ -15,6 +15,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -62,11 +63,26 @@ public class CatalogQueryService {
 
     @Transactional(readOnly = true)
     public PageResponse<EventSummaryResponse> search(EventFilter filter, int page, int size, String sort) {
-        Sort order = "latest".equalsIgnoreCase(sort)
-                ? Sort.by("startsAt").descending()
+        return search(EventSpecifications.forFilter(filter), page, size, sort);
+    }
+
+    /** Admin variant of {@link #search}: identical shape, but drafts and cancellations are visible. */
+    @Transactional(readOnly = true)
+    public PageResponse<EventSummaryResponse> searchAll(EventFilter filter, int page, int size, String sort) {
+        return search(EventSpecifications.forAdminFilter(filter), page, size, sort);
+    }
+
+    private PageResponse<EventSummaryResponse> search(Specification<Event> spec, int page, int size, String sort) {
+        // `price` orders on an aggregate the Pageable cannot express, so the
+        // specification carries the ORDER BY and the Pageable stays unsorted --
+        // a sorted one would overwrite it. See EventSpecifications#orderByFromPrice.
+        boolean byPrice = "price".equalsIgnoreCase(sort);
+        Sort order = byPrice ? Sort.unsorted()
+                : "latest".equalsIgnoreCase(sort) ? Sort.by("startsAt").descending()
                 : Sort.by("startsAt").ascending();
+        Specification<Event> effective = byPrice ? spec.and(EventSpecifications.orderByFromPrice()) : spec;
         Pageable pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100), order);
-        Page<Event> events = eventRepository.findAll(EventSpecifications.forFilter(filter), pageable);
+        Page<Event> events = eventRepository.findAll(effective, pageable);
         List<Long> ids = events.getContent().stream().map(Event::getId).toList();
 
         Map<Long, SeatRepository.SeatCountView> counts = ids.isEmpty() ? Map.of()
@@ -82,7 +98,19 @@ public class CatalogQueryService {
 
     @Transactional(readOnly = true)
     public EventDetailResponse detail(String idOrSlug) {
-        Event e = eventLookup.resolve(idOrSlug);
+        return detailOf(eventLookup.resolvePublic(idOrSlug));
+    }
+
+    /**
+     * Admin variant of {@link #detail}: identical payload, but a draft or cancelled event
+     * resolves instead of 404ing. The panel has to be able to open the draft it just created.
+     */
+    @Transactional(readOnly = true)
+    public EventDetailResponse adminDetail(Long id) {
+        return detailOf(eventLookup.resolve(String.valueOf(id)));
+    }
+
+    private EventDetailResponse detailOf(Event e) {
         Long id = e.getId();
 
         SeatRepository.SeatCountView count = seatRepository.countByEventIds(List.of(id), SeatStatus.AVAILABLE)
@@ -91,7 +119,7 @@ public class CatalogQueryService {
                 .stream().findFirst().map(PriceTierRepository.MinPriceView::getFromPrice).orElse(null);
         EventSummaryResponse summary = summary(e, count, fromPrice);
 
-        Map<Long, SeatRepository.TierCountView> tierCounts = seatRepository.countByTier(id, SeatStatus.AVAILABLE)
+        Map<Long, SeatRepository.TierCountView> tierCounts = seatRepository.countByTier(id)
                 .stream().collect(Collectors.toMap(SeatRepository.TierCountView::getTierId, v -> v));
         Map<Long, Long> sectionAvail = seatRepository.countBySection(id, SeatStatus.AVAILABLE)
                 .stream().collect(Collectors.toMap(SeatRepository.SectionCountView::getSectionId,
@@ -118,7 +146,7 @@ public class CatalogQueryService {
 
     @Transactional(readOnly = true)
     public List<SeatResponse> seats(String idOrSlug, String sub) {
-        Event e = eventLookup.resolve(idOrSlug);
+        Event e = eventLookup.resolvePublic(idOrSlug);
         return seatRepository.findAllForEventWithLayout(e.getId()).stream()
                 .map(s -> SeatResponse.from(s, sub)).toList();
     }

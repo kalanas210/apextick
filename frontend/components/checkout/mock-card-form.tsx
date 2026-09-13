@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { field } from "@/components/ui/field";
 
 const TEST_CARDS = [
   { label: "Succeeds", number: "4242 4242 4242 4242" },
@@ -48,9 +49,6 @@ export function MockCardForm({
       holder: holder.trim() || "ApexTick Demo",
     });
   };
-
-  const field =
-    "w-full rounded-lg border border-line-2 bg-ink px-3.5 py-2.5 text-[0.9rem] text-bone outline-none transition-colors placeholder:text-faint focus:border-bone";
 
   return (
     <form onSubmit={submit} className="space-y-4">

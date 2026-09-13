@@ -8,19 +8,22 @@ import com.apextick.booking.payment.model.Customer;
 import com.apextick.booking.payment.model.PaymentContext;
 import com.apextick.booking.payment.model.PaymentInitiation;
 import com.apextick.booking.payment.model.PaymentResult;
-import com.stripe.Stripe;
+import com.apextick.booking.payment.model.RefundResult;
+import com.apextick.booking.support.StripeWebhooks;
 import com.stripe.model.Charge;
 import com.stripe.model.PaymentIntent;
+import com.stripe.model.Refund;
 import com.stripe.model.StripeError;
 import com.stripe.net.RequestOptions;
 import com.stripe.param.PaymentIntentCreateParams;
+import com.stripe.param.RefundCreateParams;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -137,12 +140,30 @@ class StripePaymentGatewayTest {
     }
 
     @Test
-    void verifyCallback_accepts_a_correctly_signed_success_event() throws Exception {
-        String payload = eventJson("payment_intent.succeeded");
-        String header = sign(payload, WHSEC, System.currentTimeMillis() / 1000);
+    void refund_goes_to_stripe_under_the_callers_key_so_asking_again_is_the_same_refund() {
+        Refund refund = mock(Refund.class);
+        when(refund.getId()).thenReturn("re_test_1");
 
-        Optional<PaymentResult> result = gateway(Set.of())
-                .verifyCallback(new CallbackRequest(payload, Map.of("Stripe-Signature", header), Map.of()));
+        try (MockedStatic<Refund> mocked = mockStatic(Refund.class)) {
+            mocked.when(() -> Refund.create(any(RefundCreateParams.class), any(RequestOptions.class)))
+                    .thenReturn(refund);
+
+            RefundResult result = gateway(Set.of()).refund("pi_refunded", new BigDecimal("150.00"), "USD",
+                    "refund:payment-1");
+
+            ArgumentCaptor<RequestOptions> options = ArgumentCaptor.forClass(RequestOptions.class);
+            mocked.verify(() -> Refund.create(any(RefundCreateParams.class), options.capture()));
+            assertThat(options.getValue().getIdempotencyKey()).isEqualTo("refund:payment-1");
+            assertThat(result.accepted()).isTrue();
+            assertThat(result.providerRef()).isEqualTo("re_test_1");
+        }
+    }
+
+    @Test
+    void verifyCallback_accepts_a_correctly_signed_success_event() {
+        String payload = eventJson("payment_intent.succeeded");
+
+        Optional<PaymentResult> result = gateway(Set.of()).verifyCallback(signed(payload));
 
         assertThat(result).isPresent();
         assertThat(result.get().outcome()).isEqualTo(PaymentOutcome.SUCCEEDED);
@@ -150,15 +171,26 @@ class StripePaymentGatewayTest {
         assertThat(result.get().externalEventId()).isEqualTo("evt_1");
         assertThat(result.get().currency()).isEqualTo("USD");
         assertThat(result.get().amount()).isEqualByComparingTo("150.00");
+        assertThat(result.get().paymentId()).isNull();
     }
 
     @Test
-    void verifyCallback_ignores_event_types_we_do_not_act_on() throws Exception {
-        String payload = eventJson("customer.created");
-        String header = sign(payload, WHSEC, System.currentTimeMillis() / 1000);
+    void verifyCallback_names_the_payment_stamped_on_the_intent() {
+        String paymentId = UUID.randomUUID().toString();
+        String payload = StripeWebhooks.paymentIntentEvent("evt_2", "payment_intent.succeeded", "pi_test_2",
+                15000, "usd", paymentId);
 
-        Optional<PaymentResult> result = gateway(Set.of())
-                .verifyCallback(new CallbackRequest(payload, Map.of("Stripe-Signature", header), Map.of()));
+        Optional<PaymentResult> result = gateway(Set.of()).verifyCallback(signed(payload));
+
+        assertThat(result).isPresent();
+        assertThat(result.get().paymentId()).isEqualTo(paymentId);
+    }
+
+    @Test
+    void verifyCallback_ignores_event_types_we_do_not_act_on() {
+        String payload = eventJson("customer.created");
+
+        Optional<PaymentResult> result = gateway(Set.of()).verifyCallback(signed(payload));
 
         assertThat(result).isEmpty();
     }
@@ -173,23 +205,52 @@ class StripePaymentGatewayTest {
                 .isInstanceOf(WebhookVerificationException.class);
     }
 
-    private static String eventJson(String type) {
-        return String.format(
-                "{\"id\":\"evt_1\",\"object\":\"event\",\"api_version\":\"%s\",\"type\":\"%s\","
-                        + "\"data\":{\"object\":{\"id\":\"pi_test_1\",\"object\":\"payment_intent\","
-                        + "\"amount\":15000,\"amount_received\":15000,\"currency\":\"usd\",\"status\":\"succeeded\"}}}",
-                Stripe.API_VERSION, type);
+    @Test
+    void verifyCallback_rejects_a_missing_signature() {
+        String payload = eventJson("payment_intent.succeeded");
+
+        assertThatThrownBy(() -> gateway(Set.of())
+                .verifyCallback(new CallbackRequest(payload, Map.of(), Map.of())))
+                .isInstanceOf(WebhookVerificationException.class);
     }
 
-    private static String sign(String payload, String secret, long timestamp) throws Exception {
-        String signedPayload = timestamp + "." + payload;
-        Mac mac = Mac.getInstance("HmacSHA256");
-        mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-        byte[] hash = mac.doFinal(signedPayload.getBytes(StandardCharsets.UTF_8));
-        StringBuilder hex = new StringBuilder(hash.length * 2);
-        for (byte b : hash) {
-            hex.append(String.format("%02x", b & 0xff));
-        }
-        return "t=" + timestamp + ",v1=" + hex;
+    @ParameterizedTest
+    @ValueSource(strings = {"t", "t=1,v1", "t=abc,v1=x", "t=", "=", ","})
+    void verifyCallback_rejects_a_malformed_signature_header(String header) {
+        String payload = eventJson("payment_intent.succeeded");
+
+        assertThatThrownBy(() -> gateway(Set.of())
+                .verifyCallback(new CallbackRequest(payload, Map.of("Stripe-Signature", header), Map.of())))
+                .isInstanceOf(WebhookVerificationException.class);
+    }
+
+    @Test
+    void verifyCallback_rejects_everything_when_no_webhook_secret_is_configured() {
+        String payload = eventJson("payment_intent.succeeded");
+        AppProperties.Payment.Stripe stripe =
+                new AppProperties.Payment.Stripe("sk_test_key", "pk_test_key", "", Set.of());
+        StripePaymentGateway unconfigured = new StripePaymentGateway(
+                new AppProperties(null, null, null, new AppProperties.Payment("mock", stripe), null));
+
+        assertThatThrownBy(() -> unconfigured.verifyCallback(signed(payload)))
+                .isInstanceOf(WebhookVerificationException.class);
+    }
+
+    @Test
+    void verifyCallback_rejects_an_unsigned_body_that_is_not_json() {
+        String header = "t=" + (System.currentTimeMillis() / 1000) + ",v1=deadbeef";
+
+        assertThatThrownBy(() -> gateway(Set.of())
+                .verifyCallback(new CallbackRequest("not json", Map.of("Stripe-Signature", header), Map.of())))
+                .isInstanceOf(WebhookVerificationException.class);
+    }
+
+    private static String eventJson(String type) {
+        return StripeWebhooks.paymentIntentEvent("evt_1", type, "pi_test_1", 15000, "usd", null);
+    }
+
+    private static CallbackRequest signed(String payload) {
+        return new CallbackRequest(payload,
+                Map.of("Stripe-Signature", StripeWebhooks.signatureHeader(payload, WHSEC)), Map.of());
     }
 }

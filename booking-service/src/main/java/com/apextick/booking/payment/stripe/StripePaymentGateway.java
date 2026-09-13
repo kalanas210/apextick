@@ -133,7 +133,25 @@ public class StripePaymentGateway implements PaymentGateway {
 
     @Override
     public Optional<PaymentResult> verifyCallback(CallbackRequest req) {
+        if (webhookSecret == null || webhookSecret.isBlank()) {
+            // mock mode: the endpoint is still public, but nothing can be verified
+            throw new WebhookVerificationException("Stripe webhooks are not configured");
+        }
         String signature = header(req, "Stripe-Signature");
+        if (signature == null || signature.isBlank()) {
+            throw new WebhookVerificationException("Missing Stripe-Signature header");
+        }
+        // constructEvent parses the body before it checks the signature, so an
+        // unsigned non-JSON body would surface as a parse error (500); verify first.
+        try {
+            Webhook.Signature.verifyHeader(req.rawBody(), signature, webhookSecret, Webhook.DEFAULT_TOLERANCE);
+        } catch (SignatureVerificationException e) {
+            throw new WebhookVerificationException("Invalid Stripe signature");
+        } catch (RuntimeException e) {
+            // stripe-java parses the header without guarding it: "t" or "t=1,v1" throw
+            // ArrayIndexOutOfBounds, "t=abc" NumberFormat
+            throw new WebhookVerificationException("Malformed Stripe-Signature header");
+        }
         Event event;
         try {
             event = Webhook.constructEvent(req.rawBody(), signature, webhookSecret);
@@ -167,7 +185,10 @@ public class StripePaymentGateway implements PaymentGateway {
             com.stripe.model.StripeError err = pi.getLastPaymentError();
             failureCode = err.getDeclineCode() != null ? err.getDeclineCode() : err.getCode();
         }
-        return Optional.of(new PaymentResult(event.getId(), pi.getId(), outcome, amount, currency,
+        // stamped on the intent by initiate(), so a callback can name its payment even before the
+        // intent's id has been recorded against it
+        String paymentId = pi.getMetadata() == null ? null : pi.getMetadata().get("paymentId");
+        return Optional.of(new PaymentResult(event.getId(), pi.getId(), paymentId, outcome, amount, currency,
                 card[0], card[1], failureCode, req.rawBody()));
     }
 
@@ -178,8 +199,8 @@ public class StripePaymentGateway implements PaymentGateway {
                     .setPaymentIntent(providerRef)
                     .setAmount(StripeAmounts.toMinorUnits(amount, currency))
                     .build();
-            String idem = idempotencyKey == null ? null : idempotencyKey + ":refund";
-            Refund refund = Refund.create(params, options(idem));
+            // the caller's key names this refund, so asking again can only return the same refund
+            Refund refund = Refund.create(params, options(idempotencyKey));
             return new RefundResult(true, refund.getId(), null);
         } catch (StripeException e) {
             log.error("Stripe refund failed for intent {}", providerRef, e);

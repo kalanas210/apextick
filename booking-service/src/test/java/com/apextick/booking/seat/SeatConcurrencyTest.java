@@ -8,11 +8,17 @@ import com.apextick.booking.catalog.Section;
 import com.apextick.booking.catalog.SectionRepository;
 import com.apextick.booking.catalog.Sport;
 import com.apextick.booking.support.IntegrationTest;
+import com.apextick.booking.support.TestTokens;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.math.BigDecimal;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -23,15 +29,24 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * The lock-free hold claim under contention, driven through the endpoint buyers actually
+ * use: {@code POST /api/events/{slug}/holds}. Deliberately over HTTP rather than against
+ * the service, so the guards that sit in front of the UPDATE -- authentication, the event
+ * status and sales window, the per-user cap -- are part of what is being measured.
+ */
 @IntegrationTest
 class SeatConcurrencyTest {
 
-    @Autowired SeatService seatService;
+    @Value("${local.server.port}")
+    int port;
+
     @Autowired SeatRepository seatRepository;
     @Autowired EventRepository eventRepository;
     @Autowired PriceTierRepository priceTierRepository;
     @Autowired SectionRepository sectionRepository;
 
+    String slug;
     Long seatId;
 
     @BeforeEach
@@ -43,6 +58,7 @@ class SeatConcurrencyTest {
         event.setSlug("concurrency-" + System.nanoTime());
         event.setSport(Sport.CRICKET);
         event = eventRepository.save(event);
+        slug = event.getSlug();
 
         PriceTier tier = new PriceTier();
         tier.setEvent(event);
@@ -82,19 +98,26 @@ class SeatConcurrencyTest {
         CountDownLatch doneGate = new CountDownLatch(contenders);
         AtomicInteger wins = new AtomicInteger();
         AtomicInteger rejections = new AtomicInteger();
+        AtomicInteger other = new AtomicInteger();
 
-        try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
+        try (HttpClient http = HttpClient.newHttpClient();
+             ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
             for (int i = 0; i < contenders; i++) {
                 String user = "user-" + i;
                 pool.submit(() -> {
                     try {
                         startGate.await();
-                        seatService.holdSeat(seatId, user);
-                        wins.incrementAndGet();
-                    } catch (SeatUnavailableException e) {
-                        rejections.incrementAndGet();
+                        int status = http.send(holdRequest(user), HttpResponse.BodyHandlers.discarding())
+                                .statusCode();
+                        switch (status) {
+                            case 201 -> wins.incrementAndGet();
+                            case 409 -> rejections.incrementAndGet();
+                            default -> other.incrementAndGet();
+                        }
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
+                    } catch (Exception e) {
+                        other.incrementAndGet();
                     } finally {
                         doneGate.countDown();
                     }
@@ -102,14 +125,23 @@ class SeatConcurrencyTest {
             }
 
             startGate.countDown();
-            assertThat(doneGate.await(20, TimeUnit.SECONDS)).isTrue();
+            assertThat(doneGate.await(60, TimeUnit.SECONDS)).isTrue();
         }
 
+        assertThat(other.get()).isZero();
         assertThat(wins.get()).isEqualTo(1);
         assertThat(rejections.get()).isEqualTo(contenders - 1);
 
         Seat finalSeat = seatRepository.findById(seatId).orElseThrow();
         assertThat(finalSeat.getStatus()).isEqualTo(SeatStatus.HELD);
         assertThat(finalSeat.getHeldBy()).isNotNull();
+    }
+
+    private HttpRequest holdRequest(String sub) {
+        return HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/events/" + slug + "/holds"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + TestTokens.user(sub, sub, sub + "@apextick.local"))
+                .POST(HttpRequest.BodyPublishers.ofString("{\"seatIds\":[" + seatId + "]}"))
+                .build();
     }
 }

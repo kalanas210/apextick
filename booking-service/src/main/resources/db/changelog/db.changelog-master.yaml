@@ -23,3 +23,12 @@ databaseChangeLog:
   - include:
       file: 008-payments-tickets.sql
       relativeToChangelogFile: true
+  - include:
+      file: 009-demo-sales-windows.sql
+      relativeToChangelogFile: true
+  - include:
+      file: 010-payment-integrity.sql
+      relativeToChangelogFile: true
+  - include:
+      file: 011-ticket-scans.sql
+      relativeToChangelogFile: true

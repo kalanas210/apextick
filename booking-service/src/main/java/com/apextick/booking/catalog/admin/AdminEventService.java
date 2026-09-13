@@ -4,19 +4,24 @@ import com.apextick.booking.catalog.CatalogQueryService;
 import com.apextick.booking.catalog.Event;
 import com.apextick.booking.catalog.EventRepository;
 import com.apextick.booking.catalog.EventStatus;
+import com.apextick.booking.catalog.PriceTierRepository;
+import com.apextick.booking.catalog.SectionRepository;
 import com.apextick.booking.catalog.SeriesRepository;
 import com.apextick.booking.catalog.Sport;
 import com.apextick.booking.catalog.TeamRepository;
 import com.apextick.booking.catalog.dto.EventDetailResponse;
 import com.apextick.booking.catalog.dto.EventUpsertRequest;
 import com.apextick.booking.order.OrderRepository;
+import com.apextick.booking.seat.SeatRepository;
 import com.apextick.booking.web.ConflictException;
 import com.apextick.booking.web.NotFoundException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.DateTimeException;
 import java.time.Instant;
+import java.time.ZoneId;
 
 @Service
 public class AdminEventService {
@@ -26,14 +31,21 @@ public class AdminEventService {
     private final TeamRepository teams;
     private final OrderRepository orders;
     private final CatalogQueryService catalog;
+    private final SeatRepository seats;
+    private final SectionRepository sections;
+    private final PriceTierRepository tiers;
 
     public AdminEventService(EventRepository events, SeriesRepository series, TeamRepository teams,
-                             OrderRepository orders, CatalogQueryService catalog) {
+                             OrderRepository orders, CatalogQueryService catalog,
+                             SeatRepository seats, SectionRepository sections, PriceTierRepository tiers) {
         this.events = events;
         this.series = series;
         this.teams = teams;
         this.orders = orders;
         this.catalog = catalog;
+        this.seats = seats;
+        this.sections = sections;
+        this.tiers = tiers;
     }
 
     @Transactional
@@ -42,7 +54,7 @@ public class AdminEventService {
         apply(e, r);
         e.setCreatedAt(Instant.now());
         save(e);
-        return catalog.detail(e.getId().toString());
+        return catalog.adminDetail(e.getId());
     }
 
     @Transactional
@@ -51,7 +63,7 @@ public class AdminEventService {
         apply(e, r);
         e.setUpdatedAt(Instant.now());
         save(e);
-        return catalog.detail(id.toString());
+        return catalog.adminDetail(id);
     }
 
     @Transactional
@@ -59,16 +71,27 @@ public class AdminEventService {
         Event e = events.findById(id).orElseThrow(() -> new NotFoundException("Event", id));
         e.setStatus(EventStatus.fromCode(status));
         e.setUpdatedAt(Instant.now());
-        return catalog.detail(id.toString());
+        return catalog.adminDetail(id);
     }
 
     @Transactional
     public void delete(Long id) {
         Event e = events.findById(id).orElseThrow(() -> new NotFoundException("Event", id));
+        // Deliberately counts orders in every status, expired and cancelled included: orders
+        // reference the event, order_items reference its seats, and payments and tickets hang
+        // off those orders, all with plain foreign keys. A cancelled order can still carry a
+        // captured-then-refunded payment, so clearing the way would mean deleting sales history.
         if (orders.existsByEventId(id)) {
             throw new ConflictException("EVENT_HAS_ORDERS",
-                    "Event has orders; set status to cancelled instead of deleting");
+                    "Event has orders (expired and cancelled ones included), which are kept as the sales "
+                            + "record; set its status to cancelled instead of deleting it");
         }
+        // Seating layouts are create-only, so deleting the event is the only way back
+        // from a mis-built one. The schema declares plain foreign keys with no cascade,
+        // so the layout has to come away by hand, innermost first.
+        seats.deleteByEventId(id);
+        sections.deleteByEventId(id);
+        tiers.deleteByEventId(id);
         events.delete(e);
     }
 
@@ -77,7 +100,7 @@ public class AdminEventService {
         e.setSlug(r.slug());
         e.setSport(Sport.fromCode(r.sport()));
         e.setStartsAt(r.startsAt());
-        e.setTimeZone(r.timeZone() == null ? "UTC" : r.timeZone());
+        e.setTimeZone(zoneOrThrow(r.timeZone()));
         e.setVenue(r.venue());
         e.setCity(r.city());
         e.setCountry(r.country());
@@ -94,6 +117,29 @@ public class AdminEventService {
                 : teams.findById(r.homeTeamId()).orElseThrow(() -> new NotFoundException("Team", r.homeTeamId())));
         e.setAwayTeam(r.awayTeamId() == null ? null
                 : teams.findById(r.awayTeamId()).orElseThrow(() -> new NotFoundException("Team", r.awayTeamId())));
+    }
+
+    /**
+     * The time zone is a free-text field, but it is read back as a {@link ZoneId} when an
+     * event is summarised. An unparseable one is not merely this request's problem: stored,
+     * it would throw on every later read of the event, including the public catalog. So it
+     * is rejected here, where the caller can still be told which field was wrong.
+     *
+     * <p>{@code ZoneId.of} signals a bad zone with {@link DateTimeException}, which is not an
+     * {@code IllegalArgumentException} and so would otherwise land on the 500 handler.
+     */
+    private static String zoneOrThrow(String timeZone) {
+        if (timeZone == null || timeZone.isBlank()) {
+            return "UTC";
+        }
+        String tz = timeZone.trim();
+        try {
+            ZoneId.of(tz);
+        } catch (DateTimeException ex) {
+            throw new IllegalArgumentException(
+                    "Unknown time zone '" + tz + "'; expected an IANA zone id such as Asia/Colombo or UTC");
+        }
+        return tz;
     }
 
     private void save(Event e) {

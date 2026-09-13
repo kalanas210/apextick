@@ -16,6 +16,7 @@ import com.apextick.booking.support.TestTokens;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
@@ -40,9 +41,10 @@ class SeatsLostCompensationTest {
     @Autowired OrderRepository orderRepository;
     @Autowired EventRepository eventRepository;
     @Autowired SeatRepository seatRepository;
+    @Autowired JdbcClient jdbc;
 
     @Test
-    void paying_after_the_hold_was_lost_cancels_the_order_and_flags_a_refund() throws Exception {
+    void paying_after_the_hold_was_lost_cancels_the_order_and_refunds_the_charge() throws Exception {
         Long eventId = eventRepository.findBySlug(SLUG).orElseThrow().getId();
         List<Long> seatIds = seatRepository.findAllForEventWithLayout(eventId).stream()
                 .filter(s -> s.getStatus() == SeatStatus.AVAILABLE).map(Seat::getId).limit(2).toList();
@@ -53,15 +55,23 @@ class SeatsLostCompensationTest {
         OrderResponse order = orderService.create(new CreateOrderRequest(eventId, seatIds),
                 "lost-order-" + System.nanoTime(), user);
 
-        // simulate the hold being lost between order creation and payment
-        holdService.releaseMine(SLUG, user);
+        // Lose the hold between order creation and payment the way it really happens: the
+        // deadline passes, the Redis TTL lapses and the expiry listener frees the seats. (Not
+        // releaseMine -- that now refuses seats an unpaid order still covers, which is the
+        // point of ORDER_PENDING.)
+        seatIds.forEach(id -> jdbc.sql("UPDATE seats SET held_until = now() - INTERVAL '1 minute' WHERE id = :id")
+                .param("id", id).update());
+        seatIds.forEach(holdService::releaseExpired);
+        assertThat(seatRepository.findAllForEventWithLayout(eventId).stream()
+                .filter(s -> seatIds.contains(s.getId())))
+                .allMatch(s -> s.getStatus() == SeatStatus.AVAILABLE);
 
         mvc.perform(post("/api/orders/" + order.id() + "/pay")
                         .header("Authorization", "Bearer " + TestTokens.user(sub, "lostbuyer", "lost@apextick.local"))
                         .header("Idempotency-Key", UUID.randomUUID().toString())
                         .contentType(MediaType.APPLICATION_JSON).content(VISA_OK))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.status").value("REFUND_REQUIRED"))
+                .andExpect(jsonPath("$.status").value("REFUNDED"))
                 .andExpect(jsonPath("$.failureCode").value("seats_lost"))
                 .andExpect(jsonPath("$.order.status").value("CANCELLED"));
 

@@ -1,9 +1,15 @@
 /**
  * Wire types for the booking API (`booking-service`). These mirror the Java DTOs
- * exactly; the presentation types for the static catalog live in `data/types.ts`.
+ * exactly, and are the only catalog types the app has: every page renders from
+ * what the API returns.
  */
 
 export type SeatStatus = 'AVAILABLE' | 'HELD' | 'BOOKED';
+export type Sport = 'cricket' | 'football';
+export type Currency = 'INR' | 'GBP' | 'USD';
+/** Serialized as the hyphenated code, not the enum name. */
+export type EventStatus =
+    | 'onsale' | 'selling-fast' | 'final-release' | 'sold-out' | 'draft' | 'cancelled';
 export type OrderStatus = 'PENDING_PAYMENT' | 'PAID' | 'CANCELLED' | 'EXPIRED';
 export type TicketStatus = 'ISSUED' | 'USED' | 'CANCELLED';
 export type PaymentStatus =
@@ -48,20 +54,74 @@ export interface Section {
     available: number;
 }
 
-export interface EventDetail {
+export interface Team {
+    id: number;
+    name: string;
+    /** The API renames Java's shortCode to `short` on the wire. */
+    short: string;
+    monogram: string | null;
+    color: string | null;
+    flag: string | null;
+    logo: string | null;
+}
+
+export interface Series {
     id: number;
     slug: string;
     name: string;
+    shortName: string | null;
+    sport: Sport;
+    tint: string | null;
+    kicker: string | null;
+    blurb: string | null;
+    /** The longer editorial paragraph the series band on the home page runs. */
+    story: string | null;
+    image: string | null;
+    mobileHeroImage: string | null;
+    currency: Currency;
+    currencySymbol: string;
+    cities: string[];
+    scale: string | null;
+}
+
+/** A row in either event list: the public catalog and the admin one share this shape. */
+export interface EventSummary {
+    id: number;
+    slug: string;
+    name: string;
+    seriesId: number | null;
+    seriesSlug: string | null;
+    sport: Sport;
+    home: Team | null;
+    away: Team | null;
     startsAt: string;
+    /** Rendered in the event's own timeZone, not the viewer's. */
+    date: string;
+    time: string;
     timeZone: string;
     stadium: string;
-    city: string;
-    country: string;
-    status: string;
-    currency: 'INR' | 'GBP' | 'USD';
+    city: string | null;
+    country: string | null;
+    stage: string | null;
+    status: EventStatus;
+    image: string | null;
+    blurb: string | null;
+    currency: Currency;
     currencySymbol: string;
+    fromPrice: number | null;
     availableSeats: number;
     totalSeats: number;
+    salesStartAt: string | null;
+    salesEndAt: string | null;
+}
+
+/**
+ * Event detail. The API builds it from the summary and adds the series and the
+ * layout, so it carries every summary field — `date`, `time`, `seriesSlug` and
+ * `fromPrice` included, which the storefront renders and this type used to hide.
+ */
+export interface EventDetail extends EventSummary {
+    series: Series | null;
     tiers: PriceTier[];
     sections: Section[];
 }
@@ -108,6 +168,8 @@ export interface Order {
 export interface Ticket {
     id: string;
     orderId: string;
+    /** The event this ticket admits to, and the only one. */
+    eventId: number;
     status: TicketStatus;
     qrToken: string;
     issuedAt: string;
@@ -155,5 +217,105 @@ export interface ProblemDetail {
     detail?: string;
     code?: string;
     seatIds?: number[];
-    fieldErrors?: Record<string, string>;
+    /** One entry per rejected field; not a map — the API sends a list. */
+    fieldErrors?: { field: string; message: string }[];
+    retryAfterSeconds?: number;
+    correlationId?: string;
+    /** On TICKET_ALREADY_USED: when the ticket was first scanned. */
+    usedAt?: string;
+}
+
+/** The API's pagination envelope. `page` is zero-based. */
+export interface PageResponse<T> {
+    content: T[];
+    page: number;
+    size: number;
+    totalElements: number;
+    totalPages: number;
+    last: boolean;
+}
+
+/** Body of POST/PUT /api/admin/events. A PUT replaces the event wholesale. */
+export interface EventUpsert {
+    name: string;
+    slug: string;
+    sport: Sport;
+    seriesId: number | null;
+    homeTeamId: number | null;
+    awayTeamId: number | null;
+    /** ISO-8601 instant, e.g. `2027-01-01T18:00:00Z`. */
+    startsAt: string;
+    timeZone: string | null;
+    venue: string;
+    city: string | null;
+    country: string | null;
+    stage: string | null;
+    status: EventStatus | null;
+    image: string | null;
+    blurb: string | null;
+    currency: Currency;
+    salesStartAt: string | null;
+    salesEndAt: string | null;
+}
+
+export interface LayoutTierSpec {
+    code: string;
+    name: string;
+    price: number;
+    perks: string[];
+    sortOrder: number;
+}
+
+export interface LayoutSectionSpec {
+    code: string;
+    name: string;
+    tierCode: string;
+    side: 'n' | 's' | 'e' | 'w';
+    /** 1..26 — row letters are generated as A..Z. */
+    rows: number;
+    seatsPerRow: number;
+    sortOrder: number;
+}
+
+export interface LayoutInput {
+    tiers: LayoutTierSpec[];
+    sections: LayoutSectionSpec[];
+}
+
+export interface LayoutResult {
+    eventId: number;
+    tiersCreated: number;
+    sectionsCreated: number;
+    seatsCreated: number;
+}
+
+export interface TierStat {
+    tierId: number;
+    tierCode: string;
+    total: number;
+    available: number;
+    held: number;
+    booked: number;
+}
+
+export interface EventStats {
+    eventId: number;
+    available: number;
+    held: number;
+    booked: number;
+    total: number;
+    revenue: number;
+    currency: Currency;
+    byTier: TierStat[];
+}
+
+export interface AdminSeat {
+    id: number;
+    label: string;
+    sectionId: number;
+    status: SeatStatus;
+    /** Keycloak `sub` of whoever holds it. */
+    heldBy: string | null;
+    heldUntil: string | null;
+    version: number;
 }

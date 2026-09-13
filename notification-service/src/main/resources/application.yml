@@ -32,9 +32,23 @@ spring:
   mail:
     host: ${SPRING_MAIL_HOST:localhost}
     port: ${SPRING_MAIL_PORT:1025}
+    # Empty by default: Mailpit accepts unauthenticated mail. A real provider
+    # (Gmail, Brevo, ...) needs both credentials and STARTTLS switched on.
+    username: ${SPRING_MAIL_USERNAME:}
+    password: ${SPRING_MAIL_PASSWORD:}
     properties:
-      mail.smtp.auth: false
-      mail.smtp.starttls.enable: false
+      mail.smtp.auth: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE:false}
+      # Once STARTTLS is on, a server that does not offer it is refused instead of
+      # being sent the login in plaintext (an attacker can strip it from EHLO).
+      mail.smtp.starttls.required: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_REQUIRED:${SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE:false}}
+      # Implicit TLS for providers on port 465; STARTTLS (587) leaves this off.
+      mail.smtp.ssl.enable: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_ENABLE:false}
+      # JavaMail waits forever by default, so a hung SMTP server would stall the
+      # consumer (and its open DB transaction) instead of failing into a retry.
+      mail.smtp.connectiontimeout: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_CONNECTIONTIMEOUT:10000}
+      mail.smtp.timeout: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_TIMEOUT:10000}
+      mail.smtp.writetimeout: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_WRITETIMEOUT:10000}
 
 management:
   endpoints:

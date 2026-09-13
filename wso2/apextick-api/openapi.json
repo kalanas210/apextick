@@ -36,6 +36,23 @@
         },
         "type": "object"
       },
+      "AdmissionsResponse": {
+        "properties": {
+          "admitted": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "eventId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "issued": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "CreateOrderRequest": {
         "properties": {
           "eventId": {
@@ -226,6 +243,18 @@
         },
         "type": "object"
       },
+      "EventStatusRequest": {
+        "properties": {
+          "status": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
       "EventSummaryResponse": {
         "properties": {
           "availableSeats": {
@@ -394,6 +423,42 @@
         ],
         "type": "object"
       },
+      "GateEventResponse": {
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "startsAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "onsale",
+              "selling-fast",
+              "final-release",
+              "sold-out",
+              "draft",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "timeZone": {
+            "type": "string"
+          },
+          "venue": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "HoldRequest": {
         "properties": {
           "seatIds": {
@@ -436,22 +501,6 @@
               "$ref": "#/components/schemas/SeatResponse"
             },
             "type": "array"
-          }
-        },
-        "type": "object"
-      },
-      "HoldSeatResponse": {
-        "properties": {
-          "heldUntil": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "seatId": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "status": {
-            "type": "string"
           }
         },
         "type": "object"
@@ -806,6 +855,42 @@
         },
         "type": "object"
       },
+      "ScanRequest": {
+        "properties": {
+          "eventId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "gate": {
+            "maxLength": 64,
+            "minLength": 0,
+            "type": "string"
+          },
+          "qrToken": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "eventId",
+          "qrToken"
+        ],
+        "type": "object"
+      },
+      "ScanResponse": {
+        "properties": {
+          "admissions": {
+            "$ref": "#/components/schemas/AdmissionsResponse"
+          },
+          "event": {
+            "$ref": "#/components/schemas/GateEventResponse"
+          },
+          "ticket": {
+            "$ref": "#/components/schemas/TicketResponse"
+          }
+        },
+        "type": "object"
+      },
       "SeatResponse": {
         "properties": {
           "col": {
@@ -1007,6 +1092,10 @@
       },
       "TicketResponse": {
         "properties": {
+          "eventId": {
+            "format": "int64",
+            "type": "integer"
+          },
           "id": {
             "type": "string"
           },
@@ -1080,6 +1169,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "held": {
+            "format": "int64",
+            "type": "integer"
+          },
           "tierCode": {
             "type": "string"
           },
@@ -1094,25 +1187,23 @@
         },
         "type": "object"
       },
-      "VerifyRequest": {
+      "UnadmitRequest": {
         "properties": {
-          "qrToken": {
-            "minLength": 1,
+          "reason": {
+            "maxLength": 255,
+            "minLength": 0,
             "type": "string"
           }
         },
         "required": [
-          "qrToken"
+          "reason"
         ],
         "type": "object"
       },
-      "VerifyResponse": {
+      "UnadmitResponse": {
         "properties": {
-          "ok": {
-            "type": "boolean"
-          },
-          "reason": {
-            "type": "string"
+          "admissions": {
+            "$ref": "#/components/schemas/AdmissionsResponse"
           },
           "ticket": {
             "$ref": "#/components/schemas/TicketResponse"
@@ -1137,6 +1228,123 @@
   "openapi": "3.1.0",
   "paths": {
     "/admin/events": {
+      "get": {
+        "operationId": "list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sport",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "seriesId",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "series",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "city",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "latest",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResponseEventSummaryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Browse every event, including drafts and cancellations",
+        "tags": [
+          "Admin: Events"
+        ]
+      },
       "post": {
         "operationId": "create_1",
         "requestBody": {
@@ -1185,6 +1393,36 @@
             "description": "OK"
           }
         },
+        "tags": [
+          "Admin: Events"
+        ]
+      },
+      "get": {
+        "operationId": "detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventDetailResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Event detail in any status, including drafts and cancellations",
         "tags": [
           "Admin: Events"
         ]
@@ -1319,10 +1557,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "type": "object"
+                "$ref": "#/components/schemas/EventStatusRequest"
               }
             }
           },
@@ -1347,7 +1582,7 @@
     },
     "/admin/orders": {
       "get": {
-        "operationId": "list_2",
+        "operationId": "list_3",
         "parameters": [
           {
             "in": "query",
@@ -1429,6 +1664,14 @@
               "format": "int64",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "admin",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
           }
         ],
         "responses": {
@@ -1448,49 +1691,43 @@
         ]
       }
     },
-    "/admin/tickets/verify": {
-      "post": {
-        "operationId": "verify",
+    "/admin/teams": {
+      "get": {
+        "operationId": "teams",
         "parameters": [
           {
             "in": "query",
-            "name": "admin",
-            "required": true,
+            "name": "sport",
+            "required": false,
             "schema": {
-              "$ref": "#/components/schemas/CurrentUser"
+              "type": "string"
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VerifyRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "content": {
               "*/*": {
                 "schema": {
-                  "$ref": "#/components/schemas/VerifyResponse"
+                  "items": {
+                    "$ref": "#/components/schemas/TeamResponse"
+                  },
+                  "type": "array"
                 }
               }
             },
             "description": "OK"
           }
         },
+        "summary": "Teams available to pick as an event's home or away side",
         "tags": [
-          "Admin: Tickets"
+          "Admin: Catalog"
         ]
       }
     },
     "/events": {
       "get": {
-        "operationId": "list_1",
+        "operationId": "list_2",
         "parameters": [
           {
             "in": "query",
@@ -1609,15 +1846,17 @@
             "description": "OK"
           }
         },
+        "security": [],
         "summary": "Browse events with filters and pagination",
         "tags": [
           "Events"
-        ]
+        ],
+        "x-auth-type": "None"
       }
     },
     "/events/{idOrSlug}": {
       "get": {
-        "operationId": "detail",
+        "operationId": "detail_1",
         "parameters": [
           {
             "in": "path",
@@ -1640,10 +1879,12 @@
             "description": "OK"
           }
         },
+        "security": [],
         "summary": "Event detail with tiers and sections",
         "tags": [
           "Events"
-        ]
+        ],
+        "x-auth-type": "None"
       }
     },
     "/events/{idOrSlug}/holds": {
@@ -1678,7 +1919,7 @@
         ]
       },
       "post": {
-        "operationId": "hold_1",
+        "operationId": "hold",
         "parameters": [
           {
             "in": "path",
@@ -1800,9 +2041,134 @@
             "description": "OK"
           }
         },
+        "security": [],
         "summary": "Seats for an event; sets mine=true for the caller's holds",
         "tags": [
           "Events"
+        ],
+        "x-auth-type": "None"
+      }
+    },
+    "/gate/events/{eventId}/admissions": {
+      "get": {
+        "operationId": "admissions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eventId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Tickets admitted to an event so far, across every gate",
+        "tags": [
+          "Gate"
+        ]
+      }
+    },
+    "/gate/scans": {
+      "post": {
+        "operationId": "scan",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "steward",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Admit the ticket behind a scanned QR code to the event this gate is admitting",
+        "tags": [
+          "Gate"
+        ]
+      }
+    },
+    "/gate/tickets/{ticketId}/unadmit": {
+      "post": {
+        "operationId": "unadmit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticketId",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "admin",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnadmitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnadmitResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Undo a mistaken admission, with a reason for the record",
+        "tags": [
+          "Gate"
         ]
       }
     },
@@ -2064,7 +2430,7 @@
     },
     "/orders/{id}/payments": {
       "get": {
-        "operationId": "list",
+        "operationId": "list_1",
         "parameters": [
           {
             "in": "path",
@@ -2163,10 +2529,12 @@
             "description": "OK"
           }
         },
+        "security": [],
         "summary": "Active payment provider + Stripe publishable key for the checkout UI",
         "tags": [
           "Payments"
-        ]
+        ],
+        "x-auth-type": "None"
       }
     },
     "/payments/stripe/webhook": {
@@ -2204,41 +2572,12 @@
             "description": "OK"
           }
         },
+        "security": [],
         "summary": "Stripe webhook (signature-verified)",
         "tags": [
           "Payments"
-        ]
-      }
-    },
-    "/seats/{seatId}/hold": {
-      "post": {
-        "operationId": "hold",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "seatId",
-            "required": true,
-            "schema": {
-              "format": "int64",
-              "type": "integer"
-            }
-          }
         ],
-        "responses": {
-          "200": {
-            "content": {
-              "*/*": {
-                "schema": {
-                  "$ref": "#/components/schemas/HoldSeatResponse"
-                }
-              }
-            },
-            "description": "OK"
-          }
-        },
-        "tags": [
-          "seat-controller"
-        ]
+        "x-auth-type": "None"
       }
     },
     "/series": {
@@ -2259,10 +2598,12 @@
             "description": "OK"
           }
         },
+        "security": [],
         "summary": "All series",
         "tags": [
           "Series"
-        ]
+        ],
+        "x-auth-type": "None"
       }
     },
     "/series/{slug}": {
@@ -2290,10 +2631,12 @@
             "description": "OK"
           }
         },
+        "security": [],
         "summary": "A single series by slug",
         "tags": [
           "Series"
-        ]
+        ],
+        "x-auth-type": "None"
       }
     },
     "/tickets/{id}": {

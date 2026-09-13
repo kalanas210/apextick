@@ -2,7 +2,9 @@ package com.apextick.booking.order;
 
 import com.apextick.booking.catalog.Event;
 import com.apextick.booking.catalog.EventRepository;
+import com.apextick.booking.catalog.SalesWindow;
 import com.apextick.booking.config.AppProperties;
+import com.apextick.booking.hold.SeatHoldKeys;
 import com.apextick.booking.order.dto.CreateOrderRequest;
 import com.apextick.booking.order.dto.OrderResponse;
 import com.apextick.booking.outbox.AfterCommit;
@@ -27,7 +29,6 @@ import com.apextick.booking.web.PageResponse;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,8 +49,17 @@ import java.util.stream.Collectors;
 @Service
 public class OrderService {
 
-    private static final String HOLD_KEY = "seat-hold:";
     private static final SecureRandom RANDOM = new SecureRandom();
+
+    /** What confirming a charge found when it reached the order. */
+    public enum Confirmation {
+        /** The seats are booked and the tickets issued. */
+        CONFIRMED,
+        /** The order had already been paid. */
+        ALREADY_PAID,
+        /** The order had expired or been cancelled, so the charge has nothing left to buy. */
+        ORDER_CLOSED
+    }
 
     private final OrderRepository orders;
     private final EventRepository events;
@@ -58,13 +68,13 @@ public class OrderService {
     private final DomainEventPublisher domainEvents;
     private final RealtimePublisher realtime;
     private final ApplicationEventPublisher appEvents;
-    private final StringRedisTemplate redis;
+    private final SeatHoldKeys holdKeys;
     private final BigDecimal feePercent;
     private final Duration paymentWindow;
 
     public OrderService(OrderRepository orders, EventRepository events, SeatRepository seats,
                         TicketRepository tickets, DomainEventPublisher domainEvents, RealtimePublisher realtime,
-                        ApplicationEventPublisher appEvents, StringRedisTemplate redis, AppProperties props) {
+                        ApplicationEventPublisher appEvents, SeatHoldKeys holdKeys, AppProperties props) {
         this.orders = orders;
         this.events = events;
         this.seats = seats;
@@ -72,7 +82,7 @@ public class OrderService {
         this.domainEvents = domainEvents;
         this.realtime = realtime;
         this.appEvents = appEvents;
-        this.redis = redis;
+        this.holdKeys = holdKeys;
         this.feePercent = props.order().feePercent();
         this.paymentWindow = props.order().paymentWindow();
     }
@@ -86,6 +96,9 @@ public class OrderService {
 
         Event event = events.findById(request.eventId())
                 .orElseThrow(() -> new NotFoundException("Event", request.eventId()));
+        // Re-checked here, not only at hold time: a hold taken while the event was on sale
+        // outlives the moment the gates close, the sale ends, or an operator marks it sold out.
+        SalesWindow.assertOpen(event);
         List<Long> seatIds = request.seatIds().stream().distinct().sorted().toList();
 
         List<Seat> held = seats.findByIdsWithLayout(seatIds);
@@ -154,7 +167,8 @@ public class OrderService {
 
     @Transactional
     public OrderResponse cancel(UUID id, CurrentUser user) {
-        Order order = orders.findByIdAndUserSub(id, user.sub())
+        Order order = orders.findByIdForUpdate(id)
+                .filter(o -> o.getUserSub().equals(user.sub()))
                 .orElseThrow(() -> new NotFoundException("Order", id));
         if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
             throw new ConflictException(ErrorCodes.ORDER_NOT_PAYABLE, "Order can no longer be cancelled");
@@ -166,26 +180,46 @@ public class OrderService {
     /** Called by the expiry sweeper. */
     @Transactional
     public void expire(UUID id) {
-        Order order = orders.findById(id).orElse(null);
+        close(id, OrderStatus.EXPIRED, "EXPIRED");
+    }
+
+    /**
+     * An admin force-released one of the order's seats, so it can never be paid. Closing it
+     * frees the rest of its seats and stops it blocking the next buyer on those.
+     */
+    @Transactional
+    public void cancelForAdminRelease(UUID id) {
+        close(id, OrderStatus.CANCELLED, "ADMIN_RELEASED");
+    }
+
+    private void close(UUID id, OrderStatus status, String reason) {
+        // locked like confirmPaid locks it, so a payment landing now waits for the close or sees it
+        Order order = orders.findByIdForUpdate(id).orElse(null);
         if (order == null || order.getStatus() != OrderStatus.PENDING_PAYMENT) {
             return;
         }
-        releaseSeatsAndClose(order, OrderStatus.EXPIRED, "EXPIRED");
+        releaseSeatsAndClose(order, status, reason);
     }
 
     /**
      * Confirms a paid order within the payment transaction: books the seats (all-or-nothing),
-     * issues tickets and emits booking.confirmed. Throws {@link SeatsLostException} if a held
-     * seat was lost before payment (triggers compensation in the caller).
+     * issues tickets and emits booking.confirmed. An order that was already paid, or has expired or
+     * been cancelled, is reported rather than refused, because the caller is holding the money for
+     * it and has to decide what happens to that. Throws {@link SeatsLostException} if a held seat
+     * was lost before payment (triggers compensation in the caller).
+     *
+     * <p>The order row is locked before any seat is touched, the same order every path that closes
+     * an order takes its locks in, so expiry, cancellation and a payment landing at the same moment
+     * wait for one another instead of deadlocking, and whichever goes second sees what the first did.
      */
     @Transactional(propagation = Propagation.MANDATORY)
-    public void confirmPaid(UUID orderId, Payment payment) {
-        Order order = orders.findById(orderId).orElseThrow(() -> new NotFoundException("Order", orderId));
+    public Confirmation confirmPaid(UUID orderId, Payment payment) {
+        Order order = orders.findByIdForUpdate(orderId).orElseThrow(() -> new NotFoundException("Order", orderId));
         if (order.getStatus() == OrderStatus.PAID) {
-            return;
+            return Confirmation.ALREADY_PAID;
         }
         if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
-            throw new ConflictException(ErrorCodes.ORDER_NOT_PAYABLE, "Order is not payable");
+            return Confirmation.ORDER_CLOSED;
         }
         List<Long> seatIds = order.getItems().stream().map(OrderItem::getSeatId).toList();
         int booked = seats.bookSeatsHeldBy(seatIds, order.getUserSub());
@@ -261,15 +295,16 @@ public class OrderService {
         List<SeatStatusChange> changes = seatIds.stream()
                 .map(sid -> new SeatStatusChange(sid, SeatStatus.BOOKED.name(), null)).toList();
         AfterCommit.run(() -> {
-            seatIds.forEach(sid -> redis.delete(HOLD_KEY + sid));
+            holdKeys.drop(seatIds);
             realtime.seatStatusChanged(eventId, changes);
         });
+        return Confirmation.CONFIRMED;
     }
 
     /** Cancels an order whose seats were lost mid-payment (compensation path). */
     @Transactional(propagation = Propagation.MANDATORY)
     public void compensateSeatsLost(UUID orderId) {
-        Order order = orders.findById(orderId).orElseThrow(() -> new NotFoundException("Order", orderId));
+        Order order = orders.findByIdForUpdate(orderId).orElseThrow(() -> new NotFoundException("Order", orderId));
         if (order.getStatus() == OrderStatus.PENDING_PAYMENT) {
             releaseSeatsAndClose(order, OrderStatus.CANCELLED, "SEATS_LOST");
         }
@@ -287,16 +322,29 @@ public class OrderService {
                 : orders.findByIdAndUserSub(id, user.sub()).orElseThrow(() -> new NotFoundException("Order", id));
     }
 
+    /** As {@link #loadOwned}, holding the order's row lock until the calling transaction ends. */
+    public Order loadOwnedForUpdate(UUID id, CurrentUser user) {
+        Order order = orders.findByIdForUpdate(id).orElseThrow(() -> new NotFoundException("Order", id));
+        if (!user.isAdmin() && !order.getUserSub().equals(user.sub())) {
+            throw new NotFoundException("Order", id);
+        }
+        return order;
+    }
+
     private void releaseSeatsAndClose(Order order, OrderStatus status, String reason) {
         List<Long> seatIds = order.getItems().stream().map(OrderItem::getSeatId).toList();
-        seats.releaseSeatsHeldBy(seatIds, order.getUserSub());
+        // Only the rows this order actually still held. An order expires at its earliest hold
+        // deadline but the sweeper runs every 30s, so by now the next buyer may already hold
+        // one of these seats; announcing it AVAILABLE, publishing seat.released for it or
+        // dropping its Redis key would be acting on someone else's hold.
+        List<Long> released = seats.releaseSeatsHeldBy(seatIds, order.getUserSub());
         order.setStatus(status);
         order.setCancelReason(reason);
         order.setCancelledAt(Instant.now());
         order.setUpdatedAt(Instant.now());
 
         Long eventId = order.getEvent().getId();
-        for (Long seatId : seatIds) {
+        for (Long seatId : released) {
             domainEvents.publish(EventTypes.SEAT_RELEASED, "seat", String.valueOf(seatId),
                     new SeatReleasedPayload(seatId, eventId, "ORDER_" + reason));
         }
@@ -310,10 +358,11 @@ public class OrderService {
         cancelPayload.put("reason", reason);
         domainEvents.publish(EventTypes.ORDER_CANCELLED, "order", order.getId().toString(), cancelPayload);
 
-        List<SeatStatusChange> changes = seatIds.stream()
+        List<SeatStatusChange> changes = released.stream()
                 .map(sid -> new SeatStatusChange(sid, SeatStatus.AVAILABLE.name(), null)).toList();
+        String userSub = order.getUserSub();
         AfterCommit.run(() -> {
-            seatIds.forEach(sid -> redis.delete(HOLD_KEY + sid));
+            holdKeys.dropOwn(released, userSub);
             realtime.seatStatusChanged(eventId, changes);
         });
     }

@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.MinIOContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
@@ -16,9 +17,12 @@ class S3TicketStorageTest {
 
     private static final String BUCKET = "apextick-tickets";
 
+    // MinIO withdrew its Docker Hub repository, so the same release is pulled from
+    // quay.io; Testcontainers still has to be told it stands in for minio/minio.
     @Container
-    static final MinIOContainer MINIO =
-            new MinIOContainer("minio/minio:RELEASE.2025-09-07T16-13-09Z");
+    static final MinIOContainer MINIO = new MinIOContainer(
+            DockerImageName.parse("quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z")
+                    .asCompatibleSubstituteFor("minio/minio"));
 
     private static S3TicketStorage storage() {
         StorageProperties props = new StorageProperties(new StorageProperties.S3(

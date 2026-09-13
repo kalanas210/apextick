@@ -7,6 +7,7 @@ public final class EventTypes {
     public static final String BOOKING_CONFIRMED = "booking.confirmed";
     public static final String ORDER_CANCELLED = "order.cancelled";
     public static final String TICKET_USED = "ticket.used";
+    public static final String TICKET_UNADMITTED = "ticket.unadmitted";
 
     private EventTypes() {
     }

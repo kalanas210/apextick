@@ -11,11 +11,8 @@ import com.apextick.booking.payment.model.PaymentCard;
 import com.apextick.booking.security.CurrentUser;
 import com.apextick.booking.seat.Seat;
 import com.apextick.booking.seat.SeatRepository;
-import com.apextick.booking.seat.SeatStatus;
 import com.apextick.booking.support.IntegrationTest;
 import com.apextick.booking.support.TestTokens;
-import com.apextick.booking.ticket.Ticket;
-import com.apextick.booking.ticket.TicketRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,7 +38,6 @@ class AdminApiTest {
     @Autowired HoldService holdService;
     @Autowired OrderService orderService;
     @Autowired PaymentService paymentService;
-    @Autowired TicketRepository ticketRepository;
 
     private final ObjectMapper json = new ObjectMapper();
 
@@ -83,35 +79,49 @@ class AdminApiTest {
                 .andExpect(jsonPath("$[0].status").value("AVAILABLE"));
     }
 
+    /** Per-tier stats used to report booked as total - available, so a hold counted as a sale. */
     @Test
-    void admin_verifies_a_ticket_once_then_rejects_reuse() throws Exception {
-        String slug = "australia-england-super-8";
-        Long eventId = eventRepository.findBySlug(slug).orElseThrow().getId();
-        List<Long> seatIds = seatRepository.findAllForEventWithLayout(eventId).stream()
-                .filter(s -> s.getStatus() == SeatStatus.AVAILABLE).map(Seat::getId).limit(1).toList();
+    void tier_stats_count_held_and_booked_seats_separately() throws Exception {
+        String slug = "admin-tier-stats-" + System.nanoTime();
+        Map<String, Object> event = Map.of(
+                "name", "Tier Stats", "slug", slug, "sport", "football", "status", "onsale",
+                "startsAt", "2027-01-01T18:00:00Z", "venue", "Test Arena", "currency", "USD");
+        String created = mvc.perform(post("/api/admin/events").header("Authorization", adminToken())
+                        .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(event)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        long eventId = json.readTree(created).get("id").asLong();
+        Map<String, Object> layout = Map.of(
+                "tiers", List.of(Map.of("code", "std", "name", "Standard", "price", 100)),
+                "sections", List.of(Map.of("code", "main", "name", "Main", "tierCode", "std",
+                        "side", "n", "rows", 2, "seatsPerRow", 2)));
+        mvc.perform(post("/api/admin/events/" + eventId + "/layout").header("Authorization", adminToken())
+                        .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(layout)))
+                .andExpect(status().isCreated());
 
-        String sub = "verify-buyer";
-        CurrentUser buyer = new CurrentUser(sub, "verifybuyer", "vb@apextick.local", "Verify Buyer", Set.of("user"));
-        holdService.hold(slug, seatIds, buyer);
-        OrderResponse order = orderService.create(new CreateOrderRequest(eventId, seatIds),
-                "verify-order-" + System.nanoTime(), buyer);
+        List<Long> seatIds = seatRepository.findByEventIdOrderByIdAsc(eventId).stream().map(Seat::getId).toList();
+        CurrentUser holder = new CurrentUser("tier-holder", "tierholder", "th@apextick.local", "Tier Holder", Set.of("user"));
+        holdService.hold(slug, List.of(seatIds.get(0)), holder);
+
+        CurrentUser buyer = new CurrentUser("tier-buyer", "tierbuyer", "tb@apextick.local", "Tier Buyer", Set.of("user"));
+        List<Long> bought = List.of(seatIds.get(1));
+        holdService.hold(slug, bought, buyer);
+        OrderResponse order = orderService.create(new CreateOrderRequest(eventId, bought),
+                "tier-order-" + System.nanoTime(), buyer);
         paymentService.pay(UUID.fromString(order.id()),
-                new PayRequest(new PaymentCard("4242424242424242", 12, 2030, "123", "H"), null, null, null),
-                "verify-pay-" + System.nanoTime(), buyer);
+                new PayRequest(new PaymentCard("4242424242424242", 12, 2030, "123", "T"), null, null, null),
+                "tier-pay-" + System.nanoTime(), buyer);
 
-        Ticket ticket = ticketRepository.findByOrderId(UUID.fromString(order.id())).get(0);
-        String verifyBody = json.writeValueAsString(Map.of("qrToken", ticket.getQrToken()));
-
-        mvc.perform(post("/api/admin/tickets/verify").header("Authorization", adminToken())
-                        .contentType(MediaType.APPLICATION_JSON).content(verifyBody))
+        mvc.perform(get("/api/admin/events/" + eventId + "/stats").header("Authorization", adminToken()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.ok").value(true))
-                .andExpect(jsonPath("$.ticket.status").value("USED"));
-
-        mvc.perform(post("/api/admin/tickets/verify").header("Authorization", adminToken())
-                        .contentType(MediaType.APPLICATION_JSON).content(verifyBody))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("TICKET_ALREADY_USED"));
+                .andExpect(jsonPath("$.available").value(2))
+                .andExpect(jsonPath("$.held").value(1))
+                .andExpect(jsonPath("$.booked").value(1))
+                .andExpect(jsonPath("$.byTier[0].tierCode").value("std"))
+                .andExpect(jsonPath("$.byTier[0].total").value(4))
+                .andExpect(jsonPath("$.byTier[0].available").value(2))
+                .andExpect(jsonPath("$.byTier[0].held").value(1))
+                .andExpect(jsonPath("$.byTier[0].booked").value(1));
     }
 
     @Test

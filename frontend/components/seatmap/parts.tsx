@@ -34,13 +34,17 @@ export function Seat({
   seat,
   selected,
   onToggle,
+  locked = false,
 }: {
   seat: MapSeat;
   selected: boolean;
   onToggle: (id: string) => void;
+  /** The whole map is closed for sales — the seat still reads, it just cannot be picked. */
+  locked?: boolean;
 }) {
   const color = tierColor(seat.tierId);
-  const disabled = seat.state !== "available";
+  const pickable = seat.state === "available" && !locked;
+  const disabled = !pickable;
 
   let style: CSSProperties = {
     width: "var(--seat)",
@@ -70,7 +74,9 @@ export function Seat({
       disabled={disabled}
       aria-pressed={selected}
       aria-label={`${seat.sectionName} seat ${seat.label}, ${
-        seat.state === "available" ? `available, ${seat.tierName}` : seat.state
+        seat.state === "available"
+          ? `${locked ? "not on sale" : "available"}, ${seat.tierName}`
+          : seat.state
       }`}
       title={`${seat.sectionName} ${seat.label} · ${seat.tierName}`}
       onClick={() => onToggle(seat.id)}
@@ -79,8 +85,8 @@ export function Seat({
         "rounded-[3px] border transition-transform duration-150",
         seat.state === "sold" && "opacity-40",
         seat.state === "held" && "animate-pulse cursor-not-allowed",
-        seat.state === "available" &&
-          "cursor-pointer hover:scale-[1.18] hover:brightness-125",
+        locked && seat.state === "available" && "cursor-not-allowed opacity-70",
+        pickable && "cursor-pointer hover:scale-[1.18] hover:brightness-125",
         selected && "scale-[1.12] ring-2 ring-bone ring-offset-1 ring-offset-ink",
       )}
     />
@@ -97,6 +103,7 @@ export function Stand({
   onToggle,
   highlighted,
   className,
+  locked = false,
 }: {
   name: string;
   seats: MapSeat[];
@@ -105,6 +112,8 @@ export function Stand({
   onToggle: (id: string) => void;
   highlighted: boolean;
   className?: string;
+  /** Sales are not open for this event; the stand reads but does not respond. */
+  locked?: boolean;
 }) {
   const cols = Math.max(...seats.map((s) => s.col)) + 1;
   const available = seats.filter((s) => s.state === "available").length;
@@ -125,7 +134,9 @@ export function Stand({
             {name}
           </span>
         </span>
-        <span className="tnum text-[0.6rem] text-faint">{available} open</span>
+        <span className="tnum text-[0.6rem] text-faint">
+          {locked ? `${available} unsold` : `${available} open`}
+        </span>
       </div>
       <div
         className="grid justify-center gap-[3px]"
@@ -137,6 +148,7 @@ export function Stand({
             seat={seat}
             selected={selectedIds.has(seat.id)}
             onToggle={onToggle}
+            locked={locked}
           />
         ))}
       </div>
@@ -146,7 +158,8 @@ export function Stand({
 
 /* -------------------------------- Pitch ---------------------------------- */
 
-export function Pitch({ home, away }: { home: string; away: string }) {
+/** `away` is optional: not every event on sale is a fixture between two sides. */
+export function Pitch({ home, away }: { home: string; away?: string }) {
   return (
     <div className="relative grid min-h-[110px] min-w-[140px] flex-1 place-items-center rounded-xl border border-line bg-ink">
       <div className="absolute inset-5 rounded-[36%] border border-line-2/50" />
@@ -154,7 +167,13 @@ export function Pitch({ home, away }: { home: string; away: string }) {
       <div className="absolute inset-x-5 top-1/2 h-px bg-line-2/50" />
       <div className="relative text-center">
         <div className="font-display text-sm font-semibold tracking-tight text-bone">
-          {home} <span className="text-faint">v</span> {away}
+          {home}
+          {away && (
+            <>
+              {" "}
+              <span className="text-faint">v</span> {away}
+            </>
+          )}
         </div>
         <div className="font-mono text-[0.5rem] uppercase tracking-[0.2em] text-faint">
           Field of play

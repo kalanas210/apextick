@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /** Fallback reconciliation: releases HELD seats whose TTL elapsed but whose Redis expiry was missed. */
@@ -50,17 +51,22 @@ public class HoldSweeper {
             return 0;
         }
         List<Long> ids = expired.stream().map(Seat::getId).toList();
-        int released = seats.releaseSeats(ids);
-        for (Seat s : expired) {
+        // The UPDATE re-checks the deadline against the same cutoff and reports which rows it
+        // actually moved. A seat selected a moment ago may have been booked, freed or re-held
+        // since, and announcing that one AVAILABLE would show every viewer a seat that is not
+        // free -- and tell the notification service it was released.
+        Set<Long> released = Set.copyOf(seats.releaseSeats(ids, cutoff));
+        List<Seat> freed = expired.stream().filter(s -> released.contains(s.getId())).toList();
+        for (Seat s : freed) {
             events.publish(EventTypes.SEAT_RELEASED, "seat", String.valueOf(s.getId()),
                     new SeatReleasedPayload(s.getId(), s.getEventId(), "EXPIRED"));
         }
-        Map<Long, List<SeatStatusChange>> byEvent = expired.stream().collect(Collectors.groupingBy(
+        Map<Long, List<SeatStatusChange>> byEvent = freed.stream().collect(Collectors.groupingBy(
                 Seat::getEventId,
                 Collectors.mapping(s -> new SeatStatusChange(s.getId(), SeatStatus.AVAILABLE.name(), null),
                         Collectors.toList())));
         AfterCommit.run(() -> byEvent.forEach(realtime::seatStatusChanged));
-        log.info("Hold sweeper released {} expired seats", released);
-        return released;
+        log.info("Hold sweeper released {} of {} expired seats", freed.size(), ids.size());
+        return freed.size();
     }
 }

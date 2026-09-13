@@ -17,11 +17,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /** Applies a seating layout to an event: creates tiers + sections, then generates the seats. */
 @Service
 public class LayoutService {
+
+    private static final Set<String> SIDES = Set.of("n", "s", "e", "w");
 
     private final EventRepository events;
     private final PriceTierRepository tiers;
@@ -70,12 +74,13 @@ public class LayoutService {
                 throw new UnprocessableException("INVALID_SECTION",
                         "rows must be 1..26 and seatsPerRow >= 1 for section " + s.code());
             }
+            String side = side(s);
             Section section = new Section();
             section.setEvent(event);
             section.setCode(s.code());
             section.setName(s.name());
             section.setTier(tiers.getReferenceById(tierId));
-            section.setSide(s.side());
+            section.setSide(side);
             section.setRows(s.rows());
             section.setSeatsPerRow(s.seatsPerRow());
             section.setSortOrder(s.sortOrder() == null ? sOrder++ : s.sortOrder());
@@ -94,5 +99,21 @@ public class LayoutService {
                     .update();
         }
         return new LayoutResult(eventId, request.tiers().size(), request.sections().size(), seatsCreated);
+    }
+
+    /**
+     * The compass point a stand sits on. The seat map and the stadium diagram place a
+     * section by this and by nothing else, so an unrecognised side would render a
+     * stand nowhere -- and the column holds a single character, so anything longer
+     * used to surface as a 500 from the database instead of a complaint about the
+     * request.
+     */
+    private static String side(LayoutRequest.SectionSpec s) {
+        String side = s.side() == null ? "" : s.side().trim().toLowerCase(Locale.ROOT);
+        if (!SIDES.contains(side)) {
+            throw new UnprocessableException("INVALID_SECTION",
+                    "side must be one of n, s, e, w for section " + s.code());
+        }
+        return side;
     }
 }

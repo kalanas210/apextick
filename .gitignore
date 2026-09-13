@@ -18,6 +18,8 @@ out/
 .idea/
 *.iml
 .vscode/
+# local agent config, launch profiles and throwaway worktrees
+.claude/
 
 # OS / logs
 .DS_Store

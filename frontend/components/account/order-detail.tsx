@@ -162,7 +162,7 @@ function Order({ orderId }: { orderId: string }) {
                   <span className="tnum text-muted"> · {item.label}</span>
                 </span>
                 <span className="tnum text-[0.84rem] text-bone">
-                  {formatPrice(item.unitPrice, order.currency)}
+                  {formatPrice(item.unitPrice, order.currency, { keepMinorUnits: true })}
                 </span>
               </li>
             ))}
@@ -170,16 +170,20 @@ function Order({ orderId }: { orderId: string }) {
           <dl className="mt-5 space-y-2 border-t border-line pt-5 text-[0.86rem]">
             <div className="flex justify-between text-muted">
               <dt>Subtotal</dt>
-              <dd className="tnum text-bone">{formatPrice(order.subtotal, order.currency)}</dd>
+              <dd className="tnum text-bone">
+                {formatPrice(order.subtotal, order.currency, { keepMinorUnits: true })}
+              </dd>
             </div>
             <div className="flex justify-between text-muted">
               <dt>Booking fee</dt>
-              <dd className="tnum text-bone">{formatPrice(order.fee, order.currency)}</dd>
+              <dd className="tnum text-bone">
+                {formatPrice(order.fee, order.currency, { keepMinorUnits: true })}
+              </dd>
             </div>
             <div className="mt-1 flex items-baseline justify-between border-t border-line pt-3">
               <dt className="font-display text-base text-bone">Total</dt>
               <dd className="tnum text-xl text-bone">
-                {formatPrice(order.total, order.currency)}
+                {formatPrice(order.total, order.currency, { keepMinorUnits: true })}
               </dd>
             </div>
           </dl>
