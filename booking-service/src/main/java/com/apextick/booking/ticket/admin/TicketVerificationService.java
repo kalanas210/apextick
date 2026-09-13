@@ -28,19 +28,28 @@ public class TicketVerificationService {
     public VerifyResponse verify(String qrToken, CurrentUser admin) {
         Ticket ticket = tickets.findByQrToken(qrToken)
                 .orElseThrow(() -> new NotFoundException("Ticket for QR token not found"));
-        if (ticket.getStatus() == TicketStatus.USED) {
+        if (ticket.getStatus() == TicketStatus.CANCELLED) {
+            throw cancelled();
+        }
+        // Admission is the conditional UPDATE itself, not a read followed by a write: two
+        // turnstiles scanning the same QR code at the same moment both read ISSUED, and a
+        // read-then-write lets both of them in. Only one UPDATE can move the row off ISSUED.
+        if (tickets.admit(ticket.getId(), Instant.now(), admin.sub()) == 0) {
+            Ticket current = tickets.findById(ticket.getId()).orElseThrow();
+            if (current.getStatus() == TicketStatus.CANCELLED) {
+                throw cancelled();
+            }
             // usedAt rides along as a problem-detail member so the gate screen can say
             // "scanned 4 minutes ago" -- the question actually being asked at a turnstile.
             throw new ConflictException(ErrorCodes.TICKET_ALREADY_USED,
-                    "Ticket was already used at " + ticket.getUsedAt(),
-                    ticket.getUsedAt() == null ? Map.of() : Map.of("usedAt", ticket.getUsedAt().toString()));
+                    "Ticket was already used at " + current.getUsedAt(),
+                    current.getUsedAt() == null ? Map.of() : Map.of("usedAt", current.getUsedAt().toString()));
         }
-        if (ticket.getStatus() == TicketStatus.CANCELLED) {
-            throw new ConflictException("TICKET_CANCELLED", "Ticket has been cancelled");
-        }
-        ticket.setStatus(TicketStatus.USED);
-        ticket.setUsedAt(Instant.now());
-        ticket.setUsedBy(admin.sub());
-        return new VerifyResponse(true, TicketResponse.from(ticket), null);
+        Ticket admitted = tickets.findById(ticket.getId()).orElseThrow();
+        return new VerifyResponse(true, TicketResponse.from(admitted), null);
+    }
+
+    private static ConflictException cancelled() {
+        return new ConflictException("TICKET_CANCELLED", "Ticket has been cancelled");
     }
 }
