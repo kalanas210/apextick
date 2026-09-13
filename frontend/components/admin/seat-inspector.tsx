@@ -8,7 +8,7 @@ import { apiErrorMessage } from "@/lib/api";
 import { formatInstant } from "@/lib/format";
 import { pillClass, SEAT_TONE } from "@/lib/status";
 import { useSeatUpdates, type SeatStatusChange } from "@/lib/realtime";
-import { useAdminEvent, useAdminSeats, useReleaseSeat } from "@/hooks/useAdmin";
+import { useAdminEvent, useAdminSeats, useBlockSeat, useReleaseSeat, useUnblockSeat } from "@/hooks/useAdmin";
 import { AdminHeader } from "./admin-shell";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -21,16 +21,42 @@ import type { AdminSeat } from "@/lib/types";
 /** The endpoint returns every seat in one array, so the paging happens here. */
 const PAGE_SIZE = 50;
 
+type SeatAction = "release" | "block" | "unblock";
+
+/** What each action says before it runs, and what it says once it has. */
+const ACTION_COPY: Record<SeatAction, { title: string; confirm: string; done: string; failed: string }> = {
+  release: {
+    title: "Release this hold?",
+    confirm: "Release",
+    done: "Released",
+    failed: "Could not release that seat.",
+  },
+  block: {
+    title: "Take this seat off sale?",
+    confirm: "Block",
+    done: "Blocked",
+    failed: "Could not block that seat.",
+  },
+  unblock: {
+    title: "Put this seat back on sale?",
+    confirm: "Unblock",
+    done: "Back on sale:",
+    failed: "Could not unblock that seat.",
+  },
+};
+
 export function SeatInspector({ id }: { id: number }) {
   const queryClient = useQueryClient();
   const { data: event } = useAdminEvent(id);
   const { data: seats, isLoading, error } = useAdminSeats(id);
   const release = useReleaseSeat(id);
+  const block = useBlockSeat(id);
+  const unblock = useUnblockSeat(id);
   const { notice, show, clear } = useNotice();
 
   const [status, setStatus] = useState<string>("");
   const [page, setPage] = useState(0);
-  const [confirming, setConfirming] = useState<AdminSeat | null>(null);
+  const [confirming, setConfirming] = useState<{ seat: AdminSeat; action: SeatAction } | null>(null);
 
   // Live seat changes patch the cache in place, the way the public map does —
   // a refetch would pull the whole seat array back for a one-seat change.
@@ -79,19 +105,24 @@ export function SeatInspector({ id }: { id: number }) {
       AVAILABLE: all.filter((s) => s.status === "AVAILABLE").length,
       HELD: all.filter((s) => s.status === "HELD").length,
       BOOKED: all.filter((s) => s.status === "BOOKED").length,
+      BLOCKED: all.filter((s) => s.status === "BLOCKED").length,
     };
   }, [seats]);
 
-  const doRelease = (seat: AdminSeat) => {
+  const mutations = { release, block, unblock };
+  const busy = release.isPending || block.isPending || unblock.isPending;
+
+  const run = ({ seat, action }: { seat: AdminSeat; action: SeatAction }) => {
     clear();
-    release.mutate(seat.id, {
+    const copy = ACTION_COPY[action];
+    mutations[action].mutate(seat.id, {
       onSuccess: () => {
         setConfirming(null);
-        show("success", `Released ${seat.label}.`);
+        show("success", `${copy.done} ${seat.label}.`);
       },
       onError: (err) => {
         setConfirming(null);
-        show("error", apiErrorMessage(err, "Could not release that seat."));
+        show("error", apiErrorMessage(err, copy.failed));
       },
     });
   };
@@ -107,7 +138,7 @@ export function SeatInspector({ id }: { id: number }) {
         title="Seats"
         description={
           seats?.length
-            ? `${counts.AVAILABLE} available · ${counts.HELD} held · ${counts.BOOKED} booked`
+            ? `${counts.AVAILABLE} available · ${counts.HELD} held · ${counts.BOOKED} booked · ${counts.BLOCKED} blocked`
             : "Every seat generated for this event."
         }
         action={
@@ -136,11 +167,12 @@ export function SeatInspector({ id }: { id: number }) {
             { value: "AVAILABLE", label: "Available" },
             { value: "HELD", label: "Held" },
             { value: "BOOKED", label: "Booked" },
+            { value: "BLOCKED", label: "Blocked" },
           ]}
           className="w-44"
         />
         <p className="text-[0.78rem] text-faint">
-          Only held seats can be released — booking is undone by cancelling the order.
+          A held seat can be released and an available one blocked — a booked seat is undone by refunding its order.
         </p>
       </div>
 
@@ -201,16 +233,20 @@ export function SeatInspector({ id }: { id: number }) {
               key: "action",
               header: <span className="sr-only">Actions</span>,
               align: "right",
-              cell: (s) =>
-                s.status === "HELD" ? (
+              cell: (s) => {
+                const action: SeatAction | null =
+                  s.status === "HELD" ? "release" : s.status === "AVAILABLE" ? "block"
+                    : s.status === "BLOCKED" ? "unblock" : null;
+                return action ? (
                   <button
                     type="button"
-                    onClick={() => setConfirming(s)}
+                    onClick={() => setConfirming({ seat: s, action })}
                     className="rounded-full border border-line-2 px-3 py-1 text-[0.75rem] text-muted transition-colors hover:border-bone hover:text-bone"
                   >
-                    Release
+                    {ACTION_COPY[action].confirm}
                   </button>
-                ) : null,
+                ) : null;
+              },
             },
           ]}
         />
@@ -218,17 +254,28 @@ export function SeatInspector({ id }: { id: number }) {
 
       <ConfirmDialog
         open={confirming !== null}
-        tone="danger"
-        title="Release this hold?"
+        tone={confirming?.action === "unblock" ? "default" : "danger"}
+        title={confirming ? ACTION_COPY[confirming.action].title : ""}
         description={
-          <>
-            Seat <strong className="text-bone">{confirming?.label}</strong> goes back on sale
-            immediately, and whoever is holding it loses it mid-checkout.
-          </>
+          confirming?.action === "block" ? (
+            <>
+              Seat <strong className="text-bone">{confirming.seat.label}</strong> comes off sale: nobody can hold
+              or buy it until it is unblocked.
+            </>
+          ) : confirming?.action === "unblock" ? (
+            <>
+              Seat <strong className="text-bone">{confirming.seat.label}</strong> goes back on sale immediately.
+            </>
+          ) : (
+            <>
+              Seat <strong className="text-bone">{confirming?.seat.label}</strong> goes back on sale
+              immediately, and whoever is holding it loses it mid-checkout.
+            </>
+          )
         }
-        confirmLabel="Release"
-        busy={release.isPending}
-        onConfirm={() => confirming && doRelease(confirming)}
+        confirmLabel={confirming ? ACTION_COPY[confirming.action].confirm : "Confirm"}
+        busy={busy}
+        onConfirm={() => confirming && run(confirming)}
         onCancel={() => setConfirming(null)}
       />
     </>

@@ -27,6 +27,12 @@ export interface AdminOrderParams {
     size?: number;
 }
 
+export interface EventStatusChange {
+    status: string;
+    /** For a cancellation: the reason the event's ticket holders are told. */
+    reason?: string;
+}
+
 /** Drops empty values so the query key is stable and the URL stays clean. */
 function params(input: Record<string, string | number | undefined>) {
     return Object.fromEntries(
@@ -98,8 +104,8 @@ export function useSetEventStatus(id: number) {
     const token = useAccessToken();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (status: string) =>
-            (await api.patch<EventDetail>(`/api/admin/events/${id}/status`, { status },
+        mutationFn: async ({ status, reason }: EventStatusChange) =>
+            (await api.patch<EventDetail>(`/api/admin/events/${id}/status`, { status, reason },
                 { headers: authHeaders(token) })).data,
         onSettled: () => {
             queryClient.invalidateQueries({ queryKey: ['admin', 'events'] });
@@ -107,6 +113,10 @@ export function useSetEventStatus(id: number) {
             queryClient.invalidateQueries({ queryKey: ['event', String(id)] });
             // Going on sale (or off it) changes what the public catalog shows.
             queryClient.invalidateQueries({ queryKey: ['events'] });
+            // A cancellation refunds and cancels orders, and frees every held seat.
+            queryClient.invalidateQueries({ queryKey: ['admin', 'orders'] });
+            queryClient.invalidateQueries({ queryKey: ['admin', 'stats', id] });
+            queryClient.invalidateQueries({ queryKey: ['admin', 'seats', id] });
         },
     });
 }
@@ -250,6 +260,15 @@ export function useAdminSeats(eventId: number | undefined) {
     });
 }
 
+/** A seat changed state: this event's seat list and figures, and any seat map this tab has open. */
+function refreshSeats(queryClient: QueryClient, eventId: number) {
+    queryClient.invalidateQueries({ queryKey: ['admin', 'seats', eventId] });
+    queryClient.invalidateQueries({ queryKey: ['admin', 'stats', eventId] });
+    // Other browsers hear about this over STOMP; this tab asks directly.
+    queryClient.invalidateQueries({ queryKey: ['seats'] });
+}
+
+/** The API answers 409 SEAT_NOT_HELD for a seat that is not held. */
 export function useReleaseSeat(eventId: number) {
     const token = useAccessToken();
     const queryClient = useQueryClient();
@@ -257,12 +276,30 @@ export function useReleaseSeat(eventId: number) {
         mutationFn: async (seatId: number) =>
             (await api.post<AdminSeat>(`/api/admin/seats/${seatId}/release`, null,
                 { headers: authHeaders(token) })).data,
-        onSettled: () => {
-            queryClient.invalidateQueries({ queryKey: ['admin', 'seats', eventId] });
-            queryClient.invalidateQueries({ queryKey: ['admin', 'stats', eventId] });
-            // Other browsers hear about this over STOMP; this tab asks directly.
-            queryClient.invalidateQueries({ queryKey: ['seats'] });
-        },
+        onSettled: () => refreshSeats(queryClient, eventId),
+    });
+}
+
+/** Takes an available seat off sale; the API answers 409 for one that is held or booked. */
+export function useBlockSeat(eventId: number) {
+    const token = useAccessToken();
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (seatId: number) =>
+            (await api.post<AdminSeat>(`/api/admin/seats/${seatId}/block`, null,
+                { headers: authHeaders(token) })).data,
+        onSettled: () => refreshSeats(queryClient, eventId),
+    });
+}
+
+export function useUnblockSeat(eventId: number) {
+    const token = useAccessToken();
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (seatId: number) =>
+            (await api.post<AdminSeat>(`/api/admin/seats/${seatId}/unblock`, null,
+                { headers: authHeaders(token) })).data,
+        onSettled: () => refreshSeats(queryClient, eventId),
     });
 }
 

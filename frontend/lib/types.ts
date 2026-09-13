@@ -4,7 +4,7 @@
  * what the API returns.
  */
 
-export type SeatStatus = 'AVAILABLE' | 'HELD' | 'BOOKED';
+export type SeatStatus = 'AVAILABLE' | 'HELD' | 'BOOKED' | 'BLOCKED';
 export type Sport = 'cricket' | 'football';
 export type Currency = 'INR' | 'GBP' | 'USD';
 /** Serialized as the hyphenated code, not the enum name. */

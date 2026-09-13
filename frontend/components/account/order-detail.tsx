@@ -128,7 +128,13 @@ function Order({ orderId }: { orderId: string }) {
           </div>
         )}
 
-        {(order.status === "CANCELLED" || order.status === "EXPIRED") && (
+        {order.cancelReason === "EVENT_CANCELLED" && (
+          <p className="mt-3 max-w-md text-[0.9rem] text-muted">
+            The event itself was called off, so there are no seats to pick again. You have not been charged.
+          </p>
+        )}
+
+        {(order.status === "CANCELLED" || order.status === "EXPIRED") && order.cancelReason !== "EVENT_CANCELLED" && (
           <div className="mt-6">
             <Button href={`/events/${order.eventSlug}/seats`} size="md" arrow>
               Pick seats again

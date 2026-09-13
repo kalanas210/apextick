@@ -87,6 +87,7 @@ export const SEAT_TONE: Record<SeatStatus, string> = {
   AVAILABLE: "border-line-2 text-muted",
   HELD: "border-accent/50 text-accent",
   BOOKED: "border-line-strong text-bone",
+  BLOCKED: "border-[#ff6b6b]/40 text-[#ff6b6b]",
 };
 
 export const TICKET_TONE: Record<TicketStatus, string> = {
