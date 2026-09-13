@@ -7,6 +7,7 @@ import com.apextick.notification.mail.OutboundEmail;
 import com.apextick.notification.mail.TemplateRenderer;
 import com.apextick.notification.messaging.EventEnvelope;
 import com.apextick.notification.messaging.payload.BookingConfirmedPayload;
+import com.apextick.notification.messaging.payload.EventCancelledPayload;
 import com.apextick.notification.messaging.payload.OrderCancelledPayload;
 import com.apextick.notification.messaging.payload.PaymentRefundedPayload;
 import com.apextick.notification.messaging.payload.SeatEventPayload;
@@ -20,14 +21,21 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.Currency;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 @Service
 public class NotificationService {
 
     private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
+
+    private static final DateTimeFormatter KICKOFF = DateTimeFormatter.ofPattern("EEE d MMM yyyy, HH:mm", Locale.ENGLISH);
 
     private final IdempotentConsumer idempotent;
     private final EmailService email;
@@ -71,6 +79,11 @@ public class NotificationService {
                 logs.recordSkipped(env.eventId(), env.type(), "no recipient");
                 return;
             }
+            if ("EVENT_CANCELLED".equals(p.reason())) {
+                // its buyer hears from event.cancelled, which says the event is off and not only the order
+                logs.recordSkipped(env.eventId(), env.type(), "told by event.cancelled");
+                return;
+            }
             Map<String, Object> model = new LinkedHashMap<>();
             model.put("cancel", p);
             String subject = "Your ApexTick order " + p.orderNumber() + " was cancelled";
@@ -99,6 +112,27 @@ public class NotificationService {
             model.put("orderUrl", orderUrl(p.orderId()));
             String subject = "Your refund for ApexTick order " + p.orderNumber();
             email.send(new OutboundEmail(p.userEmail(), subject, templates.render("email/payment-refunded", model)));
+            logs.recordSent(env.eventId(), env.type(), p.userEmail(), subject);
+            meters.counter("notifications_sent_total", "type", env.type()).increment();
+        });
+        countEvent(env.type(), fresh);
+    }
+
+    /** One email per order an event cancellation touched, saying what happens to that order. */
+    public void handleEventCancelled(EventEnvelope<EventCancelledPayload> env) {
+        EventCancelledPayload p = env.payload();
+        boolean fresh = idempotent.runOnce(env.eventId(), env.type(), () -> {
+            if (!StringUtils.hasText(p.userEmail())) {
+                logs.recordSkipped(env.eventId(), env.type(), "no recipient");
+                return;
+            }
+            Map<String, Object> model = new LinkedHashMap<>();
+            model.put("cancelled", p);
+            model.put("when", kickoff(p.startsAt(), p.timeZone()));
+            model.put("amount", money(p.total(), p.currency()));
+            model.put("orderUrl", orderUrl(p.orderId()));
+            String subject = p.eventName() + " has been cancelled";
+            email.send(new OutboundEmail(p.userEmail(), subject, templates.render("email/event-cancelled", model)));
             logs.recordSent(env.eventId(), env.type(), p.userEmail(), subject);
             meters.counter("notifications_sent_total", "type", env.type()).increment();
         });
@@ -135,10 +169,25 @@ public class NotificationService {
         return currency == null ? value : currency + " " + value;
     }
 
+    /** "Sun 19 Jul 2026, 15:00": when the event was due, on its own clock rather than the mail server's. */
+    static String kickoff(Instant startsAt, String timeZone) {
+        if (startsAt == null) {
+            return "the date announced";
+        }
+        ZoneId zone;
+        try {
+            zone = ZoneId.of(timeZone == null || timeZone.isBlank() ? "UTC" : timeZone);
+        } catch (RuntimeException e) {
+            zone = ZoneOffset.UTC;
+        }
+        return KICKOFF.withZone(zone).format(startsAt);
+    }
+
     /** Why the money went back, in words for the customer rather than booking-service's codes. */
     static String refundExplanation(String reason) {
         return switch (reason == null ? "" : reason) {
             case "box_office_refund" -> "The box office refunded this order, so its tickets no longer admit anyone.";
+            case "event_cancelled" -> "The event was cancelled, so your order has been refunded in full.";
             case "seats_lost" -> "Your seats were taken before your payment could be confirmed, so the order was cancelled.";
             case "order_closed" -> "Your payment went through after the order had expired or been cancelled, "
                     + "so it could not buy the seats.";

@@ -4,9 +4,11 @@ import {
   useAdminOrder,
   useAdminOrders,
   useApplyLayout,
+  useBlockSeat,
   useRefundOrder,
   useRetryRefund,
   useSetEventStatus,
+  useUnblockSeat,
   useUpdateEvent,
 } from "./useAdmin";
 
@@ -37,6 +39,11 @@ interface QueryOptions {
 }
 
 interface MutationOptions {
+  onSettled: () => void;
+}
+
+interface CallableMutation<I> {
+  mutationFn: (input: I) => Promise<unknown>;
   onSettled: () => void;
 }
 
@@ -94,11 +101,28 @@ describe("event mutations", () => {
     expect(invalidated()).toContainEqual(["admin", "events"]);
   });
 
-  it("refresh the admin copy and the public catalog after a status change", () => {
+  it("refresh the admin copy, the public catalog and the order book after a status change", () => {
     (useSetEventStatus(7) as unknown as MutationOptions).onSettled();
 
     expect(invalidated()).toContainEqual(["admin", "event", 7]);
     expect(invalidated()).toContainEqual(["events"]);
+    // a cancellation refunds and cancels orders
+    expect(invalidated()).toContainEqual(["admin", "orders"]);
+  });
+
+  it("send a cancellation's reason with the status, for the buyers' email", async () => {
+    http.patch.mockResolvedValue({ data: { id: 7, status: "cancelled" } });
+
+    await (useSetEventStatus(7) as unknown as CallableMutation<{ status: string; reason?: string }>).mutationFn({
+      status: "cancelled",
+      reason: "Floodlight failure",
+    });
+
+    expect(http.patch).toHaveBeenCalledWith(
+      "/api/admin/events/7/status",
+      { status: "cancelled", reason: "Floodlight failure" },
+      withToken,
+    );
   });
 
   it("refresh the admin copy after a layout is generated", () => {
@@ -107,6 +131,22 @@ describe("event mutations", () => {
     // The builder switches to its read-only half on the event's own tiers.
     expect(invalidated()).toContainEqual(["admin", "event", 7]);
     expect(invalidated()).toContainEqual(["admin", "seats", 7]);
+  });
+});
+
+describe("seat mutations", () => {
+  it("block and unblock a seat, and refresh the seat list and any open seat map", async () => {
+    http.post.mockResolvedValue({ data: { id: 42, status: "BLOCKED" } });
+
+    const block = useBlockSeat(7) as unknown as CallableMutation<number>;
+    await block.mutationFn(42);
+    await (useUnblockSeat(7) as unknown as CallableMutation<number>).mutationFn(42);
+
+    expect(http.post).toHaveBeenCalledWith("/api/admin/seats/42/block", null, withToken);
+    expect(http.post).toHaveBeenCalledWith("/api/admin/seats/42/unblock", null, withToken);
+    block.onSettled();
+    expect(invalidated()).toContainEqual(["admin", "seats", 7]);
+    expect(invalidated()).toContainEqual(["seats"]);
   });
 });
 

@@ -18,6 +18,7 @@ import { AdminHeader } from "./admin-shell";
 import { EventForm } from "./event-form";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Field, Input } from "@/components/ui/field";
 import { Notice, useNotice } from "@/components/ui/notice";
 import type { EventStatus, EventUpsert } from "@/lib/types";
 
@@ -32,6 +33,8 @@ export function EventEditor({ id }: { id: number }) {
 
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
 
   if (isLoading) {
     return (
@@ -56,6 +59,7 @@ export function EventEditor({ id }: { id: number }) {
   }
 
   const hasLayout = (event.tiers?.length ?? 0) > 0 || (event.sections?.length ?? 0) > 0;
+  const cancelled = event.status === "cancelled";
 
   const save = (body: EventUpsert) => {
     setFieldErrors({});
@@ -78,10 +82,33 @@ export function EventEditor({ id }: { id: number }) {
   };
 
   const changeStatus = (status: EventStatus) => {
+    // cancelling refunds and cancels everything sold, so it is never one click
+    if (status === "cancelled") {
+      setConfirmCancel(true);
+      return;
+    }
     clear();
-    setStatus.mutate(status, {
+    setStatus.mutate({ status }, {
       onSuccess: () => show("success", `Now ${EVENT_LABEL[status].toLowerCase()}.`),
       onError: (err) => show("error", apiErrorMessage(err, "Could not change the status.")),
+    });
+  };
+
+  const cancelEvent = () => {
+    clear();
+    setStatus.mutate({ status: "cancelled", reason: cancelReason.trim() || undefined }, {
+      onSuccess: () => {
+        setConfirmCancel(false);
+        setCancelReason("");
+        show(
+          "success",
+          "Cancelled. Paid orders are refunded and every buyer is emailed; a refund the payment provider refuses shows under Orders as owed.",
+        );
+      },
+      onError: (err) => {
+        setConfirmCancel(false);
+        show("error", apiErrorMessage(err, "Could not cancel the event."));
+      },
     });
   };
 
@@ -152,24 +179,31 @@ export function EventEditor({ id }: { id: number }) {
             <section className="rounded-2xl border border-line bg-ink-2 p-6">
               <h2 className="kicker">Sales status</h2>
               <p className="mt-2 text-[0.78rem] text-faint">
-                Drafts and cancellations are hidden from the public catalog.
+                {cancelled
+                  ? "This event was cancelled. Its orders were refunded or cancelled, and it cannot be reopened."
+                  : "Drafts and cancellations are hidden from the public catalog. Cancelling refunds every paid order."}
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
                 {EVENT_STATUSES.map((s) => {
                   const active = event.status === s;
+                  const locked = cancelled && !active;
                   return (
                     <button
                       key={s}
                       type="button"
                       aria-pressed={active}
-                      disabled={setStatus.isPending}
+                      disabled={setStatus.isPending || locked}
                       onClick={() => !active && changeStatus(s)}
                       className={cn(
                         "rounded-full border px-3 py-1.5 font-mono text-[0.6rem] uppercase tracking-[0.14em] transition-colors",
                         active
-                          ? "border-accent bg-accent/10 text-accent"
-                          : "border-line-2 text-muted hover:border-bone hover:text-bone",
-                        setStatus.isPending && "opacity-60",
+                          ? s === "cancelled"
+                            ? "border-[#ff6b6b] bg-[#ff6b6b]/10 text-[#ff6b6b]"
+                            : "border-accent bg-accent/10 text-accent"
+                          : s === "cancelled"
+                            ? "border-[#ff6b6b]/40 text-[#ff6b6b]/80 hover:border-[#ff6b6b] hover:text-[#ff6b6b]"
+                            : "border-line-2 text-muted hover:border-bone hover:text-bone",
+                        (setStatus.isPending || locked) && "pointer-events-none opacity-40",
                       )}
                     >
                       {EVENT_LABEL[s]}
@@ -247,6 +281,45 @@ export function EventEditor({ id }: { id: number }) {
           </div>
         </aside>
       </div>
+
+      <ConfirmDialog
+        open={confirmCancel}
+        tone="danger"
+        title="Cancel this event?"
+        description={
+          <>
+            <p>
+              <strong className="text-bone">{event.name}</strong> comes off sale for good. Every paid order is
+              refunded in full
+              {stats.data && stats.data.booked > 0
+                ? ` (${stats.data.booked} booked ${stats.data.booked === 1 ? "seat" : "seats"})`
+                : ""}
+              , every unpaid order is cancelled, every hold is released, and each buyer is emailed. This cannot
+              be undone.
+            </p>
+            <Field
+              label="Reason"
+              hint="Optional. Shown to the buyers in their email."
+              className="mt-5"
+            >
+              {(a) => (
+                <Input
+                  {...a}
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  placeholder="Floodlight failure"
+                  maxLength={255}
+                />
+              )}
+            </Field>
+          </>
+        }
+        confirmLabel="Cancel the event"
+        cancelLabel="Keep it"
+        busy={setStatus.isPending}
+        onConfirm={cancelEvent}
+        onCancel={() => setConfirmCancel(false)}
+      />
 
       <ConfirmDialog
         open={confirmDelete}

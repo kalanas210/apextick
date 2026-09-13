@@ -124,7 +124,8 @@
             "enum": [
               "AVAILABLE",
               "HELD",
-              "BOOKED"
+              "BOOKED",
+              "BLOCKED"
             ],
             "type": "string"
           },
@@ -380,6 +381,11 @@
       },
       "EventStatusRequest": {
         "properties": {
+          "reason": {
+            "maxLength": 255,
+            "minLength": 0,
+            "type": "string"
+          },
           "status": {
             "minLength": 1,
             "type": "string"
@@ -1091,7 +1097,8 @@
             "enum": [
               "AVAILABLE",
               "HELD",
-              "BOOKED"
+              "BOOKED",
+              "BLOCKED"
             ],
             "type": "string"
           },
@@ -1713,6 +1720,14 @@
               "format": "int64",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "admin",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
           }
         ],
         "requestBody": {
@@ -1737,6 +1752,7 @@
             "description": "OK"
           }
         },
+        "summary": "Change an event's status; cancelling refunds and cancels everything sold for it",
         "tags": [
           "Admin: Events"
         ]
@@ -1946,6 +1962,46 @@
         ]
       }
     },
+    "/admin/seats/{id}/block": {
+      "post": {
+        "operationId": "block",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "admin",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSeatResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Take an available seat off sale: broken, or kept for the press or a wheelchair space",
+        "tags": [
+          "Admin: Seats"
+        ]
+      }
+    },
     "/admin/seats/{id}/release": {
       "post": {
         "operationId": "release_1",
@@ -1980,6 +2036,46 @@
             "description": "OK"
           }
         },
+        "tags": [
+          "Admin: Seats"
+        ]
+      }
+    },
+    "/admin/seats/{id}/unblock": {
+      "post": {
+        "operationId": "unblock",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "admin",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSeatResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Put a blocked seat back on sale",
         "tags": [
           "Admin: Seats"
         ]

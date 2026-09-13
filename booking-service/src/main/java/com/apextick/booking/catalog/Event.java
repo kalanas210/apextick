@@ -87,4 +87,11 @@ public class Event {
 
     @Column(name = "updated_at")
     private Instant updatedAt;
+
+    /** When the event was called off, and the reason its ticket holders were given. */
+    @Column(name = "cancelled_at")
+    private Instant cancelledAt;
+
+    @Column(name = "cancel_reason")
+    private String cancelReason;
 }

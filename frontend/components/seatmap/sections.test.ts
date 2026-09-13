@@ -34,9 +34,17 @@ describe("buildSections", () => {
     seat({ id: 2, label: "A10", col: 1, status: "HELD" }),
     seat({ id: 1, label: "A2", col: 0, status: "HELD", mine: true }),
     seat({ id: 3, sectionId: 12, sectionCode: "south", label: "A1", tierCode: "standard", price: 150, status: "BOOKED" }),
+    seat({ id: 5, sectionId: 12, sectionCode: "south", label: "A2", tierCode: "standard", price: 150, status: "BLOCKED" }),
     seat({ id: 4, sectionId: 99, label: "Z1" }),
   ];
   const sections = buildSections(event, seats);
+
+  it("shows a seat taken off sale as unavailable, like a sold one", () => {
+    expect(sections[1].seats.map((s) => [s.label, s.state])).toEqual([
+      ["A1", "sold"],
+      ["A2", "sold"],
+    ]);
+  });
 
   it("keeps the section code the deep links use", () => {
     expect(sections.map((s) => [s.sectionId, s.sectionCode])).toEqual([

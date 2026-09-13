@@ -177,6 +177,8 @@ class AuthorizationMatrixTest {
                 Arguments.of("DELETE", "/api/admin/events/999999999"),
                 Arguments.of("POST", "/api/admin/events/999999999/layout"),
                 Arguments.of("POST", "/api/admin/seats/999999999/release"),
+                Arguments.of("POST", "/api/admin/seats/999999999/block"),
+                Arguments.of("POST", "/api/admin/seats/999999999/unblock"),
                 Arguments.of("POST", "/api/admin/orders/00000000-0000-0000-0000-000000000000/refund"),
                 Arguments.of("POST", "/api/admin/orders/00000000-0000-0000-0000-000000000000/refund/retry"),
                 Arguments.of("POST", "/api/gate/tickets/00000000-0000-0000-0000-000000000000/unadmit"));

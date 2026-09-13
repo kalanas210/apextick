@@ -10,6 +10,7 @@ import com.apextick.booking.catalog.dto.EventSummaryResponse;
 import com.apextick.booking.catalog.dto.EventUpsertRequest;
 import com.apextick.booking.catalog.dto.LayoutRequest;
 import com.apextick.booking.catalog.dto.LayoutResult;
+import com.apextick.booking.security.CurrentUser;
 import com.apextick.booking.web.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -96,9 +97,15 @@ public class AdminEventController {
         return adminEvents.update(id, request);
     }
 
+    /**
+     * Moves an event through its statuses. Cancelling is the one move that cannot be walked back: it
+     * refunds every paid order, cancels every unpaid one, and tells their buyers the reason given here.
+     */
     @PatchMapping("/{id}/status")
-    public EventDetailResponse setStatus(@PathVariable Long id, @Valid @RequestBody EventStatusRequest request) {
-        return adminEvents.setStatus(id, request.status());
+    @Operation(summary = "Change an event's status; cancelling refunds and cancels everything sold for it")
+    public EventDetailResponse setStatus(@PathVariable Long id, @Valid @RequestBody EventStatusRequest request,
+                                         CurrentUser admin) {
+        return adminEvents.setStatus(id, request.status(), request.reason(), admin);
     }
 
     @DeleteMapping("/{id}")
