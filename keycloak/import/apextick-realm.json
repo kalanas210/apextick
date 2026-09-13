@@ -21,10 +21,9 @@
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
       "redirectUris": [
-        "http://localhost:3000/*",
-        "http://localhost:3005/*",
-        "http://host.docker.internal:3000/*",
-        "${APP_WEB_URL:http://localhost:3000}/*"
+        "${APP_WEB_URL:http://localhost:3000}/*",
+        "${DEV_PREVIEW_WEB_URL:http://localhost:3005}/*",
+        "${DEV_DOCKER_WEB_URL:http://host.docker.internal:3000}/*"
       ],
       "webOrigins": [
         "+"
