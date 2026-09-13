@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { Elements } from "@stripe/react-stripe-js";
 import { loadStripe, type Stripe } from "@stripe/stripe-js";
 import { formatPrice } from "@/lib/format";
-import { apiErrorMessage } from "@/lib/api";
+import { apiErrorMessage, apiStatus } from "@/lib/api";
+import { cardFormFor, paymentFromError, paymentOutcome, type PaymentOutcome } from "@/lib/checkout";
 import { useCancelOrder, useOrder, usePayOrder, usePaymentConfig } from "@/hooks/useBooking";
 import { RequireAuth } from "@/components/auth/require-auth";
 import { OrderSummary } from "./order-summary";
@@ -13,6 +14,7 @@ import { MockCardForm, type MockCard } from "./mock-card-form";
 import { StripeCardForm } from "./stripe-card-form";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import type { Payment } from "@/lib/types";
 
 /** Cache the Stripe.js loader per key so remounts don't refetch the script. */
 const stripeLoaders = new Map<string, Promise<Stripe | null>>();
@@ -30,6 +32,7 @@ export function CheckoutPanel({ orderId }: { orderId: string }) {
     <RequireAuth
       title="Sign in to finish checkout"
       description="Your seats are held while you sign in — you will land right back on this order."
+      expiredDescription="Sign in again to finish paying. Your seats stay held until the order's timer runs out."
     >
       <Checkout orderId={orderId} />
     </RequireAuth>
@@ -38,8 +41,8 @@ export function CheckoutPanel({ orderId }: { orderId: string }) {
 
 function Checkout({ orderId }: { orderId: string }) {
   const router = useRouter();
-  const { data: order, isLoading, error } = useOrder(orderId);
-  const { data: config } = usePaymentConfig();
+  const { data: order, isLoading, error, refetch } = useOrder(orderId);
+  const config = usePaymentConfig();
   const pay = usePayOrder(orderId);
   const cancel = useCancelOrder(orderId);
 
@@ -76,13 +79,24 @@ function Checkout({ orderId }: { orderId: string }) {
   }
 
   if (error || !order) {
+    // A lapsed session is not this branch's to explain: it swaps the page for the sign-in prompt.
+    const missing = !error || apiStatus(error) === 404;
     return (
       <div className="rounded-2xl border border-line bg-ink-2 p-8 text-center">
-        <h2 className="font-display text-xl tracking-tight">Order not found</h2>
+        <h2 className="font-display text-xl tracking-tight">
+          {missing ? "Order not found" : "Could not load this order"}
+        </h2>
         <p className="mx-auto mt-2 max-w-sm text-[0.86rem] text-muted">
-          {apiErrorMessage(error, "That order does not exist, or it is not yours.")}
+          {missing
+            ? "That order does not exist, or it is not yours."
+            : apiErrorMessage(error, "The booking service did not answer. Try again in a moment.")}
         </p>
-        <div className="mt-6 flex justify-center">
+        <div className="mt-6 flex justify-center gap-3">
+          {!missing && (
+            <Button onClick={() => void refetch()} size="md" variant="outline">
+              Try again
+            </Button>
+          )}
           <Button href="/events" size="md">
             Browse fixtures
           </Button>
@@ -92,26 +106,40 @@ function Checkout({ orderId }: { orderId: string }) {
   }
 
   const totalLabel = formatPrice(order.total, order.currency, { keepMinorUnits: true });
+  const form = cardFormFor(config.data, config.isError);
+  const stripeKey = config.data?.provider === "stripe" ? config.data.stripePublishableKey : null;
 
-  /** Sends the attempt to the API and interprets the payment status it returns. */
-  const submitPayment = async (input: { card?: MockCard; paymentMethodId?: string }) => {
+  /**
+   * Sends the attempt to the API and says what came of it. A decline answers with an error status
+   * and the payment as its body, and the payment carries the real reason, so that is what is shown.
+   */
+  const submitPayment = async (input: {
+    card?: MockCard;
+    paymentMethodId?: string;
+  }): Promise<PaymentOutcome | undefined> => {
     setFailure(null);
+    let payment: Payment | undefined;
     try {
-      const payment = await pay.mutateAsync(input);
-      if (payment.status === "SUCCEEDED") {
-        router.push(`/orders/${order.id}`);
-        return;
-      }
-      if (payment.status === "REQUIRES_ACTION") {
-        // 3-D Secure: the webhook is authoritative, so land on the order and let
-        // it settle there rather than pretending we know the outcome here.
-        router.push(`/orders/${order.id}`);
-        return;
-      }
-      setFailure(payment.failureMessage ?? "That payment did not go through.");
+      payment = await pay.mutateAsync(input);
     } catch (err) {
-      setFailure(apiErrorMessage(err, "We could not take that payment."));
+      payment = paymentFromError(err);
+      if (!payment) {
+        if (apiStatus(err) !== 401) {
+          setFailure(
+            apiErrorMessage(err, "We could not reach the payment service. Try again: one attempt is never charged twice."),
+          );
+        }
+        return undefined;
+      }
     }
+    const outcome = paymentOutcome(payment);
+    if (outcome.kind === "paid" || outcome.kind === "pending") {
+      // a pending charge is settled by Stripe's webhook, which the order page waits for
+      router.push(`/orders/${order.id}`);
+    } else if (outcome.kind === "declined" || outcome.kind === "refunded") {
+      setFailure(outcome.message);
+    }
+    return outcome;
   };
 
   /**
@@ -137,6 +165,16 @@ function Checkout({ orderId }: { orderId: string }) {
         <div className="rounded-2xl border border-line bg-ink-2 p-6">
           <h2 className="font-display text-lg font-semibold tracking-tight">Payment</h2>
 
+          {/* Above both branches: a charge refunded because the seats went has also closed the order. */}
+          {failure && (
+            <p
+              role="alert"
+              className="mt-4 rounded-lg border border-[#ff6b6b]/40 bg-[#ff6b6b]/10 px-3 py-2 text-[0.8rem] text-[#ff6b6b]"
+            >
+              {failure}
+            </p>
+          )}
+
           {expired ? (
             <div className="py-10 text-center">
               <p className="text-[0.9rem] text-muted">
@@ -152,37 +190,53 @@ function Checkout({ orderId }: { orderId: string }) {
           ) : (
             <>
               <p className="mt-1 text-[0.82rem] text-muted">
-                Paying with{" "}
-                <span className="text-bone">
-                  {config?.provider === "stripe" ? "Stripe" : "the demo gateway"}
-                </span>
-                .
+                {form === "stripe" ? (
+                  <>
+                    Paying with <span className="text-bone">Stripe</span>.
+                  </>
+                ) : form === "mock" ? (
+                  <>
+                    Paying with <span className="text-bone">the demo gateway</span>.
+                  </>
+                ) : form === "loading" ? (
+                  "Loading the payment options…"
+                ) : (
+                  "Card payments are unavailable right now."
+                )}
               </p>
 
-              {failure && (
-                <p
-                  role="alert"
-                  className="mt-4 rounded-lg border border-[#ff6b6b]/40 bg-[#ff6b6b]/10 px-3 py-2 text-[0.8rem] text-[#ff6b6b]"
-                >
-                  {failure}
-                </p>
-              )}
-
               <div className="mt-6">
-                {config?.provider === "stripe" && config.stripePublishableKey ? (
-                  <Elements stripe={stripeFor(config.stripePublishableKey)}>
+                {form === "stripe" && stripeKey ? (
+                  <Elements stripe={stripeFor(stripeKey)}>
                     <StripeCardForm
                       total={totalLabel}
                       submitting={pay.isPending}
                       onPaymentMethod={(paymentMethodId) => submitPayment({ paymentMethodId })}
+                      onAuthenticated={() => router.push(`/orders/${order.id}`)}
                     />
                   </Elements>
-                ) : (
+                ) : form === "mock" ? (
                   <MockCardForm
                     total={totalLabel}
                     submitting={pay.isPending}
-                    onSubmit={(card) => submitPayment({ card })}
+                    onSubmit={(card) => void submitPayment({ card })}
                   />
+                ) : form === "loading" ? (
+                  <div className="grid place-items-center py-10" aria-busy="true">
+                    <span className="h-6 w-6 animate-spin rounded-full border-2 border-line-2 border-t-accent" />
+                    <span className="sr-only">Loading the payment options…</span>
+                  </div>
+                ) : (
+                  <div role="alert" className="rounded-lg border border-line-2 px-4 py-6 text-center">
+                    <p className="text-[0.84rem] text-muted">
+                      The payment options could not be loaded, so no card form is shown.
+                    </p>
+                    <div className="mt-4 flex justify-center">
+                      <Button onClick={() => void config.refetch()} size="sm" variant="outline">
+                        Try again
+                      </Button>
+                    </div>
+                  </div>
                 )}
               </div>
 
