@@ -78,4 +78,11 @@ public class Payment {
 
     @Column(name = "confirmed_at")
     private Instant confirmedAt;
+
+    /** The provider's id for the refund of this charge, once one has been accepted. */
+    @Column(name = "refund_ref")
+    private String refundRef;
+
+    @Column(name = "refunded_at")
+    private Instant refundedAt;
 }

@@ -117,10 +117,10 @@ There are no `synchronized` blocks, no application-level mutexes, and no distrib
 - **Lock-free atomic concurrency**, proven at 300/300 holds with zero double-bookings under load.
 - **Self-expiring holds** — a held seat is written to Redis with a TTL. When the key expires, a Redis keyspace notification triggers the seat's release back to `AVAILABLE` — no polling loop on the happy path.
 - **Event-driven decoupling** — the booking service writes to a **transactional outbox** and publishes to a RabbitMQ topic exchange after commit; the notification service consumes independently, idempotently, with a dead-letter queue for poison messages.
-- **PCI-conscious payments** — the Stripe adapter never sees a raw card number: it creates a PaymentIntent and returns a `client_secret` for the browser to confirm, treating the signed `payment_intent.succeeded` webhook as the source of truth. Webhooks are idempotent, and a charge that lands after its seats were lost is automatically refunded.
+- **PCI-conscious payments** — the Stripe adapter never sees a raw card number: it creates a PaymentIntent and returns a `client_secret` for the browser to confirm, treating the signed `payment_intent.succeeded` webhook as the source of truth. Webhooks are idempotent, and a charge that cannot buy its order (its seats lost, the order expired or already paid, a sum other than the payment's) is refunded under a key that lets it be refunded only once. Pay attempts racing on one order take turns on the order's row, so the order is charged once however many tabs race for it.
 - **Stateless JWT security** — Keycloak issues OIDC tokens the API validates statelessly; roles map from `realm_access.roles` to `ROLE_*`. Auth keeps working containerized by fetching signing keys over the internal network while validating the public issuer.
 - **One-command infrastructure** — the whole backend, its dependencies, the Keycloak realm, and an optional observability stack start with `docker compose up`. Every secret, including the realm's client secrets, comes from a git-ignored `.env`, and the production stack refuses to start while any credential is unset.
-- **Verified** — 160 booking-service tests, most of them full-stack **Testcontainers** integration tests covering concurrency, expiry, the outbox, orders, payments, webhooks, admin, security and rate-limiting; GreenMail tests for the notification service's SMTP path (an authenticated login, and refusing a server that doesn't offer STARTTLS); Vitest unit tests for the frontend's money and status helpers, and for the admin hooks' bearer tokens and cache keys. CI also fails when the gateway's OpenAPI contract drifts from the code.
+- **Verified** — 179 booking-service tests, most of them full-stack **Testcontainers** integration tests covering concurrency, expiry, the outbox, orders, racing and resent payments, signed webhooks delivered over HTTP, admin, security and rate-limiting; GreenMail tests for the notification service's SMTP path (an authenticated login, and refusing a server that doesn't offer STARTTLS); Vitest unit tests for the frontend's money and status helpers, and for the admin hooks' bearer tokens and cache keys. CI also fails when the gateway's OpenAPI contract drifts from the code.
 
 ## Tech stack
 
@@ -253,8 +253,13 @@ The active gateway is chosen by `APP_PAYMENT_PROVIDER` (`mock` by default):
   ```bash
   curl -X POST localhost:8081/api/orders/<ORDER_ID>/pay \
     -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" \
+    -H "Idempotency-Key: <A NEW UUID>" \
     -d '{"paymentMethodId":"pm_card_visa"}'
   ```
+
+`POST /api/orders/{id}/pay` requires an `Idempotency-Key`, and a key names one payment attempt. Sending the same key again returns that attempt's result instead of charging a second time, so retrying after a dropped connection is safe; trying another card takes a new key. One attempt runs per order at a time, and a second one started meanwhile is refused with `409 PAYMENT_IN_PROGRESS`.
+
+A webhook is checked before its charge books anything. A charge whose order has expired or been cancelled, one for an order another charge already paid, one whose seats were lost, and one for a different amount or currency than its payment are all refunded and the delivery acknowledged, so Stripe never keeps redelivering an event while the customer stays charged. Each refund goes out under a key derived from its payment, so retries and redeliveries refund once, and the payment then reads `REFUNDED`, or `REFUND_REQUIRED` if Stripe refused the refund. A webhook that lands before the pay request has recorded the intent's id still finds its payment through the payment id stamped on the intent.
 
 `GET /api/payments/config` tells the frontend which provider is active and returns the Stripe publishable key.
 
@@ -332,7 +337,7 @@ After the run, `teardown` reads the seat map back and asserts every targeted sea
 (cd frontend && npm ci --ignore-scripts && npm test)
 ```
 
-booking-service runs 160 tests, most of them full-stack Testcontainers integration tests: seat concurrency (1 winner / 199 losers) over the real hold endpoint, multi-seat all-or-nothing holds, the sales window and per-user seat cap, Redis-driven expiry, the hold sweeper, the transactional outbox, the order/payment flow, Stripe signature verification and mapping, seats-lost compensation, the admin API, security, and rate limiting. Its verify also exports the served OpenAPI document to `target/openapi/api-docs.json`, which CI normalises and compares with the committed gateway contract. notification-service runs 8 (GreenMail, including an authenticated SMTP server and one that refuses STARTTLS); the frontend runs 75 Vitest unit tests.
+booking-service runs 179 tests, most of them full-stack Testcontainers integration tests: seat concurrency (1 winner / 199 losers) over the real hold endpoint, multi-seat all-or-nothing holds, the sales window and per-user seat cap, Redis-driven expiry, the hold sweeper, the transactional outbox, the order/payment flow, pay attempts racing on one order and resent under the same key, Stripe signature verification and mapping, signed Stripe webhooks delivered over HTTP (redelivered, late, duplicate, unmatched and mis-priced charges), refunds for charges an order can no longer take, the admin API, security, and rate limiting. Its verify also exports the served OpenAPI document to `target/openapi/api-docs.json`, which CI normalises and compares with the committed gateway contract. notification-service runs 8 (GreenMail, including an authenticated SMTP server and one that refuses STARTTLS); the frontend runs 75 Vitest unit tests.
 
 ## Project structure
 

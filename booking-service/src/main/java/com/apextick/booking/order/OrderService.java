@@ -51,6 +51,16 @@ public class OrderService {
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
+    /** What confirming a charge found when it reached the order. */
+    public enum Confirmation {
+        /** The seats are booked and the tickets issued. */
+        CONFIRMED,
+        /** The order had already been paid. */
+        ALREADY_PAID,
+        /** The order had expired or been cancelled, so the charge has nothing left to buy. */
+        ORDER_CLOSED
+    }
+
     private final OrderRepository orders;
     private final EventRepository events;
     private final SeatRepository seats;
@@ -157,7 +167,8 @@ public class OrderService {
 
     @Transactional
     public OrderResponse cancel(UUID id, CurrentUser user) {
-        Order order = orders.findByIdAndUserSub(id, user.sub())
+        Order order = orders.findByIdForUpdate(id)
+                .filter(o -> o.getUserSub().equals(user.sub()))
                 .orElseThrow(() -> new NotFoundException("Order", id));
         if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
             throw new ConflictException(ErrorCodes.ORDER_NOT_PAYABLE, "Order can no longer be cancelled");
@@ -182,7 +193,8 @@ public class OrderService {
     }
 
     private void close(UUID id, OrderStatus status, String reason) {
-        Order order = orders.findById(id).orElse(null);
+        // locked like confirmPaid locks it, so a payment landing now waits for the close or sees it
+        Order order = orders.findByIdForUpdate(id).orElse(null);
         if (order == null || order.getStatus() != OrderStatus.PENDING_PAYMENT) {
             return;
         }
@@ -191,17 +203,23 @@ public class OrderService {
 
     /**
      * Confirms a paid order within the payment transaction: books the seats (all-or-nothing),
-     * issues tickets and emits booking.confirmed. Throws {@link SeatsLostException} if a held
-     * seat was lost before payment (triggers compensation in the caller).
+     * issues tickets and emits booking.confirmed. An order that was already paid, or has expired or
+     * been cancelled, is reported rather than refused, because the caller is holding the money for
+     * it and has to decide what happens to that. Throws {@link SeatsLostException} if a held seat
+     * was lost before payment (triggers compensation in the caller).
+     *
+     * <p>The order row is locked before any seat is touched, the same order every path that closes
+     * an order takes its locks in, so expiry, cancellation and a payment landing at the same moment
+     * wait for one another instead of deadlocking, and whichever goes second sees what the first did.
      */
     @Transactional(propagation = Propagation.MANDATORY)
-    public void confirmPaid(UUID orderId, Payment payment) {
-        Order order = orders.findById(orderId).orElseThrow(() -> new NotFoundException("Order", orderId));
+    public Confirmation confirmPaid(UUID orderId, Payment payment) {
+        Order order = orders.findByIdForUpdate(orderId).orElseThrow(() -> new NotFoundException("Order", orderId));
         if (order.getStatus() == OrderStatus.PAID) {
-            return;
+            return Confirmation.ALREADY_PAID;
         }
         if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
-            throw new ConflictException(ErrorCodes.ORDER_NOT_PAYABLE, "Order is not payable");
+            return Confirmation.ORDER_CLOSED;
         }
         List<Long> seatIds = order.getItems().stream().map(OrderItem::getSeatId).toList();
         int booked = seats.bookSeatsHeldBy(seatIds, order.getUserSub());
@@ -280,12 +298,13 @@ public class OrderService {
             holdKeys.drop(seatIds);
             realtime.seatStatusChanged(eventId, changes);
         });
+        return Confirmation.CONFIRMED;
     }
 
     /** Cancels an order whose seats were lost mid-payment (compensation path). */
     @Transactional(propagation = Propagation.MANDATORY)
     public void compensateSeatsLost(UUID orderId) {
-        Order order = orders.findById(orderId).orElseThrow(() -> new NotFoundException("Order", orderId));
+        Order order = orders.findByIdForUpdate(orderId).orElseThrow(() -> new NotFoundException("Order", orderId));
         if (order.getStatus() == OrderStatus.PENDING_PAYMENT) {
             releaseSeatsAndClose(order, OrderStatus.CANCELLED, "SEATS_LOST");
         }
@@ -301,6 +320,15 @@ public class OrderService {
         return user.isAdmin()
                 ? orders.findById(id).orElseThrow(() -> new NotFoundException("Order", id))
                 : orders.findByIdAndUserSub(id, user.sub()).orElseThrow(() -> new NotFoundException("Order", id));
+    }
+
+    /** As {@link #loadOwned}, holding the order's row lock until the calling transaction ends. */
+    public Order loadOwnedForUpdate(UUID id, CurrentUser user) {
+        Order order = orders.findByIdForUpdate(id).orElseThrow(() -> new NotFoundException("Order", id));
+        if (!user.isAdmin() && !order.getUserSub().equals(user.sub())) {
+            throw new NotFoundException("Order", id);
+        }
+        return order;
     }
 
     private void releaseSeatsAndClose(Order order, OrderStatus status, String reason) {
