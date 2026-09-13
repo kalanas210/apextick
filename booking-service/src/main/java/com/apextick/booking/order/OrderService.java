@@ -177,6 +177,22 @@ public class OrderService {
         return toResponse(order);
     }
 
+    /**
+     * An unpaid order of an event being cancelled: closed and its seats let go, inside the
+     * cancellation's transaction. Its buyer is told by the cancellation itself.
+     *
+     * @return whether the order was still open to cancel
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean cancelForCancelledEvent(UUID id) {
+        Order order = orders.findByIdForUpdate(id).orElse(null);
+        if (order == null || order.getStatus() != OrderStatus.PENDING_PAYMENT) {
+            return false;
+        }
+        releaseSeatsAndClose(order, OrderStatus.CANCELLED, "EVENT_CANCELLED");
+        return true;
+    }
+
     /** Called by the expiry sweeper. */
     @Transactional
     public void expire(UUID id) {

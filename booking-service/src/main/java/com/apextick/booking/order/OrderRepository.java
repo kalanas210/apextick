@@ -66,6 +66,9 @@ public interface OrderRepository extends JpaRepository<Order, UUID>, JpaSpecific
 
     boolean existsByEventId(Long eventId);
 
+    @Query("select o.id from Order o where o.event.id = :eventId and o.status = :status order by o.createdAt")
+    List<UUID> findIdsByEventIdAndStatus(@Param("eventId") Long eventId, @Param("status") OrderStatus status);
+
     @Query("select coalesce(sum(o.total), 0) from Order o where o.event.id = :eventId and o.status = com.apextick.booking.order.OrderStatus.PAID")
     java.math.BigDecimal paidRevenueForEvent(@Param("eventId") Long eventId);
 }

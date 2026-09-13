@@ -128,6 +128,37 @@ public class RefundService {
         }
     }
 
+    /** What voiding one paid order of a cancelled event did. */
+    public record CancelledSale(boolean voided, UUID owedPaymentId) {
+    }
+
+    /**
+     * Voids a paid order of an event being cancelled and records its charge as owed back, inside the
+     * cancellation's transaction; the refund itself is asked for once that commits. Unlike the box
+     * office's refund, a ticket already used does not stop it: the event is off, and everyone who paid
+     * for it is owed their money.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public CancelledSale voidForCancelledEvent(UUID orderId, String cancelledBy) {
+        // the charge's row before the order's, as on every path that settles a charge
+        Payment paying = payments.findByOrderIdAndStatus(orderId, PaymentStatus.SUCCEEDED).stream()
+                .findFirst()
+                .flatMap(p -> payments.findByIdForUpdate(p.getId()))
+                .orElse(null);
+        Order order = orders.findByIdForUpdate(orderId).orElseThrow(() -> new NotFoundException("Order", orderId));
+        if (order.getStatus() != OrderStatus.PAID) {
+            return new CancelledSale(false, null);
+        }
+        orderService.markRefunded(order, cancelledBy, "Event cancelled");
+        if (paying == null || paying.getStatus() != PaymentStatus.SUCCEEDED) {
+            return new CancelledSale(true, null);
+        }
+        owe(paying, paying.getAmount(), paying.getCurrency(), "event_cancelled", "The event was cancelled");
+        // due at once: whatever the cancellation does not ask for itself, the reconciler's next pass does
+        paying.setRefundLastAttemptAt(null);
+        return new CancelledSale(true, paying.getId());
+    }
+
     private UUID decide(UUID orderId, String reason, CurrentUser admin) {
         // The charge's row before the order's, the order every path that settles a charge takes them in.
         Payment paying = payments.findByOrderIdAndStatus(orderId, PaymentStatus.SUCCEEDED).stream()
