@@ -16,6 +16,44 @@ const baseURL =
 
 export const api = axios.create({ baseURL });
 
+/* ----------------------------- lapsed sessions ----------------------------- */
+
+let refusedAuthorization: string | null = null;
+const refusalListeners = new Set<() => void>();
+
+/**
+ * Remembers the token the API last refused with a 401. A session whose token has expired and could
+ * not be renewed fails every request, and each page used to report that its own way -- a checkout
+ * with seats still held said the order did not exist. Knowing exactly which token was refused lets
+ * the session say it has lapsed, once, and clears itself the moment a fresh token replaces it.
+ */
+export function noteRefused(error: unknown): void {
+    if (!axios.isAxiosError(error) || error.response?.status !== 401) {
+        return;
+    }
+    const sent = error.config?.headers?.Authorization;
+    if (typeof sent === 'string' && sent !== refusedAuthorization) {
+        refusedAuthorization = sent;
+        refusalListeners.forEach((listener) => listener());
+    }
+}
+
+/** An external store for `useSyncExternalStore`: the Authorization header the API last refused. */
+export const refusedSessions = {
+    subscribe(listener: () => void) {
+        refusalListeners.add(listener);
+        return () => {
+            refusalListeners.delete(listener);
+        };
+    },
+    current: () => refusedAuthorization,
+};
+
+api.interceptors.response.use(undefined, (error) => {
+    noteRefused(error);
+    return Promise.reject(error);
+});
+
 /** Absolute URL for an API path — needed for links the browser follows itself (PDF downloads). */
 export function apiUrl(path: string): string {
     return `${baseURL}${path}`;
