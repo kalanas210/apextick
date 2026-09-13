@@ -1,8 +1,11 @@
 package com.apextick.booking.messaging;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.support.converter.JacksonJsonMessageConverter;
 import org.springframework.amqp.support.converter.MessageConverter;
+import org.springframework.boot.amqp.autoconfigure.RabbitTemplateCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -21,6 +24,8 @@ public class RabbitConfig {
 
     public static final String EXCHANGE = "apextick.events";
 
+    private static final Logger log = LoggerFactory.getLogger(RabbitConfig.class);
+
     @Bean
     public TopicExchange apextickExchange() {
         return new TopicExchange(EXCHANGE);
@@ -29,5 +34,16 @@ public class RabbitConfig {
     @Bean
     public MessageConverter jsonMessageConverter() {
         return new JacksonJsonMessageConverter();
+    }
+
+    /**
+     * The template is mandatory (application.yml), so an event no queue takes comes back instead of vanishing.
+     * The outbox reads each return off its own send's CorrelationData; this callback only keeps the template
+     * from logging a warning for every event nobody subscribes to yet.
+     */
+    @Bean
+    RabbitTemplateCustomizer returnedMessagesAtDebug() {
+        return template -> template.setReturnsCallback(returned -> log.debug("{} returned by the broker: {}",
+                returned.getRoutingKey(), returned.getReplyText()));
     }
 }

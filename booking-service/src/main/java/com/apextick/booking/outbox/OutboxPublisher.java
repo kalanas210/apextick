@@ -17,9 +17,13 @@ import tools.jackson.databind.node.ObjectNode;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-/** Polls the outbox and relays events to RabbitMQ with publisher confirms + backoff. */
+/**
+ * Polls the outbox and relays events to RabbitMQ with publisher confirms, and backoff. An event that must reach
+ * a queue (app.outbox.require-route) and comes back unroutable is retried like a nack rather than marked sent.
+ */
 @Component
 public class OutboxPublisher {
 
@@ -56,15 +60,25 @@ public class OutboxPublisher {
                 rabbitTemplate.send(RabbitConfig.EXCHANGE, row.type(), msg, cd);
                 CorrelationData.Confirm confirm =
                         cd.getFuture().get(props.outbox().confirmTimeout().toMillis(), TimeUnit.MILLISECONDS);
-                if (confirm != null && confirm.isAck()) {
-                    outbox.markPublished(row.id());
-                } else {
+                if (confirm == null || !confirm.isAck()) {
                     fail(row, attempts, "broker nack");
+                } else if (cd.getReturned() != null && mustRoute(row.type())) {
+                    // The broker acks a message no queue takes, too. A confirmation relayed before
+                    // notification-service had declared its queues on a new broker used to count as sent
+                    // here, and was gone; it now waits for a queue to take it.
+                    fail(row, attempts, "unroutable: no queue is bound to " + row.type());
+                } else {
+                    outbox.markPublished(row.id());
                 }
             } catch (Exception e) {
                 fail(row, attempts, e.getMessage());
             }
         }
+    }
+
+    private boolean mustRoute(String type) {
+        Set<String> required = props.outbox().requireRoute();
+        return required != null && required.contains(type);
     }
 
     private void fail(OutboxRow row, int attempts, String error) {
