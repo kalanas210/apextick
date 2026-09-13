@@ -1,7 +1,25 @@
 import Image from "next/image";
-import type { Team } from "@/data/types";
+import type { Team } from "@/lib/types";
 import { cn } from "@/lib/cn";
 import { withAlpha } from "@/lib/color";
+
+/**
+ * On the API a team carries nothing but its name for certain — an operator
+ * entering a fixture is not made to supply a badge, a colour or a monogram — so
+ * the crest has to stand up without any of them.
+ */
+const FALLBACK_COLOR = "#8b8f98";
+
+/** Initials for a side with no monogram of its own: "Real Madrid" -> "RM". */
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 3)
+    .map((word) => word[0])
+    .join("")
+    .toUpperCase();
+}
 
 interface CrestProps {
   team: Team;
@@ -57,6 +75,8 @@ export function Crest({ team, size = 56, className }: CrestProps) {
     );
   }
 
+  const color = team.color || FALLBACK_COLOR;
+
   return (
     <div
       className={cn(
@@ -66,9 +86,9 @@ export function Crest({ team, size = 56, className }: CrestProps) {
       style={{
         width: size,
         height: size,
-        borderColor: withAlpha(team.color, 0.5),
-        background: `linear-gradient(152deg, ${withAlpha(team.color, 0.2)}, ${withAlpha(
-          team.color,
+        borderColor: withAlpha(color, 0.5),
+        background: `linear-gradient(152deg, ${withAlpha(color, 0.2)}, ${withAlpha(
+          color,
           0.04,
         )})`,
       }}
@@ -76,13 +96,13 @@ export function Crest({ team, size = 56, className }: CrestProps) {
     >
       <span
         className="absolute inset-x-0 top-0 h-[3px]"
-        style={{ background: team.color }}
+        style={{ background: color }}
       />
       <span
         className="font-display font-bold leading-none"
-        style={{ color: team.color, fontSize: Math.round(size * 0.4) }}
+        style={{ color, fontSize: Math.round(size * 0.4) }}
       >
-        {team.monogram}
+        {team.monogram || initials(team.name)}
       </span>
     </div>
   );

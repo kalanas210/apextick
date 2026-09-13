@@ -15,7 +15,10 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * <p>Changeset 009 rolls the seeded season forward so the fixed 2026 dates in the 005 seed are
  * always ahead of now(); {@link CatalogSeedTest} pins that it did. But a test database is always
  * migrated seconds earlier, so that assertion is true by construction and can never see the
- * failure that matters: run once, 009 fixes only the day it ran, and about fourteen days later
+ * failure that matters: run once, 009 fixes only the day it ran, and two or three weeks later
  * the headline fixture kicks off and SalesWindow starts refusing every hold, order and payment
  * on it -- a catalog you can browse and nothing you can buy, with the suite still green.
  *
@@ -41,15 +44,31 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @IntegrationTest
 class DemoSeasonRefreshTest {
 
+    /** Each seeded fixture's kickoff on its own local calendar, exactly as 005 writes it. */
+    private static final Map<String, LocalDateTime> SEEDED_KICKOFFS = Map.ofEntries(
+            Map.entry("india-pakistan-group-stage", LocalDateTime.parse("2026-02-21T19:00")),
+            Map.entry("australia-england-super-8", LocalDateTime.parse("2026-02-26T19:00")),
+            Map.entry("south-africa-new-zealand-super-8", LocalDateTime.parse("2026-02-23T15:30")),
+            Map.entry("india-australia-semi-final", LocalDateTime.parse("2026-03-04T19:00")),
+            Map.entry("world-cup-final", LocalDateTime.parse("2026-03-08T19:00")),
+            Map.entry("mumbai-indians-chennai-super-kings", LocalDateTime.parse("2026-04-12T19:30")),
+            Map.entry("bengaluru-kolkata-night", LocalDateTime.parse("2026-04-15T19:30")),
+            Map.entry("gujarat-titans-rajasthan-royals", LocalDateTime.parse("2026-04-18T15:30")),
+            Map.entry("chennai-mumbai-return", LocalDateTime.parse("2026-04-25T19:30")),
+            Map.entry("qualifier-one", LocalDateTime.parse("2026-05-24T19:30")),
+            Map.entry("arsenal-manchester-city", LocalDateTime.parse("2026-02-22T16:30")),
+            Map.entry("liverpool-manchester-united", LocalDateTime.parse("2026-03-01T16:00")),
+            Map.entry("manchester-city-tottenham", LocalDateTime.parse("2026-03-07T15:00")),
+            Map.entry("newcastle-chelsea", LocalDateTime.parse("2026-03-14T12:30")),
+            Map.entry("aston-villa-arsenal", LocalDateTime.parse("2026-03-21T17:30")),
+            Map.entry("tottenham-chelsea-derby", LocalDateTime.parse("2026-04-04T17:30")),
+            Map.entry("usa-paraguay-group-stage", LocalDateTime.parse("2026-06-12T19:00")),
+            Map.entry("brazil-morocco-group-stage", LocalDateTime.parse("2026-06-13T16:00")),
+            Map.entry("england-croatia-group-stage", LocalDateTime.parse("2026-06-17T18:00")),
+            Map.entry("world-cup-final-2026", LocalDateTime.parse("2026-07-19T15:00")));
+
     /** Every slug changeset 009 rolls forward. */
-    private static final List<String> SEEDED_SLUGS = List.of(
-            "india-pakistan-group-stage", "australia-england-super-8", "south-africa-new-zealand-super-8",
-            "india-australia-semi-final", "world-cup-final", "mumbai-indians-chennai-super-kings",
-            "bengaluru-kolkata-night", "gujarat-titans-rajasthan-royals", "chennai-mumbai-return",
-            "qualifier-one", "arsenal-manchester-city", "liverpool-manchester-united",
-            "manchester-city-tottenham", "newcastle-chelsea", "aston-villa-arsenal",
-            "tottenham-chelsea-derby", "usa-paraguay-group-stage", "brazil-morocco-group-stage",
-            "england-croatia-group-stage", "world-cup-final-2026");
+    private static final List<String> SEEDED_SLUGS = List.copyOf(SEEDED_KICKOFFS.keySet());
 
     /** The earliest fixture, and the first thing a visitor clicks. */
     private static final String HEADLINE = "india-pakistan-group-stage";
@@ -62,13 +81,17 @@ class DemoSeasonRefreshTest {
     @Autowired HoldService holdService;
     @Autowired JdbcClient jdbc;
 
-    /** Winds the seeded season back, the way an untouched demo deployment ages into it. */
+    /**
+     * Winds the seeded season back by whole weeks, the way an untouched demo deployment ages into
+     * it: the calendar moves on, and every fixture keeps its local kickoff time and weekday.
+     */
     private void ageTheSeededSeason() {
         jdbc.sql("""
                         UPDATE events
-                           SET starts_at      = starts_at      - INTERVAL '200 days',
-                               sales_start_at = sales_start_at - INTERVAL '200 days',
-                               sales_end_at   = sales_end_at   - INTERVAL '200 days'
+                           SET starts_at      = ((starts_at AT TIME ZONE time_zone) - INTERVAL '203 days')
+                                                AT TIME ZONE time_zone,
+                               sales_start_at = sales_start_at - INTERVAL '203 days',
+                               sales_end_at   = sales_end_at   - INTERVAL '203 days'
                          WHERE slug IN (:slugs)
                         """)
                 .param("slugs", SEEDED_SLUGS)
@@ -110,9 +133,18 @@ class DemoSeasonRefreshTest {
         return eventRepository.findBySlug(slug).orElseThrow();
     }
 
+    private void assertKickoffsAsSeeded() {
+        SEEDED_KICKOFFS.forEach((slug, seededKickoff) -> {
+            Event e = seeded(slug);
+            LocalDateTime kickoff = LocalDateTime.ofInstant(e.getStartsAt(), ZoneId.of(e.getTimeZone()));
+            assertThat(kickoff.toLocalTime()).as("%s kicks off at", slug).isEqualTo(seededKickoff.toLocalTime());
+            assertThat(kickoff.getDayOfWeek()).as("%s kicks off on", slug).isEqualTo(seededKickoff.getDayOfWeek());
+        });
+    }
+
     @Test
     void a_demo_whose_season_has_expired_is_selling_again_after_a_restart() throws Exception {
-        // 005 seeds a ~148-day season, so 200 days back puts every fixture behind us
+        // 005 seeds a ~148-day season, so 29 weeks back puts every fixture behind us
         ageTheSeededSeason();
 
         assertThatThrownBy(() -> SalesWindow.assertOpen(seeded(HEADLINE)))
@@ -146,6 +178,25 @@ class DemoSeasonRefreshTest {
     }
 
     /**
+     * A kickoff time is part of the fixture, so the roll moves the calendar and never the clock:
+     * every seeded fixture keeps the local kickoff time and weekday 005 gives it -- on the database
+     * the suite migrated, and again after a restart rolls an aged season half a year forward, which
+     * for most of the year also carries the London and US fixtures across a daylight-saving change.
+     * Rolling by the raw distance to a midnight put India v Pakistan at 00:00, and rolling by a
+     * number of days that is not a number of weeks turns the Etihad's Saturday three o'clock into
+     * a Sunday.
+     */
+    @Test
+    void the_roll_forward_keeps_every_seeded_kickoff_time_and_weekday() throws Exception {
+        assertKickoffsAsSeeded();
+
+        ageTheSeededSeason();
+        boot();
+
+        assertKickoffsAsSeeded();
+    }
+
+    /**
      * The deployment that needs healing is, by definition, one already migrated by an earlier
      * revision of this file -- and a changeset whose recorded checksum no longer matches makes
      * Liquibase refuse the whole update, so the service would not start at all and nothing
@@ -166,8 +217,9 @@ class DemoSeasonRefreshTest {
     /**
      * runAlways means the roll-forward runs on every boot, so it has to converge rather than
      * accumulate: the shift is recomputed from the season's own earliest fixture each time, so
-     * booting twice must leave the season a fortnight out, not a month, and must not stretch
-     * the gaps between fixtures that give the demo its group-stage-then-semis-then-final shape.
+     * booting twice must leave the season under three weeks out, not a month, and must not
+     * stretch the gaps between fixtures that give the demo its group-stage-then-semis-then-final
+     * shape. (Two to three weeks rather than exactly two, because the roll moves in whole weeks.)
      */
     @Test
     void re_running_the_roll_forward_converges_instead_of_compounding() throws Exception {
@@ -181,6 +233,6 @@ class DemoSeasonRefreshTest {
         Instant now = Instant.now();
         assertThat(twice.get(0))
                 .isAfter(now.plus(Duration.ofDays(13)))
-                .isBefore(now.plus(Duration.ofDays(15)));
+                .isBefore(now.plus(Duration.ofDays(21)));
     }
 }

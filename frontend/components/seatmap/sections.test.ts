@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EventDetail, Seat } from "@/lib/types";
-import { buildSections, isLinkedSection } from "./sections";
+import { buildSections, bySide, isLinkedSection } from "./sections";
 
 const event = {
   tiers: [
@@ -63,6 +63,24 @@ describe("buildSections", () => {
 
   it("names each seat's tier", () => {
     expect(sections[0].seats[0].tierName).toBe("Gold");
+  });
+});
+
+describe("bySide", () => {
+  it("keeps every stand on a side, in catalog order", () => {
+    const sides = bySide([
+      { code: "north-lower", side: "n" },
+      { code: "south", side: "s" },
+      { code: "north-upper", side: "n" },
+    ]);
+    expect(sides.n.map((s) => s.code)).toEqual(["north-lower", "north-upper"]);
+    expect(sides.s.map((s) => s.code)).toEqual(["south"]);
+    expect(sides.e).toEqual([]);
+  });
+
+  it("still places a stand whose side is off the compass", () => {
+    const sides = bySide([{ code: "paddock", side: "x" }]);
+    expect(sides.n.map((s) => s.code)).toEqual(["paddock"]);
   });
 });
 

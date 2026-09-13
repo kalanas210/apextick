@@ -3,8 +3,10 @@ package com.apextick.booking.catalog;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 import org.springframework.data.jpa.domain.Specification;
 
+import java.math.BigDecimal;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -29,6 +31,28 @@ public final class EventSpecifications {
      */
     public static Specification<Event> forAdminFilter(EventFilter f) {
         return (root, query, cb) -> cb.and(filterPredicates(root, cb, f).toArray(new Predicate[0]));
+    }
+
+    /**
+     * Orders a search by its events' cheapest seat, ascending; an event with no
+     * tiers priced yet sorts last, and ties break on kickoff.
+     *
+     * <p>The value is an aggregate over another table, so it cannot be expressed as
+     * a {@code Sort} over an {@link Event} property — it goes on the query itself.
+     * Spring Data only replaces the order when the {@code Pageable} carries a sort
+     * (so the caller must pass an unsorted one), and strips orders from the count
+     * query outright, which is why the subquery costs nothing there.
+     */
+    public static Specification<Event> orderByFromPrice() {
+        return (root, query, cb) -> {
+            if (query != null) {
+                Subquery<BigDecimal> cheapest = query.subquery(BigDecimal.class);
+                Root<PriceTier> tier = cheapest.from(PriceTier.class);
+                cheapest.select(cb.min(tier.get("price"))).where(cb.equal(tier.get("event"), root));
+                query.orderBy(cb.asc(cheapest), cb.asc(root.get("startsAt")));
+            }
+            return null; // ordering only — restricts nothing
+        };
     }
 
     /** The filters both views share, so the two cannot drift apart. */

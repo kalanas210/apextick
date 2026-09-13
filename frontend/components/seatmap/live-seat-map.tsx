@@ -23,19 +23,15 @@ import {
 import { useSession } from "@/hooks/useSession";
 import type { Seat as ApiSeat } from "@/lib/types";
 import { Legend, Pitch, Stand, mmss, type MapSeat } from "./parts";
-import { buildSections, isLinkedSection, type MapSection } from "./sections";
+import { buildSections, bySide, isLinkedSection, type MapSection } from "./sections";
 import { Clock } from "@/components/ui/icons";
 
 export function LiveSeatMap({
   slug,
-  home,
-  away,
   initialTier,
   initialSection,
 }: {
   slug: string;
-  home: string;
-  away: string;
   initialTier?: string;
   initialSection?: string;
 }) {
@@ -264,11 +260,18 @@ export function LiveSeatMap({
     );
   }
 
-  const renderStand = (side: MapSection["side"], className?: string) => {
-    const sec = sections.find((s) => s.side === side);
-    if (!sec) return null;
-    return (
+  // The pitch is labelled from the event itself, so a fixture with no teams on
+  // it (a concert, a one-sided event) still reads sensibly.
+  const homeLabel = event.home?.short ?? event.name;
+  const awayLabel = event.away?.short ?? "";
+
+  // Every stand on a side, not just the first: a ground with two stands north
+  // had the second one missing from the map while its seats stayed on sale.
+  const sides = bySide(sections);
+  const renderStands = (stands: MapSection[], className?: string) =>
+    stands.map((sec) => (
       <Stand
+        key={sec.sectionId}
         name={sec.sectionName}
         seats={sec.seats}
         tierId={sec.tierId}
@@ -278,8 +281,7 @@ export function LiveSeatMap({
         className={className}
         locked={!salesOpen}
       />
-    );
-  };
+    ));
 
   const usedTierCodes = Array.from(new Set(sections.map((s) => s.tierId)));
   const legendTiers = usedTierCodes.map((code) => ({
@@ -312,13 +314,25 @@ export function LiveSeatMap({
           style={{ "--seat": "clamp(0.95rem, 3vw, 1.12rem)" } as CSSProperties}
         >
           <div className="mx-auto flex min-w-[300px] max-w-2xl flex-col items-center gap-3">
-            {renderStand("n", "w-full")}
+            {sides.n.length > 0 && (
+              <div className="flex w-full flex-col gap-3 sm:flex-row">
+                {renderStands(sides.n, "flex-1")}
+              </div>
+            )}
             <div className="flex w-full flex-col items-stretch gap-3 sm:flex-row sm:justify-center">
-              {renderStand("w")}
-              <Pitch home={home} away={away} />
-              {renderStand("e")}
+              {sides.w.length > 0 && (
+                <div className="flex flex-col gap-3">{renderStands(sides.w)}</div>
+              )}
+              <Pitch home={homeLabel} away={awayLabel} />
+              {sides.e.length > 0 && (
+                <div className="flex flex-col gap-3">{renderStands(sides.e)}</div>
+              )}
             </div>
-            {renderStand("s", "w-full")}
+            {sides.s.length > 0 && (
+              <div className="flex w-full flex-col gap-3 sm:flex-row">
+                {renderStands(sides.s, "flex-1")}
+              </div>
+            )}
           </div>
         </div>
 

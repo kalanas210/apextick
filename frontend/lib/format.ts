@@ -102,16 +102,6 @@ export function formatDate(iso: string): DateParts {
   };
 }
 
-const STATUS_COPY: Record<string, string> = {
-  onsale: "On sale",
-  "selling-fast": "Selling fast",
-  "final-release": "Final release",
-};
-
-export function statusLabel(status: string): string {
-  return STATUS_COPY[status] ?? "On sale";
-}
-
 /**
  * An absolute instant, rendered in UTC and labelled as such. Admin screens
  * compare timestamps across events in different time zones, so a single frame

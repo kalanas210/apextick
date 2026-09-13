@@ -1,19 +1,20 @@
 import Link from "next/link";
-import type { Fixture } from "@/data/types";
-import { getSeries } from "@/data/events";
+import type { EventDetail } from "@/lib/types";
 import { formatPrice } from "@/lib/format";
 import { tierColor } from "@/components/seatmap/tier-colors";
 import { Check, ArrowUpRight } from "@/components/ui/icons";
 
-export function TierPanel({ fixture }: { fixture: Fixture }) {
-  const s = getSeries(fixture.seriesId);
+/** Low enough to be worth saying out loud, measured against the tier's own size. */
+const SCARCE_SHARE = 0.12;
 
+export function TierPanel({ event }: { event: EventDetail }) {
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      {fixture.tiers.map((t) => {
-        const color = tierColor(t.id);
+      {event.tiers.map((t) => {
+        const color = tierColor(t.code);
         const soldOut = t.remaining === 0;
-        const scarce = t.remaining > 0 && t.remaining < 220;
+        // the counts are the API's own, so scarcity is measured, not invented
+        const scarce = !soldOut && t.total > 0 && t.remaining <= t.total * SCARCE_SHARE;
         return (
           <div
             key={t.id}
@@ -31,7 +32,7 @@ export function TierPanel({ fixture }: { fixture: Fixture }) {
               </div>
               <div className="text-right">
                 <span className="tnum text-[1.15rem] text-bone">
-                  {formatPrice(t.price, s.currency)}
+                  {formatPrice(t.price, event.currency)}
                 </span>
                 <span className="block text-[0.6rem] uppercase tracking-[0.14em] text-faint">
                   per seat
@@ -55,7 +56,9 @@ export function TierPanel({ fixture }: { fixture: Fixture }) {
               <span
                 className={`tnum text-[0.78rem] ${scarce ? "text-accent" : "text-faint"}`}
               >
-                {soldOut ? "Waitlist only" : `${t.remaining} remaining`}
+                {soldOut
+                  ? "No seats left"
+                  : `${t.remaining} of ${t.total} remaining`}
               </span>
               {soldOut ? (
                 <span className="font-mono text-[0.66rem] uppercase tracking-[0.16em] text-faint">
@@ -63,7 +66,7 @@ export function TierPanel({ fixture }: { fixture: Fixture }) {
                 </span>
               ) : (
                 <Link
-                  href={`/events/${fixture.slug}/seats?tier=${t.id}`}
+                  href={`/events/${event.slug}/seats?tier=${t.code}`}
                   className="group inline-flex items-center gap-1.5 font-mono text-[0.66rem] uppercase tracking-[0.16em] text-bone transition-colors hover:text-accent"
                 >
                   Select
