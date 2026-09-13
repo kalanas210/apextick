@@ -211,6 +211,7 @@ function Checkout({ orderId }: { orderId: string }) {
                     <StripeCardForm
                       total={totalLabel}
                       submitting={pay.isPending}
+                      testMode={config.data?.testMode === true}
                       onPaymentMethod={(paymentMethodId) => submitPayment({ paymentMethodId })}
                       onAuthenticated={() => router.push(`/orders/${order.id}`)}
                     />
