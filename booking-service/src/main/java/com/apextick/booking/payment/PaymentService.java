@@ -5,6 +5,9 @@ import com.apextick.booking.order.Order;
 import com.apextick.booking.order.OrderRepository;
 import com.apextick.booking.order.OrderService;
 import com.apextick.booking.order.OrderStatus;
+import com.apextick.booking.outbox.DomainEventPublisher;
+import com.apextick.booking.outbox.EventTypes;
+import com.apextick.booking.outbox.payload.PaymentFailedPayload;
 import com.apextick.booking.payment.dto.PayRequest;
 import com.apextick.booking.payment.dto.PaymentResponse;
 import com.apextick.booking.payment.model.CallbackRequest;
@@ -54,19 +57,22 @@ public class PaymentService {
     private final OrderRepository orders;
     private final OrderService orderService;
     private final RefundService refunds;
+    private final DomainEventPublisher domainEvents;
     private final PaymentGatewayRegistry registry;
     private final PaymentWebhookEventRepository webhookEvents;
     private final TransactionTemplate tx;
 
     public PaymentService(PaymentRepository payments, OrderRepository orders, OrderService orderService,
                           RefundService refunds, PaymentGatewayRegistry registry,
-                          PaymentWebhookEventRepository webhookEvents, PlatformTransactionManager txManager) {
+                          PaymentWebhookEventRepository webhookEvents, DomainEventPublisher domainEvents,
+                          PlatformTransactionManager txManager) {
         this.payments = payments;
         this.orders = orders;
         this.orderService = orderService;
         this.refunds = refunds;
         this.registry = registry;
         this.webhookEvents = webhookEvents;
+        this.domainEvents = domainEvents;
         this.tx = new TransactionTemplate(txManager);
     }
 
@@ -179,6 +185,7 @@ public class PaymentService {
                     p.setStatus(PaymentStatus.FAILED);
                     p.setFailureCode(result.failureCode());
                     p.setUpdatedAt(now);
+                    tellFailed(p, result);
                 }
             }
             // refunded in full in Stripe itself: its dashboard, or the refund asked for here reported back
@@ -210,6 +217,22 @@ public class PaymentService {
         if (order.getStatus() == OrderStatus.PAID) {
             orderService.markDisputed(order);
         }
+    }
+
+    /**
+     * A charge that failed after the buyer had moved on -- a 3-D Secure challenge left unanswered, a card
+     * the bank refused a minute later -- used to fail silently while the order ran out its window. The buyer
+     * is told, with the way back to the order while it can still be paid.
+     */
+    private void tellFailed(Payment p, PaymentResult result) {
+        Order order = p.getOrder();
+        if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
+            return;
+        }
+        domainEvents.publish(EventTypes.PAYMENT_FAILED, "payment", p.getId().toString(),
+                new PaymentFailedPayload(p.getId().toString(), order.getId().toString(), order.getOrderNumber(),
+                        order.getUserEmail(), order.getUserName(), order.getEvent().getName(), order.getTotal(),
+                        order.getCurrency(), result.failureCode(), order.getExpiresAt()));
     }
 
     /** Whether the provider took exactly the sum, in exactly the currency, the payment was recorded for. */

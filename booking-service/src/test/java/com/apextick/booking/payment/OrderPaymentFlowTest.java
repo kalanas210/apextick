@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
@@ -38,6 +39,7 @@ class OrderPaymentFlowTest {
     @Autowired OrderService orderService;
     @Autowired EventRepository eventRepository;
     @Autowired SeatRepository seatRepository;
+    @Autowired JdbcClient jdbc;
 
     private final ObjectMapper json = new ObjectMapper();
 
@@ -100,5 +102,10 @@ class OrderPaymentFlowTest {
                 .andExpect(jsonPath("$.status").value("FAILED"))
                 .andExpect(jsonPath("$.failureCode").value("card_declined"))
                 .andExpect(jsonPath("$.order.status").value("PENDING_PAYMENT"));
+
+        // the buyer is still on the page and has just been told why, so no email repeats it
+        assertThat(jdbc.sql("SELECT count(*) FROM outbox_events WHERE type = 'payment.failed' AND aggregate_id IN "
+                        + "(SELECT id::text FROM payments WHERE order_id = :orderId)")
+                .param("orderId", UUID.fromString(order.id())).query(Long.class).single()).isZero();
     }
 }

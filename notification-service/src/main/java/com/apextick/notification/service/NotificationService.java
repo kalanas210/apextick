@@ -9,6 +9,7 @@ import com.apextick.notification.messaging.EventEnvelope;
 import com.apextick.notification.messaging.payload.BookingConfirmedPayload;
 import com.apextick.notification.messaging.payload.EventCancelledPayload;
 import com.apextick.notification.messaging.payload.OrderCancelledPayload;
+import com.apextick.notification.messaging.payload.PaymentFailedPayload;
 import com.apextick.notification.messaging.payload.PaymentRefundedPayload;
 import com.apextick.notification.messaging.payload.SeatEventPayload;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -36,6 +37,10 @@ public class NotificationService {
     private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
 
     private static final DateTimeFormatter KICKOFF = DateTimeFormatter.ofPattern("EEE d MMM yyyy, HH:mm", Locale.ENGLISH);
+
+    /** A payment window is minutes long, so the time it closes is given plainly, in UTC, and said to be UTC. */
+    private static final DateTimeFormatter HELD_UNTIL =
+            DateTimeFormatter.ofPattern("HH:mm 'UTC on' d MMM", Locale.ENGLISH).withZone(ZoneOffset.UTC);
 
     private final IdempotentConsumer idempotent;
     private final EmailService email;
@@ -112,6 +117,32 @@ public class NotificationService {
             model.put("orderUrl", orderUrl(p.orderId()));
             String subject = "Your refund for ApexTick order " + p.orderNumber();
             email.send(new OutboundEmail(p.userEmail(), subject, templates.render("email/payment-refunded", model)));
+            logs.recordSent(env.eventId(), env.type(), p.userEmail(), subject);
+            meters.counter("notifications_sent_total", "type", env.type()).increment();
+        });
+        countEvent(env.type(), fresh);
+    }
+
+    /**
+     * A payment that failed after the buyer had left the checkout: a 3-D Secure challenge never answered,
+     * a card refused a minute later. The link goes back to the checkout, which says plainly whether the
+     * order can still be paid.
+     */
+    public void handlePaymentFailed(EventEnvelope<PaymentFailedPayload> env) {
+        PaymentFailedPayload p = env.payload();
+        boolean fresh = idempotent.runOnce(env.eventId(), env.type(), () -> {
+            if (!StringUtils.hasText(p.userEmail())) {
+                logs.recordSkipped(env.eventId(), env.type(), "no recipient");
+                return;
+            }
+            Map<String, Object> model = new LinkedHashMap<>();
+            model.put("failed", p);
+            model.put("amount", money(p.total(), p.currency()));
+            model.put("why", failureExplanation(p.failureCode()));
+            model.put("heldUntil", p.expiresAt() == null ? null : HELD_UNTIL.format(p.expiresAt()));
+            model.put("checkoutUrl", checkoutUrl(p.orderId()));
+            String subject = "Your payment for ApexTick order " + p.orderNumber() + " did not go through";
+            email.send(new OutboundEmail(p.userEmail(), subject, templates.render("email/payment-failed", model)));
             logs.recordSent(env.eventId(), env.type(), p.userEmail(), subject);
             meters.counter("notifications_sent_total", "type", env.type()).increment();
         });
@@ -199,10 +230,30 @@ public class NotificationService {
         };
     }
 
+    /** Why a card was refused, from the provider's decline code, in words a buyer can act on. */
+    static String failureExplanation(String code) {
+        return switch (code == null ? "" : code) {
+            case "insufficient_funds" -> "The card had insufficient funds.";
+            case "expired_card" -> "The card has expired.";
+            case "incorrect_cvc" -> "The card's security code was wrong.";
+            case "authentication_required", "payment_intent_authentication_failure" ->
+                    "Your bank's security check was not completed.";
+            case "card_declined", "generic_decline", "do_not_honor" -> "Your bank declined the card.";
+            default -> "The payment was not completed.";
+        };
+    }
+
     /** The frontend's order page (app/orders/[id]), keyed by the order's UUID; it lists the tickets. */
     private String orderUrl(String orderId) {
         return UriComponentsBuilder.fromUriString(publicBaseUrl)
                 .pathSegment("orders", orderId)
+                .toUriString();
+    }
+
+    /** The frontend's checkout for an order (app/checkout/[orderId]). */
+    private String checkoutUrl(String orderId) {
+        return UriComponentsBuilder.fromUriString(publicBaseUrl)
+                .pathSegment("checkout", orderId)
                 .toUriString();
     }
 
