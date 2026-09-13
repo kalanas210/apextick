@@ -114,6 +114,8 @@ There are no `synchronized` blocks, no application-level mutexes, and no distrib
 | **Gate API** | `/api/gate/**`, for the `scanner` role and admins: every scan checked against the event its gate admits to, admission as a single conditional `UPDATE` so two turnstiles can never both let one ticket in, each scan recorded with its gate and steward, a live admissions count across gates, and an admin-only undo that must give a reason. |
 | **Rate limiting** | Redis fixed-window limits on hold/order/pay, returning `429` + `Retry-After`. |
 | **Observability** | Micrometer → Prometheus, with a provisioned Grafana dashboard. |
+| **Backups** | Nightly dumps of every database, each read back before it counts and pruned only after a clean night, and a restore script that loads a dump into a new database and counts what came back. |
+| **Demo mode** | The API says whether a deployment takes real money and whether it runs the demo season; the storefront calls itself a demonstration, and shows the shared demo account, only when that is true. |
 | **Errors** | RFC-7807 `application/problem+json` everywhere, with a correlation id per request. |
 
 ## Engineering highlights
@@ -124,8 +126,8 @@ There are no `synchronized` blocks, no application-level mutexes, and no distrib
 - **PCI-conscious payments** — the Stripe adapter never sees a raw card number: it creates a PaymentIntent and returns a `client_secret`, with which the browser finishes any 3-D Secure challenge, treating the signed `payment_intent.succeeded` webhook as the source of truth. Webhooks are idempotent, and a charge that cannot buy its order (its seats lost, the order expired or already paid, a sum other than the payment's) is refunded under a key that lets it be refunded only once. Pay attempts racing on one order take turns on the order's row, so the order is charged once however many tabs race for it.
 - **Money that can always go back** — a refund commits its decision before it asks the provider for anything, so a refusal leaves a charge visibly owed rather than an order half refunded. A reconciler asks again under the one key a charge's refund can have, so a retry can never pay out twice, and an `apextick_refunds_owed` gauge is there for an alert to watch. A dispute stops any refund still owed on its charge, since the bank is already returning that money.
 - **Stateless JWT security** — Keycloak issues OIDC tokens the API validates statelessly; roles map from `realm_access.roles` to `ROLE_*`. Auth keeps working containerized by fetching signing keys over the internal network while validating the public issuer.
-- **One-command infrastructure** — the whole backend, its dependencies, the Keycloak realm, and an optional observability stack start with `docker compose up`. Every secret, including the realm's client secrets, comes from a git-ignored `.env`, and the production stack refuses to start while any credential is unset.
-- **Verified** — 218 booking-service tests, most of them full-stack **Testcontainers** integration tests covering concurrency, expiry, the outbox, orders, racing and resent payments, signed webhooks delivered over HTTP, refunds refused and retried, refunds and disputes made in Stripe's dashboard, failed charges that email their buyer, event cancellations, turnstiles racing on one ticket, admin, security and rate-limiting; GreenMail tests for the notification service's SMTP path (an authenticated login, and refusing a server that doesn't offer STARTTLS); Vitest tests for the frontend's money, status, gate-refusal and checkout-outcome helpers, lapsed-session detection, the seat map's live merge, the admin and gate hooks' bearer tokens and cache keys, and components rendered to static markup (the checkout's branches among them). CI also fails when the gateway's OpenAPI contract drifts from the code.
+- **One-command infrastructure** — the whole backend, its dependencies, the Keycloak realm, and an optional observability stack start with `docker compose up`. Every secret, including the realm's client secrets, comes from a git-ignored `.env`, and the production stack refuses to start while any credential, image tag or deployment setting is unset.
+- **Verified** — 225 booking-service tests, most of them full-stack **Testcontainers** integration tests covering concurrency, expiry, the outbox, orders, racing and resent payments, signed webhooks delivered over HTTP, refunds refused and retried, refunds and disputes made in Stripe's dashboard, failed charges that email their buyer, event cancellations, turnstiles racing on one ticket, admin, security and rate-limiting; GreenMail tests for the notification service's SMTP path (an authenticated login, and refusing a server that doesn't offer STARTTLS); Vitest tests for the frontend's money, status, gate-refusal and checkout-outcome helpers, lapsed-session detection, the seat map's live merge, the admin and gate hooks' bearer tokens and cache keys, and components rendered to static markup (the checkout's branches among them). CI also fails when the gateway's OpenAPI contract drifts from the code.
 
 ## Tech stack
 
@@ -360,7 +362,7 @@ After the run, `teardown` reads the seat map back and asserts every targeted sea
 (cd frontend && npm ci --ignore-scripts && npm test)
 ```
 
-booking-service runs 218 tests, most of them full-stack Testcontainers integration tests: seat concurrency (1 winner / 199 losers) over the real hold endpoint, multi-seat all-or-nothing holds, the sales window and per-user seat cap, Redis-driven expiry, the hold sweeper, the transactional outbox, the order/payment flow, pay attempts racing on one order and resent under the same key, Stripe signature verification and mapping, signed Stripe webhooks delivered over HTTP (redelivered, late, duplicate, unmatched and mis-priced charges), failed charges that email their buyer (and a decline shown on the page that does not), refunds for charges an order can no longer take, box-office refunds (refused and retried, and blocked by a ticket used at the gate), refunds and disputes made in the Stripe dashboard, the order console's search, event cancellation (paid orders refunded, unpaid ones cancelled, holds released, and status changes that cannot be walked back), seat blocking, the gate (twelve turnstiles racing on one ticket let it in once; scans for another event, at a cancelled event and repeat scans refused and recorded; an admin's undo, and a steward refused one), the admin API, security, and rate limiting. Its verify also exports the served OpenAPI document to `target/openapi/api-docs.json`, which CI normalises and compares with the committed gateway contract. notification-service runs 13 (GreenMail, including an authenticated SMTP server, one that refuses STARTTLS, and the refund, cancellation, event-cancelled and payment-failed emails); the frontend runs 125 Vitest tests, the checkout's branches and the order summary among them as components rendered to static markup.
+booking-service runs 225 tests, most of them full-stack Testcontainers integration tests: seat concurrency (1 winner / 199 losers) over the real hold endpoint, multi-seat all-or-nothing holds, the sales window and per-user seat cap, Redis-driven expiry, the hold sweeper, the transactional outbox (and an event no queue will take, held back), the migrations under the prod context (which seed nothing), the order/payment flow, pay attempts racing on one order and resent under the same key, Stripe signature verification and mapping, signed Stripe webhooks delivered over HTTP (redelivered, late, duplicate, unmatched and mis-priced charges), failed charges that email their buyer (and a decline shown on the page that does not), refunds for charges an order can no longer take, box-office refunds (refused and retried, and blocked by a ticket used at the gate), refunds and disputes made in the Stripe dashboard, the order console's search, event cancellation (paid orders refunded, unpaid ones cancelled, holds released, and status changes that cannot be walked back), seat blocking, the gate (twelve turnstiles racing on one ticket let it in once; scans for another event, at a cancelled event and repeat scans refused and recorded; an admin's undo, and a steward refused one), the admin API, security, and rate limiting. Its verify also exports the served OpenAPI document to `target/openapi/api-docs.json`, which CI normalises and compares with the committed gateway contract. notification-service runs 13 (GreenMail, including an authenticated SMTP server, one that refuses STARTTLS, and the refund, cancellation, event-cancelled and payment-failed emails); the frontend runs 130 Vitest tests, the checkout's branches and the order summary among them as components rendered to static markup.
 
 ## Project structure
 
@@ -400,26 +402,41 @@ apextick/
 ## Deployment
 
 CI builds the three service images and pushes them to GHCR once the test run for
-that commit is green; the production stack pulls those tags.
+that commit is green, tagged `sha-<commit>`; the production stack runs exactly the
+tags `.env` names.
 
 ```bash
-cp .env.example .env            # set SERVER_IP, every credential, Stripe keys
+cp .env.example .env            # set SERVER_IP, every credential, the image tags, Stripe keys
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-The production file has no fallback for any credential: it refuses to start
-until `.env` sets the database, RabbitMQ, Keycloak admin, MinIO, WSO2 and
-Grafana passwords and the two realm client secrets (`WSO2_KM_CLIENT_SECRET`,
-`LOADTEST_CLIENT_SECRET`). The check only catches a missing value, so replace
-every `changeme`, `minioadmin`, `admin` and `dev-*` value with
-`openssl rand -hex 32`.
+The production file has no fallback for anything that decides what the
+deployment is, and refuses to start until `.env` sets:
+
+- the database, RabbitMQ, Keycloak admin, MinIO, WSO2 and Grafana passwords, and
+  the two realm client secrets (`WSO2_KM_CLIENT_SECRET`, `LOADTEST_CLIENT_SECRET`);
+- `SERVER_IP` and `POSTGRES_DB`;
+- `APP_PAYMENT_PROVIDER` (`mock` takes no money; `stripe` takes test or live
+  payments, as its keys decide) and `LIQUIBASE_CONTEXTS` (`demo` seeds the sample
+  season and its shared account, and the site calls itself a demonstration;
+  `prod` seeds nothing);
+- `BOOKING_IMAGE`, `NOTIFICATION_IMAGE` and `FRONTEND_IMAGE`, each an exact
+  `sha-<commit>` tag. The tags a deploy replaces are its rollback.
+
+The check only catches a missing value, so replace every `changeme`,
+`minioadmin`, `admin` and `dev-*` value with `openssl rand -hex 32`. Third-party
+images are pinned to exact releases as well, except Postgres, which stays on its
+major version.
 
 Caddy is the only thing published (80/443). It terminates TLS with an
 automatically-provisioned certificate for `https://<SERVER_IP>.nip.io` and routes
 by path — `/api` to the WSO2 gateway (which then reaches the booking service),
 the apextick realm's `/realms`, `/resources` and `/js` to Keycloak (minus the
 master realm and the client-registration API), everything else (including the
-`/admin` panel) to the frontend. The security group in
+`/admin` panel) to the frontend. Every response carries HSTS, `nosniff`, a
+referrer policy and `frame-ancestors 'self'` (`caddy/security-headers.caddy`),
+without overriding the stricter policy Keycloak sends with its own pages. The
+security group in
 `infra/` opens only 80/443 to the world and SSH to `admin_cidr`, a required
 Terraform variable:
 
@@ -427,37 +444,52 @@ Terraform variable:
 cd infra && terraform apply -var admin_cidr=<your-ip>/32
 ```
 
-Keycloak's own admin console is not published. Reach it over an SSH tunnel to
-its loopback-only port (`ssh -L 8180:localhost:8180 ubuntu@<host>`) after the
-`kcadm` step described next to the keycloak service in
-`docker-compose.prod.yml`, repeated whenever Keycloak is recreated. Production
-Keycloak still runs `start-dev` with its data inside the container: recreating
-it (which any change to its environment does) drops self-registered users.
+Keycloak runs in production mode with its realm and accounts in the stack's
+Postgres, in a `keycloak` database that the one-shot `db-init` service creates
+when it is missing, so recreating Keycloak keeps every registered account. Its
+admin console is not published: reach it over an SSH tunnel to its loopback-only
+port (`ssh -L 8180:localhost:8180 ubuntu@<host>`) after the `kcadm` step described
+next to the keycloak service in `docker-compose.prod.yml`, once per database.
+RabbitMQ keeps its queues, bindings and dead letters on a volume, under a fixed
+hostname, so a recreate or an image upgrade keeps them too.
+
+The `backup` service dumps every database each night (`BACKUP_AT`, UTC) into
+`./backups` and keeps `BACKUP_KEEP_DAYS` days of them; `scripts/backup/restore.sh`
+loads a dump into a new database. [docs/runbook.md](docs/runbook.md) covers
+restoring, rolling back, and copying dumps off the server, which surviving the
+loss of its disk needs.
 
 ### Upgrading a running deployment
 
 `git pull` alone changes nothing that is already running. On the server:
 
-1. **Keycloak** — the first `up -d` of this compose file recreates it (new
-   environment, new loopback port), which re-imports the realm and drops
-   registered accounts. To keep them, deploy the other services with
-   `--no-deps` and patch the realm through the Admin API instead;
-   `keycloak/README.md` has both paths and the tested block.
+1. **`.env`** — add what this release requires: `APP_PAYMENT_PROVIDER`,
+   `LIQUIBASE_CONTEXTS` (`demo`, for the existing demo), `POSTGRES_DB` if it was
+   left to a default, and the three `*_IMAGE` tags.
+   `docker compose -f docker-compose.prod.yml config -q` names anything still
+   missing.
 2. **Images and the rest** —
-   `docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d`
-   (plain `up -d` doesn't fetch new `:latest` images).
-3. **Caddy** — it only reads its config at start. This release recreates it
-   (its mount changed); after a later Caddyfile-only change run
+   `docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d`.
+   This release recreates most services, two of them with consequences:
+   - **Keycloak** moves onto Postgres. It starts on an empty `keycloak` database
+     and imports the realm one last time, so accounts registered on the old
+     container, roles granted with `scripts/grant-role.sh` and the master-realm
+     `frontendUrl` do not come across (`keycloak/README.md`). Grant the roles and
+     set the `frontendUrl` again, then run `scripts/wso2/setup.sh`.
+   - **RabbitMQ** starts on its new volume, empty, and the queue booking-service
+     used to declare (`seat-held-notifications`) is gone with the old broker.
+     Anything still queued in the old container is lost with it, so deploy once
+     the queues are empty: `docker exec apextick-rabbitmq rabbitmqctl list_queues`.
+3. **Caddy** — it only reads its config at start. This release recreates it (its
+   image changed); after a later Caddyfile-only change run
    `docker compose -f docker-compose.prod.yml restart caddy`. Then check the
-   edge: `curl -s -o /dev/null -w '%{http_code}\n' https://<SERVER_IP>.nip.io/realms/master/.well-known/openid-configuration`
+   edge: `curl -sI https://<SERVER_IP>.nip.io/ | grep -i strict-transport-security`
+   prints the header, and
+   `curl -s -o /dev/null -w '%{http_code}\n' https://<SERVER_IP>.nip.io/realms/master/.well-known/openid-configuration`
    must print `404`.
 4. **The gateway** — `scripts/wso2/setup.sh` pushes the regenerated API
-   contract (anonymous catalogue reads and the Stripe webhook) and the rotated
-   key-manager secret; `scripts/wso2/smoke-test.sh` confirms it.
-5. **RabbitMQ** — delete the queue booking-service no longer declares, which
-   otherwise keeps filling:
-   `docker exec apextick-rabbitmq rabbitmqctl delete_queue seat-held-notifications`.
-6. **Terraform** — `terraform plan -var admin_cidr=<your-ip>/32` must show
+   contract and the key-manager secret; `scripts/wso2/smoke-test.sh` confirms it.
+5. **Terraform** — `terraform plan -var admin_cidr=<your-ip>/32` must show
    in-place changes only (security-group rules, `metadata_options`,
    `user_data_replace_on_change`); stop if it plans a replacement.
 
