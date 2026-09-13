@@ -5,6 +5,7 @@ import com.apextick.booking.seat.Seat;
 import com.apextick.booking.seat.SeatRepository;
 import com.apextick.booking.seat.dto.AdminSeatResponse;
 import com.apextick.booking.security.CurrentUser;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,10 +26,12 @@ public class AdminSeatController {
 
     private final SeatRepository seats;
     private final HoldService holds;
+    private final SeatBlockService blocks;
 
-    public AdminSeatController(SeatRepository seats, HoldService holds) {
+    public AdminSeatController(SeatRepository seats, HoldService holds, SeatBlockService blocks) {
         this.seats = seats;
         this.holds = holds;
+        this.blocks = blocks;
     }
 
     @GetMapping
@@ -38,8 +41,8 @@ public class AdminSeatController {
     }
 
     /**
-     * Force-releases a stuck hold. Only HELD seats move; a BOOKED seat is returned
-     * unchanged, which is why the UI offers this on held rows only.
+     * Force-releases a stuck hold. Only a HELD seat moves; any other answers 409 SEAT_NOT_HELD
+     * rather than a 200 with the seat untouched, which read as a release that had worked.
      *
      * <p>Routed through {@link HoldService#adminRelease} rather than updating the row here,
      * so the release carries the same side effects as every other one: a seat.released
@@ -51,5 +54,19 @@ public class AdminSeatController {
     public AdminSeatResponse release(@PathVariable Long id, CurrentUser admin) {
         Seat seat = holds.adminRelease(id, admin.sub());
         return AdminSeatResponse.from(seat);
+    }
+
+    @PostMapping("/{id}/block")
+    @Transactional
+    @Operation(summary = "Take an available seat off sale: broken, or kept for the press or a wheelchair space")
+    public AdminSeatResponse block(@PathVariable Long id, CurrentUser admin) {
+        return AdminSeatResponse.from(blocks.block(id, admin.sub()));
+    }
+
+    @PostMapping("/{id}/unblock")
+    @Transactional
+    @Operation(summary = "Put a blocked seat back on sale")
+    public AdminSeatResponse unblock(@PathVariable Long id, CurrentUser admin) {
+        return AdminSeatResponse.from(blocks.unblock(id, admin.sub()));
     }
 }

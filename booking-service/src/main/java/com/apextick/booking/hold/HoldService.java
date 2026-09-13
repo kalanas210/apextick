@@ -196,14 +196,18 @@ public class HoldService {
         // one of them locks the order first as well, so the two queue instead of deadlocking.
         List<UUID> pendingOrders = orders.findPendingOrderIdsForSeat(seatId);
         pendingOrders.forEach(orders::findByIdForUpdate);
-        if (seats.releaseSeat(seatId) > 0) {
-            for (UUID orderId : pendingOrders) {
-                orderService.cancelForAdminRelease(orderId);
-            }
-            publishReleased(eventId, List.of(seatId), holder, "ADMIN");
-            log.info("Admin {} force-released seat {} (event {}) held by {}",
-                    adminSub, seatId, eventId, holder);
+        if (seats.releaseSeat(seatId) == 0) {
+            // A booked seat is undone by refunding its order, a blocked one by unblocking it. Answering
+            // 200 with the seat untouched used to read as a release that had worked.
+            throw new ConflictException(ErrorCodes.SEAT_NOT_HELD, "Only a held seat can be released",
+                    Map.of("seatStatus", seats.findById(seatId).map(s -> s.getStatus().name()).orElse("UNKNOWN")));
         }
+        for (UUID orderId : pendingOrders) {
+            orderService.cancelForAdminRelease(orderId);
+        }
+        publishReleased(eventId, List.of(seatId), holder, "ADMIN");
+        log.info("Admin {} force-released seat {} (event {}) held by {}",
+                adminSub, seatId, eventId, holder);
         return seats.findById(seatId).orElseThrow(() -> new NotFoundException("Seat", seatId));
     }
 
