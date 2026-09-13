@@ -140,7 +140,7 @@ public class PaymentService {
         PaymentWebhookEvent event = newWebhookEvent(provider, result, now);
         webhookEvents.saveAndFlush(event); // surface the unique-key race as DataIntegrityViolation
 
-        Payment p = payments.findByProviderAndProviderRefForUpdate(provider, result.providerRef()).orElse(null);
+        Payment p = matchPayment(provider, result).orElse(null);
         if (p == null) {
             log.warn("{} webhook {} matched no payment (ref {})",
                     provider, result.externalEventId(), result.providerRef());
@@ -183,7 +183,7 @@ public class PaymentService {
         PaymentWebhookEvent event = newWebhookEvent(provider, result, now);
         webhookEvents.saveAndFlush(event);
 
-        Payment p = payments.findByProviderAndProviderRefForUpdate(provider, result.providerRef())
+        Payment p = matchPayment(provider, result)
                 .orElseThrow(() -> new NotFoundException("Payment", result.providerRef()));
         if (!SETTLED.contains(p.getStatus())) {
             applyCard(p, result);
@@ -193,6 +193,32 @@ public class PaymentService {
         }
         event.setOutcome(p.getStatus().name());
         event.setProcessedAt(Instant.now());
+    }
+
+    /**
+     * The payment a callback is about, locked. Usually found by the provider's reference, but a
+     * charge can outrun our record of it: its webhook can land before the pay request has stored the
+     * reference, or after that request's last step rolled back. The payment id stamped on the charge
+     * when it was created still names the row, which records the reference then.
+     */
+    private Optional<Payment> matchPayment(PaymentProvider provider, PaymentResult result) {
+        Optional<Payment> byReference = payments.findByProviderAndProviderRefForUpdate(provider, result.providerRef());
+        if (byReference.isPresent() || result.paymentId() == null) {
+            return byReference;
+        }
+        UUID paymentId;
+        try {
+            paymentId = UUID.fromString(result.paymentId());
+        } catch (IllegalArgumentException e) {
+            return Optional.empty();
+        }
+        return payments.findByIdForUpdate(paymentId)
+                // a payment that already carries a different reference belongs to some other charge
+                .filter(p -> p.getProvider() == provider && p.getProviderRef() == null)
+                .map(p -> {
+                    p.setProviderRef(result.providerRef());
+                    return p;
+                });
     }
 
     private static PaymentWebhookEvent newWebhookEvent(PaymentProvider provider, PaymentResult result, Instant now) {

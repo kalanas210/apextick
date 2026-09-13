@@ -274,4 +274,35 @@ class StripeWebhookApiTest extends PaymentGatewaySpies {
         assertThat(orderStatus(c)).isEqualTo("CANCELLED");
         assertThat(outcomeRecorded("evt_refused")).isEqualTo("REFUND_REQUIRED");
     }
+
+    /**
+     * Stripe can send the succeeded event before the pay request that created the intent has stored
+     * the intent's id: a server-confirmed charge settles within the same second. The payment id
+     * stamped on the intent still finds the payment, which records the reference as it settles.
+     */
+    @Test
+    void a_charge_whose_reference_was_not_recorded_yet_is_matched_by_its_payment_id() throws Exception {
+        Charge c = pendingStripeOrder("webhook-early");
+        jdbc.sql("UPDATE payments SET provider_ref = NULL, status = 'INITIATED' WHERE id = :id")
+                .param("id", c.paymentId()).update();
+
+        deliver(event(c, "evt_early", "payment_intent.succeeded")).andExpect(status().isOk());
+
+        assertThat(orderStatus(c)).isEqualTo("PAID");
+        assertThat(paymentStatus(c)).isEqualTo("SUCCEEDED");
+        assertThat(jdbc.sql("SELECT provider_ref FROM payments WHERE id = :id")
+                .param("id", c.paymentId()).query(String.class).single()).isEqualTo(c.intentId());
+        assertThat(outcomeRecorded("evt_early")).isEqualTo("SUCCEEDED");
+    }
+
+    @Test
+    void a_charge_nothing_here_created_is_recorded_as_unmatched_and_left_alone() throws Exception {
+        String payload = StripeWebhooks.paymentIntentEvent("evt_stranger", "payment_intent.succeeded",
+                "pi_created_elsewhere", 5000, "usd", null);
+
+        deliver(payload).andExpect(status().isOk());
+
+        assertThat(outcomeRecorded("evt_stranger")).isEqualTo("unmatched");
+        verify(stripe, never()).refund(any(), any(), any(), any());
+    }
 }

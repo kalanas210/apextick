@@ -185,7 +185,10 @@ public class StripePaymentGateway implements PaymentGateway {
             com.stripe.model.StripeError err = pi.getLastPaymentError();
             failureCode = err.getDeclineCode() != null ? err.getDeclineCode() : err.getCode();
         }
-        return Optional.of(new PaymentResult(event.getId(), pi.getId(), outcome, amount, currency,
+        // stamped on the intent by initiate(), so a callback can name its payment even before the
+        // intent's id has been recorded against it
+        String paymentId = pi.getMetadata() == null ? null : pi.getMetadata().get("paymentId");
+        return Optional.of(new PaymentResult(event.getId(), pi.getId(), paymentId, outcome, amount, currency,
                 card[0], card[1], failureCode, req.rawBody()));
     }
 
