@@ -21,6 +21,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -160,5 +161,60 @@ class NotificationEmailTest {
             assertThat(info.getMessageCount()).isGreaterThanOrEqualTo(1);
         });
         assertThat(logs.countByStatus(NotificationStatus.FAILED)).isGreaterThanOrEqualTo(1);
+    }
+
+    private Map<String, Object> refundPayload(String email) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("paymentId", UUID.randomUUID().toString());
+        payload.put("orderId", UUID.randomUUID().toString());
+        payload.put("orderNumber", "APX-REFUND1");
+        payload.put("userSub", "buyer-sub");
+        payload.put("userEmail", email);
+        payload.put("userName", "Buyer");
+        payload.put("eventId", 1);
+        payload.put("eventName", "World Cup Final");
+        payload.put("amount", new BigDecimal("105.00"));
+        payload.put("currency", "USD");
+        payload.put("reason", "box_office_refund");
+        payload.put("refundRef", "re_test_123");
+        payload.put("refundedAt", Instant.now().toString());
+        return payload;
+    }
+
+    @Test
+    void an_accepted_refund_is_emailed_with_how_much_and_why() throws Exception {
+        UUID eventId = UUID.randomUUID();
+        Map<String, Object> payload = refundPayload("refunded@apextick.local");
+        publish("payment.refunded", envelope(eventId, "payment.refunded", payload));
+
+        assertThat(greenMail.waitForIncomingEmail(15_000, 1)).isTrue();
+        MimeMessage mail = greenMail.getReceivedMessages()[0];
+        assertThat(mail.getSubject()).contains("APX-REFUND1");
+        assertThat((String) mail.getContent())
+                .contains("USD 105.00")
+                .contains("The box office refunded this order")
+                .contains("href=\"https://tickets.apextick.test/orders/" + payload.get("orderId") + "\"");
+        await().atMost(Duration.ofSeconds(5))
+                .untilAsserted(() -> assertThat(processed.findById(eventId)).isPresent());
+    }
+
+    /** It used to tell every customer a refund had been requested, whether or not they were ever charged. */
+    @Test
+    void a_cancellation_says_what_happened_instead_of_promising_a_refund() throws Exception {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("orderId", UUID.randomUUID().toString());
+        payload.put("orderNumber", "APX-EXPIRED");
+        payload.put("userSub", "buyer-sub");
+        payload.put("userEmail", "expired@apextick.local");
+        payload.put("eventId", 1);
+        payload.put("seatIds", List.of(10, 11));
+        payload.put("reason", "EXPIRED");
+        publish("order.cancelled", envelope(UUID.randomUUID(), "order.cancelled", payload));
+
+        assertThat(greenMail.waitForIncomingEmail(15_000, 1)).isTrue();
+        assertThat((String) greenMail.getReceivedMessages()[0].getContent())
+                .contains("The payment window closed")
+                .doesNotContain("a refund has been requested")
+                .doesNotContain("(EXPIRED)");
     }
 }

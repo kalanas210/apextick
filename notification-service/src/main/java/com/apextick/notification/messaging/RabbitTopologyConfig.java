@@ -22,6 +22,7 @@ public class RabbitTopologyConfig {
     public static final String DLX = "apextick.events.dlx";
     public static final String Q_BOOKING = "notifications.booking-confirmed";
     public static final String Q_CANCEL = "notifications.order-cancelled";
+    public static final String Q_REFUND = "notifications.payment-refunded";
     public static final String Q_SEAT = "notifications.seat-events";
 
     @Bean
@@ -31,19 +32,23 @@ public class RabbitTopologyConfig {
 
         Queue booking = workQueue(Q_BOOKING);
         Queue cancel = workQueue(Q_CANCEL);
+        Queue refund = workQueue(Q_REFUND);
         Queue seat = workQueue(Q_SEAT);
         Queue bookingDlq = new Queue(Q_BOOKING + ".dlq", true);
         Queue cancelDlq = new Queue(Q_CANCEL + ".dlq", true);
+        Queue refundDlq = new Queue(Q_REFUND + ".dlq", true);
         Queue seatDlq = new Queue(Q_SEAT + ".dlq", true);
 
         return new Declarables(
-                events, dlx, booking, cancel, seat, bookingDlq, cancelDlq, seatDlq,
+                events, dlx, booking, cancel, refund, seat, bookingDlq, cancelDlq, refundDlq, seatDlq,
                 BindingBuilder.bind(booking).to(events).with("booking.confirmed"),
                 BindingBuilder.bind(cancel).to(events).with("order.cancelled"),
+                BindingBuilder.bind(refund).to(events).with("payment.refunded"),
                 BindingBuilder.bind(seat).to(events).with("seat.held"),
                 BindingBuilder.bind(seat).to(events).with("seat.released"),
                 dlqBinding(bookingDlq, dlx, Q_BOOKING),
                 dlqBinding(cancelDlq, dlx, Q_CANCEL),
+                dlqBinding(refundDlq, dlx, Q_REFUND),
                 dlqBinding(seatDlq, dlx, Q_SEAT));
     }
 
