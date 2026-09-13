@@ -15,6 +15,7 @@ public final class ErrorCodes {
     public static final String IDEMPOTENCY_KEY_REUSED = "IDEMPOTENCY_KEY_REUSED";
     public static final String IDEMPOTENCY_KEY_MISSING = "IDEMPOTENCY_KEY_MISSING";
     public static final String PAYMENT_FAILED = "PAYMENT_FAILED";
+    public static final String PAYMENT_IN_PROGRESS = "PAYMENT_IN_PROGRESS";
     public static final String TICKET_ALREADY_USED = "TICKET_ALREADY_USED";
     public static final String CONFLICT = "CONFLICT";
     public static final String FORBIDDEN = "FORBIDDEN";

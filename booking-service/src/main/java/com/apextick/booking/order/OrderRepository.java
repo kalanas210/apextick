@@ -1,8 +1,10 @@
 package com.apextick.booking.order;
 
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -15,6 +17,15 @@ import java.util.UUID;
 public interface OrderRepository extends JpaRepository<Order, UUID> {
 
     Optional<Order> findByIdAndUserSub(UUID id, String userSub);
+
+    /**
+     * The order, with its row locked until the transaction ends. A payment takes this lock before
+     * it decides anything, so two attempts on one order take turns instead of both concluding
+     * they are the first.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select o from Order o where o.id = :id")
+    Optional<Order> findByIdForUpdate(@Param("id") UUID id);
 
     Optional<Order> findByUserSubAndIdempotencyKey(String userSub, String idempotencyKey);
 

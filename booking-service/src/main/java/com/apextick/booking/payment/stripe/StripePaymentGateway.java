@@ -185,7 +185,10 @@ public class StripePaymentGateway implements PaymentGateway {
             com.stripe.model.StripeError err = pi.getLastPaymentError();
             failureCode = err.getDeclineCode() != null ? err.getDeclineCode() : err.getCode();
         }
-        return Optional.of(new PaymentResult(event.getId(), pi.getId(), outcome, amount, currency,
+        // stamped on the intent by initiate(), so a callback can name its payment even before the
+        // intent's id has been recorded against it
+        String paymentId = pi.getMetadata() == null ? null : pi.getMetadata().get("paymentId");
+        return Optional.of(new PaymentResult(event.getId(), pi.getId(), paymentId, outcome, amount, currency,
                 card[0], card[1], failureCode, req.rawBody()));
     }
 
@@ -196,8 +199,8 @@ public class StripePaymentGateway implements PaymentGateway {
                     .setPaymentIntent(providerRef)
                     .setAmount(StripeAmounts.toMinorUnits(amount, currency))
                     .build();
-            String idem = idempotencyKey == null ? null : idempotencyKey + ":refund";
-            Refund refund = Refund.create(params, options(idem));
+            // the caller's key names this refund, so asking again can only return the same refund
+            Refund refund = Refund.create(params, options(idempotencyKey));
             return new RefundResult(true, refund.getId(), null);
         } catch (StripeException e) {
             log.error("Stripe refund failed for intent {}", providerRef, e);

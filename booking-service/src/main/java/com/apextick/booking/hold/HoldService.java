@@ -192,8 +192,12 @@ public class HoldService {
         Seat seat = seats.findById(seatId).orElseThrow(() -> new NotFoundException("Seat", seatId));
         Long eventId = seat.getEventId();
         String holder = seat.getHeldBy();
+        // The unpaid orders covering this seat are locked before the seat is: a payment confirming
+        // one of them locks the order first as well, so the two queue instead of deadlocking.
+        List<UUID> pendingOrders = orders.findPendingOrderIdsForSeat(seatId);
+        pendingOrders.forEach(orders::findByIdForUpdate);
         if (seats.releaseSeat(seatId) > 0) {
-            for (UUID orderId : orders.findPendingOrderIdsForSeat(seatId)) {
+            for (UUID orderId : pendingOrders) {
                 orderService.cancelForAdminRelease(orderId);
             }
             publishReleased(eventId, List.of(seatId), holder, "ADMIN");

@@ -38,7 +38,7 @@ public class PaymentController {
         PaymentResponse response = payments.pay(id, request, idempotencyKey, user);
         HttpStatus status = switch (response.status()) {
             case "SUCCEEDED", "REQUIRES_ACTION", "REDIRECTED" -> HttpStatus.OK;
-            case "REFUND_REQUIRED" -> HttpStatus.CONFLICT;
+            case "REFUND_REQUIRED", "REFUNDED" -> HttpStatus.CONFLICT;
             default -> HttpStatus.PAYMENT_REQUIRED;
         };
         return ResponseEntity.status(status).body(response);

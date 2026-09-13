@@ -44,7 +44,7 @@ class SeatsLostCompensationTest {
     @Autowired JdbcClient jdbc;
 
     @Test
-    void paying_after_the_hold_was_lost_cancels_the_order_and_flags_a_refund() throws Exception {
+    void paying_after_the_hold_was_lost_cancels_the_order_and_refunds_the_charge() throws Exception {
         Long eventId = eventRepository.findBySlug(SLUG).orElseThrow().getId();
         List<Long> seatIds = seatRepository.findAllForEventWithLayout(eventId).stream()
                 .filter(s -> s.getStatus() == SeatStatus.AVAILABLE).map(Seat::getId).limit(2).toList();
@@ -71,7 +71,7 @@ class SeatsLostCompensationTest {
                         .header("Idempotency-Key", UUID.randomUUID().toString())
                         .contentType(MediaType.APPLICATION_JSON).content(VISA_OK))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.status").value("REFUND_REQUIRED"))
+                .andExpect(jsonPath("$.status").value("REFUNDED"))
                 .andExpect(jsonPath("$.failureCode").value("seats_lost"))
                 .andExpect(jsonPath("$.order.status").value("CANCELLED"));
 
