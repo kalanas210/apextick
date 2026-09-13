@@ -305,4 +305,38 @@ class StripeWebhookApiTest extends PaymentGatewaySpies {
         assertThat(outcomeRecorded("evt_stranger")).isEqualTo("unmatched");
         verify(stripe, never()).refund(any(), any(), any(), any());
     }
+
+    /**
+     * The webhook is the word on what was actually charged. A charge for another sum than the
+     * payment -- an intent reused from a different order, a partial capture -- must not buy the
+     * order's tickets: the money goes back exactly as taken and the order stays payable.
+     */
+    @Test
+    void a_charge_for_a_different_amount_than_its_payment_is_refunded_and_buys_nothing() throws Exception {
+        Charge c = pendingStripeOrder("webhook-short");
+        long charged = c.amountMinor() - 100;
+
+        deliver(StripeWebhooks.paymentIntentEvent("evt_short", "payment_intent.succeeded", c.intentId(), charged,
+                c.currency(), c.paymentId().toString())).andExpect(status().isOk());
+
+        verify(stripe).refund(eq(c.intentId()), eq(StripeAmounts.fromMinorUnits(charged, c.currency())),
+                eq(c.currency()), eq(refundKeyOf(c)));
+        assertThat(paymentStatus(c)).isEqualTo("REFUNDED");
+        assertThat(failureCode(c)).isEqualTo("amount_mismatch");
+        assertThat(orderStatus(c)).isEqualTo("PENDING_PAYMENT");
+        assertThat(ticketRepository.findByOrderId(c.orderId())).isEmpty();
+    }
+
+    @Test
+    void a_charge_in_a_different_currency_than_its_payment_is_refunded_and_buys_nothing() throws Exception {
+        Charge c = pendingStripeOrder("webhook-currency");
+        String otherCurrency = c.currency().equalsIgnoreCase("USD") ? "GBP" : "USD";
+
+        deliver(StripeWebhooks.paymentIntentEvent("evt_currency", "payment_intent.succeeded", c.intentId(),
+                c.amountMinor(), otherCurrency, c.paymentId().toString())).andExpect(status().isOk());
+
+        verify(stripe).refund(eq(c.intentId()), any(), eq(otherCurrency), eq(refundKeyOf(c)));
+        assertThat(failureCode(c)).isEqualTo("amount_mismatch");
+        assertThat(orderStatus(c)).isEqualTo("PENDING_PAYMENT");
+    }
 }

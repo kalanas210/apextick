@@ -26,6 +26,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.EnumSet;
@@ -106,10 +107,10 @@ public class PaymentService {
     /**
      * Process a verified provider callback (the Stripe webhook). Idempotent: each external event is
      * recorded once via the {@code payment_webhook_events} unique key, so re-deliveries are ignored.
-     * A charge its order can no longer take -- its seats lost, the order closed, or the order already
-     * paid by another charge -- is refunded as the synchronous pay path would refund it, and the
-     * delivery is acknowledged either way: refusing it only has the provider send it again, for days,
-     * while the customer stays charged.
+     * A charge that must not buy its order -- its seats lost, the order closed, the order already
+     * paid by another charge, or a sum that is not the one the payment was for -- is refunded, and
+     * the delivery is acknowledged either way: refusing it only has the provider send it again, for
+     * days, while the customer stays charged.
      */
     public void handleWebhook(PaymentProvider provider, CallbackRequest req) {
         PaymentGateway gateway = registry.get(provider);
@@ -153,11 +154,24 @@ public class PaymentService {
             case SUCCEEDED -> {
                 if (!SETTLED.contains(p.getStatus())) {
                     applyCard(p, result);
-                    p.setStatus(PaymentStatus.SUCCEEDED);
-                    p.setConfirmedAt(now);
                     p.setUpdatedAt(now);
                     p.setRawResult(result.rawJson());
-                    settle(p, gateway); // may throw SeatsLostException
+                    if (chargedAsRecorded(p, result)) {
+                        p.setStatus(PaymentStatus.SUCCEEDED);
+                        p.setConfirmedAt(now);
+                        settle(p, gateway); // may throw SeatsLostException
+                    } else {
+                        // Not the charge this payment asked for -- an intent reused from another
+                        // order, a partial capture. It must not buy the order's tickets, and the
+                        // money goes back exactly as it was taken.
+                        log.error("{} charge {} for payment {} took {} {}, but the payment is for {} {}; refunding it",
+                                provider, result.providerRef(), p.getId(), result.amount(), result.currency(),
+                                p.getAmount(), p.getCurrency());
+                        refund(p, gateway,
+                                result.amount() == null ? p.getAmount() : result.amount(),
+                                result.currency() == null ? p.getCurrency() : result.currency(),
+                                "amount_mismatch", "The amount charged did not match the order");
+                    }
                 }
             }
             case FAILED, DECLINED, CANCELLED -> {
@@ -171,6 +185,13 @@ public class PaymentService {
         }
         event.setOutcome(result.outcome() == PaymentOutcome.SUCCEEDED ? p.getStatus().name() : result.outcome().name());
         event.setProcessedAt(Instant.now());
+    }
+
+    /** Whether the provider took exactly the sum, in exactly the currency, the payment was recorded for. */
+    private static boolean chargedAsRecorded(Payment p, PaymentResult result) {
+        return result.amount() != null && result.currency() != null
+                && result.amount().compareTo(p.getAmount()) == 0
+                && result.currency().equalsIgnoreCase(p.getCurrency());
     }
 
     private void compensateWebhook(PaymentProvider provider, PaymentResult result, PaymentGateway gateway) {
@@ -366,13 +387,18 @@ public class PaymentService {
         }
     }
 
+    private void refund(Payment p, PaymentGateway gateway, String reason, String message) {
+        refund(p, gateway, p.getAmount(), p.getCurrency(), reason, message);
+    }
+
     /**
      * Gives a charge back and records what the provider said. The refund's idempotency key comes
      * from the payment, so however many retries and redeliveries end up here, the charge is refunded
      * once.
      */
-    private void refund(Payment p, PaymentGateway gateway, String reason, String message) {
-        RefundResult refund = gateway.refund(p.getProviderRef(), p.getAmount(), p.getCurrency(), refundKey(p));
+    private void refund(Payment p, PaymentGateway gateway, BigDecimal amount, String currency,
+                        String reason, String message) {
+        RefundResult refund = gateway.refund(p.getProviderRef(), amount, currency, refundKey(p));
         Instant now = Instant.now();
         p.setFailureCode(reason);
         p.setFailureMessage(message);
@@ -385,7 +411,7 @@ public class PaymentService {
             // the money still has to go back and nothing retries it yet, so say so where it is seen
             p.setStatus(PaymentStatus.REFUND_REQUIRED);
             log.error("{} refused to refund payment {} ({} {}, {}): {}", p.getProvider(), p.getId(),
-                    p.getAmount(), p.getCurrency(), reason, refund.rawJson());
+                    amount, currency, reason, refund.rawJson());
         }
     }
 
