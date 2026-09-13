@@ -5,6 +5,7 @@ import com.apextick.booking.payment.dto.PaymentConfigResponse;
 import com.apextick.booking.payment.model.CallbackRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -27,15 +29,19 @@ public class PaymentPublicController {
     private final PaymentService payments;
     private final PaymentGatewayRegistry registry;
     private final AppProperties props;
+    private final boolean demo;
 
-    public PaymentPublicController(PaymentService payments, PaymentGatewayRegistry registry, AppProperties props) {
+    public PaymentPublicController(PaymentService payments, PaymentGatewayRegistry registry, AppProperties props,
+                                   @Value("${spring.liquibase.contexts:}") String liquibaseContexts) {
         this.payments = payments;
         this.registry = registry;
         this.props = props;
+        this.demo = seedsDemo(liquibaseContexts);
     }
 
     @GetMapping("/config")
-    @Operation(summary = "Active payment provider + Stripe publishable key for the checkout UI")
+    @Operation(summary = "Active payment provider, Stripe publishable key, and whether this deployment takes "
+            + "test payments and is the demo")
     public PaymentConfigResponse config() {
         List<String> enabled = registry.providers().stream()
                 .map(p -> p.name().toLowerCase(Locale.ROOT)).toList();
@@ -45,8 +51,29 @@ public class PaymentPublicController {
                 && stripe != null && stripe.publishableKey() != null && !stripe.publishableKey().isBlank()) {
             publishableKey = stripe.publishableKey();
         }
-        return new PaymentConfigResponse(
-                registry.defaultProvider().name().toLowerCase(Locale.ROOT), enabled, publishableKey);
+        PaymentProvider active = registry.defaultProvider();
+        return new PaymentConfigResponse(active.name().toLowerCase(Locale.ROOT), enabled, publishableKey,
+                testMode(active, stripe), demo);
+    }
+
+    /**
+     * Whether no real money can move: the mock gateway never charges, and Stripe only does with live keys. A
+     * Stripe deployment whose key is missing or unrecognised does not count -- "no real money is charged" is a
+     * promise to a buyer, so it is only made when it is known to be true.
+     */
+    static boolean testMode(PaymentProvider active, AppProperties.Payment.Stripe stripe) {
+        if (active == PaymentProvider.MOCK) {
+            return true;
+        }
+        String key = stripe == null ? null : stripe.secretKey();
+        return key != null && (key.startsWith("sk_test_") || key.startsWith("rk_test_"));
+    }
+
+    /** The demo season and its shared account are seeded only under the {@code demo} Liquibase context. */
+    static boolean seedsDemo(String liquibaseContexts) {
+        return liquibaseContexts != null && Arrays.stream(liquibaseContexts.split(","))
+                .map(String::trim)
+                .anyMatch("demo"::equalsIgnoreCase);
     }
 
     @PostMapping("/stripe/webhook")
