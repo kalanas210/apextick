@@ -1,4 +1,4 @@
-import type { EventStatus, OrderStatus, SeatStatus, TicketStatus } from "./types";
+import type { EventStatus, OrderStatus, PaymentStatus, SeatStatus, TicketStatus } from "./types";
 
 /**
  * Shared status vocabulary. Colour is never the only carrier — every pill also
@@ -11,6 +11,7 @@ export const ORDER_TONE: Record<OrderStatus, string> = {
   PENDING_PAYMENT: "border-line-2 text-bone",
   CANCELLED: "border-line-2 text-faint",
   EXPIRED: "border-line-2 text-faint",
+  REFUNDED: "border-line-strong text-muted",
 };
 
 export const ORDER_LABEL: Record<OrderStatus, string> = {
@@ -18,6 +19,7 @@ export const ORDER_LABEL: Record<OrderStatus, string> = {
   PENDING_PAYMENT: "Awaiting payment",
   CANCELLED: "Cancelled",
   EXPIRED: "Expired",
+  REFUNDED: "Refunded",
 };
 
 export const EVENT_TONE: Record<EventStatus, string> = {
@@ -53,18 +55,51 @@ export const ORDER_STATUSES: OrderStatus[] = [
   "PAID",
   "CANCELLED",
   "EXPIRED",
+  "REFUNDED",
 ];
+
+/** Money the box office still owes a customer reads as the alarm it is. */
+export const PAYMENT_TONE: Record<PaymentStatus, string> = {
+  INITIATED: "border-line-2 text-muted",
+  REQUIRES_ACTION: "border-line-2 text-bone",
+  REDIRECTED: "border-line-2 text-bone",
+  SUCCEEDED: "border-accent/50 text-accent",
+  FAILED: "border-line-2 text-faint",
+  CANCELLED: "border-line-2 text-faint",
+  REFUND_REQUIRED: "border-[#ff6b6b]/40 text-[#ff6b6b]",
+  REFUNDED: "border-line-strong text-muted",
+  DISPUTED: "border-[#ff6b6b]/40 text-[#ff6b6b]",
+};
+
+export const PAYMENT_LABEL: Record<PaymentStatus, string> = {
+  INITIATED: "Started",
+  REQUIRES_ACTION: "Awaiting customer",
+  REDIRECTED: "Awaiting customer",
+  SUCCEEDED: "Paid",
+  FAILED: "Failed",
+  CANCELLED: "Cancelled",
+  REFUND_REQUIRED: "Refund owed",
+  REFUNDED: "Refunded",
+  DISPUTED: "Disputed",
+};
 
 export const SEAT_TONE: Record<SeatStatus, string> = {
   AVAILABLE: "border-line-2 text-muted",
   HELD: "border-accent/50 text-accent",
   BOOKED: "border-line-strong text-bone",
+  BLOCKED: "border-[#ff6b6b]/40 text-[#ff6b6b]",
 };
 
 export const TICKET_TONE: Record<TicketStatus, string> = {
   ISSUED: "border-accent/50 text-accent",
   USED: "border-line-2 text-muted",
   CANCELLED: "border-[#ff6b6b]/40 text-[#ff6b6b]",
+};
+
+export const TICKET_LABEL: Record<TicketStatus, string> = {
+  ISSUED: "Valid",
+  USED: "Used",
+  CANCELLED: "Void",
 };
 
 /** The pill shape used across the admin tables. */

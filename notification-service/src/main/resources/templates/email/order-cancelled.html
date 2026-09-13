@@ -3,8 +3,19 @@
 <head><meta charset="UTF-8"/><title>Order cancelled</title></head>
 <body style="font-family: Arial, Helvetica, sans-serif; color: #1a1a1a;">
 <h2>Your order was cancelled</h2>
-<p>Order <strong th:text="${cancel.orderNumber}">APX-XXXX</strong> has been cancelled
-   (<span th:text="${cancel.reason}">reason</span>).</p>
-<p>If a payment was taken, a refund has been requested. No seats are held for this order.</p>
+<p>Order <strong th:text="${cancel.orderNumber}">APX-XXXX</strong> has been cancelled.</p>
+<!--/* Says what happened. It used to promise every customer a refund, charged or not; a refund
+       now gets its own email, sent once the card company has accepted it. */-->
+<th:block th:switch="${cancel.reason}">
+  <p th:case="'EXPIRED'">The payment window closed before it was paid, so its seats were released.
+     If a payment for it still goes through, it is refunded automatically, and we email you when it is.</p>
+  <p th:case="'USER_CANCELLED'">You cancelled it before it was paid, so its seats were released.</p>
+  <p th:case="'ADMIN_RELEASED'">The box office released its seats before it was paid.</p>
+  <p th:case="'SEATS_LOST'">Its seats were taken before your payment could be confirmed. The payment is
+     being refunded, and we email you as soon as the refund is on its way.</p>
+  <p th:case="'CHARGEBACK'">The payment for it was disputed with your card issuer, so its tickets no
+     longer admit anyone.</p>
+  <p th:case="*">No seats are held for it.</p>
+</th:block>
 </body>
 </html>

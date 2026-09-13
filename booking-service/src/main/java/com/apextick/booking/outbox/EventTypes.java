@@ -8,6 +8,11 @@ public final class EventTypes {
     public static final String ORDER_CANCELLED = "order.cancelled";
     public static final String TICKET_USED = "ticket.used";
     public static final String TICKET_UNADMITTED = "ticket.unadmitted";
+    public static final String PAYMENT_REFUNDED = "payment.refunded";
+    public static final String PAYMENT_FAILED = "payment.failed";
+    public static final String EVENT_CANCELLED = "event.cancelled";
+    public static final String SEAT_BLOCKED = "seat.blocked";
+    public static final String SEAT_UNBLOCKED = "seat.unblocked";
 
     private EventTypes() {
     }

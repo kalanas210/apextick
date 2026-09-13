@@ -1,0 +1,15 @@
+# Response headers for every page on the public origin, imported by Caddyfile.
+#
+# A field with a leading "?" is only a default: it is written when the upstream
+# did not send that header itself, so the stricter policy Keycloak sends with
+# its own login pages stands. Each default is a directive of its own, because
+# within one header block Caddy writes the "?" fields only when the upstream
+# sent none of them.
+
+# The origin is only ever served over HTTPS; Caddy redirects port 80.
+header Strict-Transport-Security "max-age=31536000"
+# Only this origin may frame its pages, so Pay and Reserve can't be clickjacked
+# from someone else's site.
+header ?Content-Security-Policy "frame-ancestors 'self'"
+header ?X-Content-Type-Options "nosniff"
+header ?Referrer-Policy "strict-origin-when-cross-origin"

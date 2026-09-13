@@ -19,6 +19,9 @@ export function AdminDashboard() {
   const events = useAdminEvents({ size: 100 });
   const orders = useAdminOrders({ size: RECENT });
   const paid = useAdminOrders({ status: "PAID", size: 100 });
+  // Only the count is wanted: how many customers are still waiting on money.
+  const refundsOwed = useAdminOrders({ refundRequired: true, size: 1 });
+  const owed = refundsOwed.data?.totalElements ?? 0;
 
   const counts = useMemo(() => {
     const rows = events.data?.content ?? [];
@@ -64,6 +67,21 @@ export function AdminDashboard() {
         }
       />
 
+      {/* Quiet when there is nothing to do; impossible to miss when a customer is owed money. */}
+      {owed > 0 && (
+        <Link
+          href="/admin/orders?refund=owed"
+          className="mt-8 flex items-center justify-between gap-4 rounded-2xl border border-[#ff6b6b]/40 bg-[#ff6b6b]/[0.06] px-6 py-4 text-[0.86rem] text-[#ff6b6b] transition-colors hover:border-[#ff6b6b]"
+        >
+          <span>
+            <span className="tnum font-semibold">{owed}</span>{" "}
+            {owed === 1 ? "refund is" : "refunds are"} still owed: the payment provider has not accepted{" "}
+            {owed === 1 ? "it" : "them"} yet.
+          </span>
+          <span className="shrink-0 text-[0.8rem]">Review</span>
+        </Link>
+      )}
+
       <section className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Events" value={counts.total} hint={`${counts.draft} in draft`} loading={events.isLoading} />
         <Stat label="On sale" value={counts.live} hint="Visible in the catalog" loading={events.isLoading} />
@@ -101,6 +119,7 @@ export function AdminDashboard() {
           rowKey={(o) => o.id}
           isLoading={orders.isLoading}
           error={orders.error}
+          rowHref={(o) => `/admin/orders/${o.id}`}
           emptyTitle="No orders yet"
           emptyHint="Orders appear here the moment someone holds a seat."
           columns={[

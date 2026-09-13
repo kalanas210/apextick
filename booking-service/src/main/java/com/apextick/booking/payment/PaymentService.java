@@ -5,6 +5,9 @@ import com.apextick.booking.order.Order;
 import com.apextick.booking.order.OrderRepository;
 import com.apextick.booking.order.OrderService;
 import com.apextick.booking.order.OrderStatus;
+import com.apextick.booking.outbox.DomainEventPublisher;
+import com.apextick.booking.outbox.EventTypes;
+import com.apextick.booking.outbox.payload.PaymentFailedPayload;
 import com.apextick.booking.payment.dto.PayRequest;
 import com.apextick.booking.payment.dto.PaymentResponse;
 import com.apextick.booking.payment.model.CallbackRequest;
@@ -12,7 +15,6 @@ import com.apextick.booking.payment.model.Customer;
 import com.apextick.booking.payment.model.PaymentContext;
 import com.apextick.booking.payment.model.PaymentInitiation;
 import com.apextick.booking.payment.model.PaymentResult;
-import com.apextick.booking.payment.model.RefundResult;
 import com.apextick.booking.security.CurrentUser;
 import com.apextick.booking.web.ConflictException;
 import com.apextick.booking.web.ErrorCodes;
@@ -26,7 +28,6 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.EnumSet;
@@ -49,24 +50,29 @@ public class PaymentService {
     static final Duration ABANDONED_AFTER = Duration.ofMinutes(2);
 
     /** A charge already settled one way or the other: hearing about it again changes nothing. */
-    private static final Set<PaymentStatus> SETTLED =
-            EnumSet.of(PaymentStatus.SUCCEEDED, PaymentStatus.REFUNDED, PaymentStatus.REFUND_REQUIRED);
+    private static final Set<PaymentStatus> SETTLED = EnumSet.of(PaymentStatus.SUCCEEDED, PaymentStatus.REFUNDED,
+            PaymentStatus.REFUND_REQUIRED, PaymentStatus.DISPUTED);
 
     private final PaymentRepository payments;
     private final OrderRepository orders;
     private final OrderService orderService;
+    private final RefundService refunds;
+    private final DomainEventPublisher domainEvents;
     private final PaymentGatewayRegistry registry;
     private final PaymentWebhookEventRepository webhookEvents;
     private final TransactionTemplate tx;
 
     public PaymentService(PaymentRepository payments, OrderRepository orders, OrderService orderService,
-                          PaymentGatewayRegistry registry, PaymentWebhookEventRepository webhookEvents,
+                          RefundService refunds, PaymentGatewayRegistry registry,
+                          PaymentWebhookEventRepository webhookEvents, DomainEventPublisher domainEvents,
                           PlatformTransactionManager txManager) {
         this.payments = payments;
         this.orders = orders;
         this.orderService = orderService;
+        this.refunds = refunds;
         this.registry = registry;
         this.webhookEvents = webhookEvents;
+        this.domainEvents = domainEvents;
         this.tx = new TransactionTemplate(txManager);
     }
 
@@ -167,7 +173,7 @@ public class PaymentService {
                         log.error("{} charge {} for payment {} took {} {}, but the payment is for {} {}; refunding it",
                                 provider, result.providerRef(), p.getId(), result.amount(), result.currency(),
                                 p.getAmount(), p.getCurrency());
-                        refund(p, gateway,
+                        refunds.refundNow(p, gateway,
                                 result.amount() == null ? p.getAmount() : result.amount(),
                                 result.currency() == null ? p.getCurrency() : result.currency(),
                                 "amount_mismatch", "The amount charged did not match the order");
@@ -179,12 +185,54 @@ public class PaymentService {
                     p.setStatus(PaymentStatus.FAILED);
                     p.setFailureCode(result.failureCode());
                     p.setUpdatedAt(now);
+                    tellFailed(p, result);
                 }
             }
+            // refunded in full in Stripe itself: its dashboard, or the refund asked for here reported back
+            case REFUNDED -> refunds.recordProviderRefund(p);
+            case CHARGEBACK -> dispute(p, result, now);
             default -> { /* PENDING / other: leave the payment as-is until a terminal event */ }
         }
         event.setOutcome(result.outcome() == PaymentOutcome.SUCCEEDED ? p.getStatus().name() : result.outcome().name());
         event.setProcessedAt(Instant.now());
+    }
+
+    /**
+     * The cardholder disputed the charge with their bank, so the money is being clawed back whatever
+     * happens here. The tickets it bought stop admitting anyone, and a refund still owed on it stops
+     * being asked for: paying that as well would return the money twice.
+     */
+    private void dispute(Payment p, PaymentResult result, Instant now) {
+        if (p.getStatus() != PaymentStatus.SUCCEEDED && p.getStatus() != PaymentStatus.REFUND_REQUIRED) {
+            log.warn("{} dispute {} on payment {} left alone: the payment is {}",
+                    p.getProvider(), result.externalEventId(), p.getId(), p.getStatus());
+            return;
+        }
+        p.setStatus(PaymentStatus.DISPUTED);
+        p.setFailureCode(result.failureCode() == null ? "dispute" : "dispute:" + result.failureCode());
+        p.setUpdatedAt(now);
+        // the payment's lock is held already, so the order's comes second, as on every path that settles a charge
+        UUID orderId = p.getOrder().getId();
+        Order order = orders.findByIdForUpdate(orderId).orElseThrow(() -> new NotFoundException("Order", orderId));
+        if (order.getStatus() == OrderStatus.PAID) {
+            orderService.markDisputed(order);
+        }
+    }
+
+    /**
+     * A charge that failed after the buyer had moved on -- a 3-D Secure challenge left unanswered, a card
+     * the bank refused a minute later -- used to fail silently while the order ran out its window. The buyer
+     * is told, with the way back to the order while it can still be paid.
+     */
+    private void tellFailed(Payment p, PaymentResult result) {
+        Order order = p.getOrder();
+        if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
+            return;
+        }
+        domainEvents.publish(EventTypes.PAYMENT_FAILED, "payment", p.getId().toString(),
+                new PaymentFailedPayload(p.getId().toString(), order.getId().toString(), order.getOrderNumber(),
+                        order.getUserEmail(), order.getUserName(), order.getEvent().getName(), order.getTotal(),
+                        order.getCurrency(), result.failureCode(), order.getExpiresAt()));
     }
 
     /** Whether the provider took exactly the sum, in exactly the currency, the payment was recorded for. */
@@ -387,37 +435,9 @@ public class PaymentService {
         }
     }
 
+    /** Gives the whole charge back, now: see {@link RefundService#refundNow}. */
     private void refund(Payment p, PaymentGateway gateway, String reason, String message) {
-        refund(p, gateway, p.getAmount(), p.getCurrency(), reason, message);
-    }
-
-    /**
-     * Gives a charge back and records what the provider said. The refund's idempotency key comes
-     * from the payment, so however many retries and redeliveries end up here, the charge is refunded
-     * once.
-     */
-    private void refund(Payment p, PaymentGateway gateway, BigDecimal amount, String currency,
-                        String reason, String message) {
-        RefundResult refund = gateway.refund(p.getProviderRef(), amount, currency, refundKey(p));
-        Instant now = Instant.now();
-        p.setFailureCode(reason);
-        p.setFailureMessage(message);
-        p.setUpdatedAt(now);
-        if (refund.accepted()) {
-            p.setStatus(PaymentStatus.REFUNDED);
-            p.setRefundRef(refund.providerRef());
-            p.setRefundedAt(now);
-        } else {
-            // the money still has to go back and nothing retries it yet, so say so where it is seen
-            p.setStatus(PaymentStatus.REFUND_REQUIRED);
-            log.error("{} refused to refund payment {} ({} {}, {}): {}", p.getProvider(), p.getId(),
-                    amount, currency, reason, refund.rawJson());
-        }
-    }
-
-    /** The idempotency key of the one refund a payment can have. */
-    static String refundKey(Payment p) {
-        return "refund:" + p.getId();
+        refunds.refundNow(p, gateway, p.getAmount(), p.getCurrency(), reason, message);
     }
 
     /** The order was already paid: answer with the payment that paid it. */

@@ -3,26 +3,13 @@
 import Link from "next/link";
 import { formatPrice } from "@/lib/format";
 import { apiErrorMessage } from "@/lib/api";
+import { ORDER_LABEL, ORDER_TONE } from "@/lib/status";
 import { useMyOrders } from "@/hooks/useBooking";
 import { useSession } from "@/hooks/useSession";
 import { RequireAuth } from "@/components/auth/require-auth";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
-import type { Order, OrderStatus } from "@/lib/types";
-
-const TONE: Record<OrderStatus, string> = {
-  PAID: "border-accent/50 text-accent",
-  PENDING_PAYMENT: "border-line-2 text-bone",
-  CANCELLED: "border-line-2 text-faint",
-  EXPIRED: "border-line-2 text-faint",
-};
-
-const LABEL: Record<OrderStatus, string> = {
-  PAID: "Confirmed",
-  PENDING_PAYMENT: "Awaiting payment",
-  CANCELLED: "Cancelled",
-  EXPIRED: "Expired",
-};
+import type { Order } from "@/lib/types";
 
 export function AccountOrders() {
   return (
@@ -114,10 +101,10 @@ function Orders() {
                     <span
                       className={cn(
                         "rounded-full border px-3 py-1 font-mono text-[0.6rem] uppercase tracking-[0.14em]",
-                        TONE[order.status],
+                        ORDER_TONE[order.status],
                       )}
                     >
-                      {LABEL[order.status]}
+                      {ORDER_LABEL[order.status]}
                     </span>
                   </div>
                 </Link>

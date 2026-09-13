@@ -4,3 +4,4 @@ scripts/git-hooks/* text eol=lf
 mvnw               text eol=lf
 Caddyfile          text eol=lf
 *.tftpl            text eol=lf
+*.caddy            text eol=lf

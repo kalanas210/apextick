@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { CardElement, useElements, useStripe } from "@stripe/react-stripe-js";
+import type { PaymentOutcome } from "@/lib/checkout";
 
 /** Stripe Elements styled for the ApexTick dark palette. */
 const CARD_STYLE = {
@@ -17,24 +18,34 @@ const CARD_STYLE = {
   },
 } as const;
 
+type Step = "idle" | "tokenising" | "authenticating";
+
 /**
  * Collects card details in a Stripe-hosted iframe and exchanges them for a
  * PaymentMethod id. The card number never touches our servers or this bundle —
- * the backend only ever sees `pm_…`, which it confirms server-side.
+ * the backend only ever sees `pm_…`, which it confirms server-side. When the
+ * card's bank asks for 3-D Secure, the challenge runs here, in Stripe's dialog.
  */
 export function StripeCardForm({
   onPaymentMethod,
+  onAuthenticated,
   submitting,
+  testMode = false,
   total,
 }: {
-  onPaymentMethod: (paymentMethodId: string) => void;
+  /** Pays with the PaymentMethod, and answers what came of it. */
+  onPaymentMethod: (paymentMethodId: string) => Promise<PaymentOutcome | undefined>;
+  /** The bank's challenge was passed: Stripe's webhook settles the charge from here. */
+  onAuthenticated: () => void;
   submitting?: boolean;
+  /** Test keys: say which card to use. A buyer paying with live keys is never shown a test card. */
+  testMode?: boolean;
   total: string;
 }) {
   const stripe = useStripe();
   const elements = useElements();
   const [error, setError] = useState<string | null>(null);
-  const [tokenising, setTokenising] = useState(false);
+  const [step, setStep] = useState<Step>("idle");
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -43,25 +54,39 @@ export function StripeCardForm({
     if (!card) return;
 
     setError(null);
-    setTokenising(true);
+    setStep("tokenising");
     const result = await stripe.createPaymentMethod({ type: "card", card });
-    setTokenising(false);
-
+    setStep("idle");
     if (result.error) {
       setError(result.error.message ?? "That card could not be used.");
       return;
     }
-    onPaymentMethod(result.paymentMethod.id);
+
+    const outcome = await onPaymentMethod(result.paymentMethod.id);
+    if (outcome?.kind !== "authenticate") return;
+
+    // 3-D Secure, mandatory for most cards in the UK and the EU. Without this the intent sat in
+    // requires_action, the order ran out its window, and a card that needed the check could never pay.
+    setStep("authenticating");
+    const challenge = await stripe.handleNextAction({ clientSecret: outcome.clientSecret });
+    setStep("idle");
+    if (challenge.error) {
+      setError(challenge.error.message ?? "Your bank could not confirm this payment. Try again, or use another card.");
+      return;
+    }
+    onAuthenticated();
   };
 
-  const busy = tokenising || submitting || !stripe;
+  const busy = step !== "idle" || submitting || !stripe;
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <p className="text-[0.72rem] text-faint">
-        Test mode — use <span className="tnum">4242 4242 4242 4242</span> with any
-        future expiry and CVC.
-      </p>
+      {testMode && (
+        <p className="text-[0.72rem] text-faint">
+          Test mode — use <span className="tnum">4242 4242 4242 4242</span> with any
+          future expiry and CVC.
+        </p>
+      )}
 
       <div className="rounded-lg border border-line-2 bg-ink px-3.5 py-3.5 transition-colors focus-within:border-bone">
         <CardElement options={CARD_STYLE} onChange={() => setError(null)} />
@@ -81,7 +106,11 @@ export function StripeCardForm({
         {busy ? (
           <>
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-accent-ink/30 border-t-accent-ink" />
-            {tokenising ? "Checking your card…" : "Taking payment…"}
+            {step === "tokenising"
+              ? "Checking your card…"
+              : step === "authenticating"
+                ? "Waiting for your bank…"
+                : "Taking payment…"}
           </>
         ) : (
           <>Pay {total}</>

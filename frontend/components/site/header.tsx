@@ -12,6 +12,7 @@ import {
 import { cn } from "@/lib/cn";
 import { Logo } from "./logo";
 import { AccountMenu } from "./account-menu";
+import { DemoBadge } from "./site-mode";
 import { Button } from "@/components/ui/button";
 
 const NAV = [
@@ -103,7 +104,10 @@ export function Header() {
         )}
       >
         <div className="shell flex h-16 items-center justify-between md:h-[4.5rem]">
-          <Logo />
+          <div className="flex items-center gap-3">
+            <Logo />
+            <DemoBadge />
+          </div>
 
           <nav className="hidden items-center gap-1 md:flex">
             {NAV.map((item) => (

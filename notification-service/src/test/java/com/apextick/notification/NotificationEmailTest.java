@@ -21,6 +21,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -160,5 +161,139 @@ class NotificationEmailTest {
             assertThat(info.getMessageCount()).isGreaterThanOrEqualTo(1);
         });
         assertThat(logs.countByStatus(NotificationStatus.FAILED)).isGreaterThanOrEqualTo(1);
+    }
+
+    private Map<String, Object> refundPayload(String email) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("paymentId", UUID.randomUUID().toString());
+        payload.put("orderId", UUID.randomUUID().toString());
+        payload.put("orderNumber", "APX-REFUND1");
+        payload.put("userSub", "buyer-sub");
+        payload.put("userEmail", email);
+        payload.put("userName", "Buyer");
+        payload.put("eventId", 1);
+        payload.put("eventName", "World Cup Final");
+        payload.put("amount", new BigDecimal("105.00"));
+        payload.put("currency", "USD");
+        payload.put("reason", "box_office_refund");
+        payload.put("refundRef", "re_test_123");
+        payload.put("refundedAt", Instant.now().toString());
+        return payload;
+    }
+
+    @Test
+    void an_accepted_refund_is_emailed_with_how_much_and_why() throws Exception {
+        UUID eventId = UUID.randomUUID();
+        Map<String, Object> payload = refundPayload("refunded@apextick.local");
+        publish("payment.refunded", envelope(eventId, "payment.refunded", payload));
+
+        assertThat(greenMail.waitForIncomingEmail(15_000, 1)).isTrue();
+        MimeMessage mail = greenMail.getReceivedMessages()[0];
+        assertThat(mail.getSubject()).contains("APX-REFUND1");
+        assertThat((String) mail.getContent())
+                .contains("USD 105.00")
+                .contains("The box office refunded this order")
+                .contains("href=\"https://tickets.apextick.test/orders/" + payload.get("orderId") + "\"");
+        await().atMost(Duration.ofSeconds(5))
+                .untilAsserted(() -> assertThat(processed.findById(eventId)).isPresent());
+    }
+
+    /** It used to tell every customer a refund had been requested, whether or not they were ever charged. */
+    @Test
+    void a_cancellation_says_what_happened_instead_of_promising_a_refund() throws Exception {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("orderId", UUID.randomUUID().toString());
+        payload.put("orderNumber", "APX-EXPIRED");
+        payload.put("userSub", "buyer-sub");
+        payload.put("userEmail", "expired@apextick.local");
+        payload.put("eventId", 1);
+        payload.put("seatIds", List.of(10, 11));
+        payload.put("reason", "EXPIRED");
+        publish("order.cancelled", envelope(UUID.randomUUID(), "order.cancelled", payload));
+
+        assertThat(greenMail.waitForIncomingEmail(15_000, 1)).isTrue();
+        assertThat((String) greenMail.getReceivedMessages()[0].getContent())
+                .contains("The payment window closed")
+                .doesNotContain("a refund has been requested")
+                .doesNotContain("(EXPIRED)");
+    }
+
+    private Map<String, Object> eventCancelledPayload(String email, boolean refundDue) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("eventId", 1);
+        payload.put("eventName", "World Cup Final");
+        payload.put("startsAt", "2026-07-19T19:00:00Z");
+        payload.put("timeZone", "America/New_York");
+        payload.put("venue", "MetLife Stadium");
+        payload.put("reason", "Floodlight failure");
+        payload.put("orderId", UUID.randomUUID().toString());
+        payload.put("orderNumber", "APX-CALLED1");
+        payload.put("userEmail", email);
+        payload.put("userName", "Fan");
+        payload.put("total", new BigDecimal("210.00"));
+        payload.put("currency", "USD");
+        payload.put("refundDue", refundDue);
+        return payload;
+    }
+
+    @Test
+    void a_cancelled_event_tells_each_buyer_what_happens_to_their_own_order() throws Exception {
+        publish("event.cancelled", envelope(UUID.randomUUID(), "event.cancelled",
+                eventCancelledPayload("paid-fan@apextick.local", true)));
+
+        assertThat(greenMail.waitForIncomingEmail(15_000, 1)).isTrue();
+        MimeMessage mail = greenMail.getReceivedMessages()[0];
+        assertThat(mail.getSubject()).isEqualTo("World Cup Final has been cancelled");
+        assertThat((String) mail.getContent())
+                // on the event's own clock: 19:00 UTC is 15:00 in New York in July
+                .contains("Sun 19 Jul 2026, 15:00")
+                .contains("Floodlight failure")
+                .contains("refunded in full")
+                .contains("USD 210.00");
+    }
+
+    /** A buyer whose unpaid order went down with its event hears it once, from event.cancelled. */
+    @Test
+    void an_order_cancelled_with_its_event_sends_no_second_email() throws Exception {
+        UUID eventId = UUID.randomUUID();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("orderId", UUID.randomUUID().toString());
+        payload.put("orderNumber", "APX-CALLED2");
+        payload.put("userSub", "buyer-sub");
+        payload.put("userEmail", "unpaid-fan@apextick.local");
+        payload.put("eventId", 1);
+        payload.put("seatIds", List.of(12));
+        payload.put("reason", "EVENT_CANCELLED");
+        publish("order.cancelled", envelope(eventId, "order.cancelled", payload));
+
+        await().atMost(Duration.ofSeconds(10))
+                .untilAsserted(() -> assertThat(processed.findById(eventId)).isPresent());
+        assertThat(greenMail.getReceivedMessages()).isEmpty();
+    }
+
+    /** A 3-D Secure challenge left unanswered used to fail in silence while the order ran out its window. */
+    @Test
+    void a_payment_that_failed_after_the_buyer_left_sends_them_back_to_finish_paying() throws Exception {
+        String orderId = UUID.randomUUID().toString();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("paymentId", UUID.randomUUID().toString());
+        payload.put("orderId", orderId);
+        payload.put("orderNumber", "APX-FAILED1");
+        payload.put("userEmail", "unpaid@apextick.local");
+        payload.put("userName", "Fan");
+        payload.put("eventName", "World Cup Final");
+        payload.put("total", new BigDecimal("105.00"));
+        payload.put("currency", "USD");
+        payload.put("failureCode", "insufficient_funds");
+        payload.put("expiresAt", "2026-07-19T14:32:00Z");
+        publish("payment.failed", envelope(UUID.randomUUID(), "payment.failed", payload));
+
+        assertThat(greenMail.waitForIncomingEmail(15_000, 1)).isTrue();
+        MimeMessage mail = greenMail.getReceivedMessages()[0];
+        assertThat(mail.getSubject()).contains("APX-FAILED1").contains("did not go through");
+        assertThat((String) mail.getContent())
+                .contains("insufficient funds")
+                .contains("14:32 UTC on 19 Jul")
+                .contains("href=\"https://tickets.apextick.test/checkout/" + orderId + "\"");
     }
 }

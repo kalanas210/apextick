@@ -1,10 +1,11 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { QueryClient } from '@tanstack/react-query';
 import { api, authHeaders, retryOn5xx } from '@/lib/api';
 import { useAccessToken } from './useSession';
 import type {
-    AdminSeat, EventDetail, EventStats, EventSummary, EventUpsert, LayoutInput, LayoutResult,
+    AdminOrderDetail, AdminSeat, EventDetail, EventStats, EventSummary, EventUpsert, LayoutInput, LayoutResult,
     Order, PageResponse, Series, Team,
 } from '@/lib/types';
 
@@ -17,9 +18,19 @@ export interface AdminEventParams {
 }
 
 export interface AdminOrderParams {
+    /** An order number, or part of the customer's email or name. */
+    q?: string;
     status?: string;
+    /** Only the orders the box office still owes a refund on. */
+    refundRequired?: boolean;
     page?: number;
     size?: number;
+}
+
+export interface EventStatusChange {
+    status: string;
+    /** For a cancellation: the reason the event's ticket holders are told. */
+    reason?: string;
 }
 
 /** Drops empty values so the query key is stable and the URL stays clean. */
@@ -93,8 +104,8 @@ export function useSetEventStatus(id: number) {
     const token = useAccessToken();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (status: string) =>
-            (await api.patch<EventDetail>(`/api/admin/events/${id}/status`, { status },
+        mutationFn: async ({ status, reason }: EventStatusChange) =>
+            (await api.patch<EventDetail>(`/api/admin/events/${id}/status`, { status, reason },
                 { headers: authHeaders(token) })).data,
         onSettled: () => {
             queryClient.invalidateQueries({ queryKey: ['admin', 'events'] });
@@ -102,6 +113,10 @@ export function useSetEventStatus(id: number) {
             queryClient.invalidateQueries({ queryKey: ['event', String(id)] });
             // Going on sale (or off it) changes what the public catalog shows.
             queryClient.invalidateQueries({ queryKey: ['events'] });
+            // A cancellation refunds and cancels orders, and frees every held seat.
+            queryClient.invalidateQueries({ queryKey: ['admin', 'orders'] });
+            queryClient.invalidateQueries({ queryKey: ['admin', 'stats', id] });
+            queryClient.invalidateQueries({ queryKey: ['admin', 'seats', id] });
         },
     });
 }
@@ -166,8 +181,65 @@ export function useAdminOrders(query: AdminOrderParams) {
         queryFn: async () =>
             (await api.get<PageResponse<Order>>('/api/admin/orders', {
                 headers: authHeaders(token),
-                params: params({ ...query }),
+                params: params({
+                    q: query.q,
+                    status: query.status,
+                    refundRequired: query.refundRequired ? 'true' : undefined,
+                    page: query.page,
+                    size: query.size,
+                }),
             })).data,
+    });
+}
+
+/** One order in full, for the box office: its tickets, its payments, and whether it can be refunded. */
+export function useAdminOrder(id: string | undefined) {
+    const token = useAccessToken();
+    return useQuery({
+        queryKey: ['admin', 'order', id],
+        enabled: !!token && !!id,
+        retry: retryOn5xx,
+        queryFn: async () =>
+            (await api.get<AdminOrderDetail>(`/api/admin/orders/${id}`, { headers: authHeaders(token) })).data,
+    });
+}
+
+/** A refund voids tickets, frees seats and takes revenue off an event, so every view of those refreshes. */
+function refreshAfterRefund(queryClient: QueryClient) {
+    queryClient.invalidateQueries({ queryKey: ['admin', 'orders'] });
+    queryClient.invalidateQueries({ queryKey: ['admin', 'stats'] });
+    queryClient.invalidateQueries({ queryKey: ['admin', 'seats'] });
+    // Other browsers hear about the freed seats over STOMP; this tab asks directly.
+    queryClient.invalidateQueries({ queryKey: ['seats'] });
+}
+
+/** Refunds a paid order in full. The answer is the order as it now stands, shown at once. */
+export function useRefundOrder(id: string) {
+    const token = useAccessToken();
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (reason: string) =>
+            (await api.post<AdminOrderDetail>(`/api/admin/orders/${id}/refund`, { reason },
+                { headers: authHeaders(token) })).data,
+        onSuccess: (detail: AdminOrderDetail) => queryClient.setQueryData(['admin', 'order', id], detail),
+        // refused because the order moved on meanwhile -- a ticket scanned, a refund already made:
+        // show the operator what it looks like now
+        onError: () => queryClient.invalidateQueries({ queryKey: ['admin', 'order', id] }),
+        onSettled: () => refreshAfterRefund(queryClient),
+    });
+}
+
+/** Asks the payment provider again for every refund still owed on the order. */
+export function useRetryRefund(id: string) {
+    const token = useAccessToken();
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async () =>
+            (await api.post<AdminOrderDetail>(`/api/admin/orders/${id}/refund/retry`, null,
+                { headers: authHeaders(token) })).data,
+        onSuccess: (detail: AdminOrderDetail) => queryClient.setQueryData(['admin', 'order', id], detail),
+        onError: () => queryClient.invalidateQueries({ queryKey: ['admin', 'order', id] }),
+        onSettled: () => refreshAfterRefund(queryClient),
     });
 }
 
@@ -188,6 +260,15 @@ export function useAdminSeats(eventId: number | undefined) {
     });
 }
 
+/** A seat changed state: this event's seat list and figures, and any seat map this tab has open. */
+function refreshSeats(queryClient: QueryClient, eventId: number) {
+    queryClient.invalidateQueries({ queryKey: ['admin', 'seats', eventId] });
+    queryClient.invalidateQueries({ queryKey: ['admin', 'stats', eventId] });
+    // Other browsers hear about this over STOMP; this tab asks directly.
+    queryClient.invalidateQueries({ queryKey: ['seats'] });
+}
+
+/** The API answers 409 SEAT_NOT_HELD for a seat that is not held. */
 export function useReleaseSeat(eventId: number) {
     const token = useAccessToken();
     const queryClient = useQueryClient();
@@ -195,12 +276,30 @@ export function useReleaseSeat(eventId: number) {
         mutationFn: async (seatId: number) =>
             (await api.post<AdminSeat>(`/api/admin/seats/${seatId}/release`, null,
                 { headers: authHeaders(token) })).data,
-        onSettled: () => {
-            queryClient.invalidateQueries({ queryKey: ['admin', 'seats', eventId] });
-            queryClient.invalidateQueries({ queryKey: ['admin', 'stats', eventId] });
-            // Other browsers hear about this over STOMP; this tab asks directly.
-            queryClient.invalidateQueries({ queryKey: ['seats'] });
-        },
+        onSettled: () => refreshSeats(queryClient, eventId),
+    });
+}
+
+/** Takes an available seat off sale; the API answers 409 for one that is held or booked. */
+export function useBlockSeat(eventId: number) {
+    const token = useAccessToken();
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (seatId: number) =>
+            (await api.post<AdminSeat>(`/api/admin/seats/${seatId}/block`, null,
+                { headers: authHeaders(token) })).data,
+        onSettled: () => refreshSeats(queryClient, eventId),
+    });
+}
+
+export function useUnblockSeat(eventId: number) {
+    const token = useAccessToken();
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (seatId: number) =>
+            (await api.post<AdminSeat>(`/api/admin/seats/${seatId}/unblock`, null,
+                { headers: authHeaders(token) })).data,
+        onSettled: () => refreshSeats(queryClient, eventId),
     });
 }
 

@@ -3,6 +3,7 @@ import Image from "next/image";
 import type { ReactNode } from "react";
 import { unsplash } from "@/data/images";
 import { Logo } from "@/components/site/logo";
+import { SiteModeNote } from "@/components/site/site-mode";
 import { ArrowUpRight } from "@/components/ui/icons";
 
 interface AuthShellProps {
@@ -59,8 +60,8 @@ export function AuthShell({
         </div>
 
         <p className="text-center text-[0.7rem] leading-relaxed text-faint">
-          Accounts are created and stored by our Keycloak sign-in service. This
-          is a demonstration site: checkout runs in test mode.
+          Accounts are created and stored by our Keycloak sign-in service.{" "}
+          <SiteModeNote variant="auth" as="span" />
         </p>
       </div>
 

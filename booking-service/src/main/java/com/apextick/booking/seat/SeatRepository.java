@@ -135,6 +135,38 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
             """, nativeQuery = true)
     List<Long> releaseSeatsHeldBy(@Param("ids") Collection<Long> ids, @Param("sub") String sub);
 
+    /** Lets go of every hold on an event, when it is cancelled. Returns the seats that moved. */
+    @Query(value = """
+            UPDATE seats
+               SET status = 'AVAILABLE', held_by = NULL, held_until = NULL, version = version + 1
+             WHERE event_id = :eventId AND status = 'HELD'
+            RETURNING id
+            """, nativeQuery = true)
+    List<Long> releaseAllHeld(@Param("eventId") Long eventId);
+
+    /** Takes a seat off sale, only while it is available: a held or booked seat is somebody's. */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = "UPDATE seats SET status = 'BLOCKED', version = version + 1 "
+            + "WHERE id = :seatId AND status = 'AVAILABLE'", nativeQuery = true)
+    int blockSeat(@Param("seatId") Long seatId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = "UPDATE seats SET status = 'AVAILABLE', version = version + 1 "
+            + "WHERE id = :seatId AND status = 'BLOCKED'", nativeQuery = true)
+    int unblockSeat(@Param("seatId") Long seatId);
+
+    /**
+     * Puts booked seats back on sale, when the tickets that booked them are voided. Returns the
+     * ids that actually moved, the way every other release does.
+     */
+    @Query(value = """
+            UPDATE seats
+               SET status = 'AVAILABLE', held_by = NULL, held_until = NULL, version = version + 1
+             WHERE id IN (:ids) AND status = 'BOOKED'
+            RETURNING id
+            """, nativeQuery = true)
+    List<Long> releaseBooked(@Param("ids") Collection<Long> ids);
+
     @Modifying(flushAutomatically = true)
     @Query("""
             update Seat s

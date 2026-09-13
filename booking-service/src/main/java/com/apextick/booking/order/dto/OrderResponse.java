@@ -13,7 +13,8 @@ public record OrderResponse(
         String id, String orderNumber, String status, Long eventId, String eventSlug, String eventName,
         Instant startsAt, String currency, BigDecimal subtotal, BigDecimal fee, BigDecimal total,
         Instant expiresAt, Instant createdAt, Instant paidAt, String cancelReason,
-        List<OrderItemResponse> items, List<String> ticketIds) {
+        List<OrderItemResponse> items, List<String> ticketIds,
+        String userEmail, String userName, Instant cancelledAt, Instant refundedAt) {
 
     /** Builds the response, attaching each item's issued ticket id (if any). */
     public static OrderResponse of(Order o, Map<Long, UUID> ticketByItemId) {
@@ -25,7 +26,8 @@ public record OrderResponse(
                 o.getId().toString(), o.getOrderNumber(), o.getStatus().name(),
                 o.getEvent().getId(), o.getEvent().getSlug(), o.getEvent().getName(),
                 o.getEvent().getStartsAt(), o.getCurrency(), o.getSubtotal(), o.getFee(), o.getTotal(),
-                o.getExpiresAt(), o.getCreatedAt(), o.getPaidAt(), o.getCancelReason(), items, ticketIds);
+                o.getExpiresAt(), o.getCreatedAt(), o.getPaidAt(), o.getCancelReason(), items, ticketIds,
+                o.getUserEmail(), o.getUserName(), o.getCancelledAt(), o.getRefundedAt());
     }
 
     public static OrderResponse from(Order o) {

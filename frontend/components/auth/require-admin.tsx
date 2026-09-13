@@ -32,6 +32,7 @@ export function RequireAdmin({
           ? "The scanner needs an ApexTick account with the admin or scanner role."
           : "The admin area needs an ApexTick account with the admin role."
       }
+      expiredDescription="Sign in again to get back to the admin area."
     >
       <AdminGate allowScanner={allowScanner}>{children}</AdminGate>
     </RequireAuth>
@@ -57,7 +58,7 @@ function AdminGate({ children, allowScanner }: { children: ReactNode; allowScann
     return (
       <Card title="Your session expired" description="Sign in again to get back to the admin area.">
         <Button onClick={signIn} size="md">
-          Sign in
+          Sign in again
         </Button>
       </Card>
     );

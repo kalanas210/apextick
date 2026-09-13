@@ -23,15 +23,20 @@ look rather than a fallback one. The demo season ships four:
 ## Getting started
 
 ```bash
-npm install
+npm ci --ignore-scripts
 npm run dev
 ```
 
-Open http://localhost:3000. The app needs nothing else running.
+Open http://localhost:3000. Every page reads the booking service and signing in needs
+Keycloak, so start the backend first (the root README's Getting started). The browser
+finds the API on port 8081 of the same host, or wherever `NEXT_PUBLIC_API_URL` says;
+server-rendered pages use `API_INTERNAL_URL` when they run inside Docker. With no API
+the storefront says the catalog is unavailable rather than showing an empty one.
 
 ```bash
 npm run build   # production build
 npm run lint    # eslint
+npm test        # Vitest: helpers, and components rendered to static markup
 ```
 
 ## Routes
@@ -42,19 +47,30 @@ npm run lint    # eslint
 | `/events` | Every fixture, filterable by sport, series, and month |
 | `/events/[slug]` | A single fixture: matchup, pricing tiers, and stand selector |
 | `/events/[slug]/seats` | Interactive seat map with a live order summary and hold timer |
+| `/checkout/[orderId]` | Paying for a held order, 3-D Secure included, against the payment window's countdown |
+| `/orders/[id]` | One order: its status, and its tickets with QR codes and PDFs |
+| `/account` | The signed-in customer's orders |
+| `/signin`, `/register`, `/forgot-password` | Hand off to Keycloak, which owns every credential |
+| `/admin` | The admin panel: events and layouts, orders and refunds, seats, event cancellation (the `admin` role) |
+| `/admin/scan` | The gate scanner (the `admin` or `scanner` role) |
 
 ## Structure
 
 ```
 app/                 routes and the root layout
 components/
-  ui/                reusable primitives (buttons, motion, crest, marquee, grain)
-  site/              header, footer, logo, smooth scroll
+  ui/                reusable primitives (buttons, motion, crest, marquee, grain, dialogs, tables)
+  site/              header, footer, logo, smooth scroll, the demo and test-mode labels
   home/              home page sections
   fixtures/          fixture card, listing explorer, tier panel
-  seatmap/           seat map, stadium diagram, tier colors
+  seatmap/           live seat map, stadium diagram, tier colors
+  auth/              the Keycloak hand-off, and the gates for signed-in and admin pages
+  checkout/          the payment forms (Stripe Elements, the mock gateway) and order summary
+  account/           orders and tickets
+  admin/             the admin panel and the gate scanner
+hooks/               React Query hooks over the API, and the session
 data/                curated photography ids (the only data still in the repo)
-lib/                 API clients (browser and server), formatting, colour, class helpers
+lib/                 API clients (browser and server), formatting, checkout and site-mode helpers
 ```
 
 ## Design system
@@ -83,3 +99,7 @@ The booking flow is live too: the seat map streams changes over STOMP, holds and
 orders hit the API, and checkout takes a real payment through Stripe or the backend's
 offline mock gateway. Sign-in is Keycloak (authorization code + PKCE), so this app
 never handles a password.
+
+Whether the deployment is the demo, and whether checkout takes real money, come from
+the API too (`GET /api/payments/config`): the Demo badge, the "demonstration site" line
+and the test-mode notes appear only when they are true.

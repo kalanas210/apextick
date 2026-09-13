@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { formatPrice } from "@/lib/format";
-import { apiErrorMessage } from "@/lib/api";
+import { apiErrorMessage, apiStatus } from "@/lib/api";
 import { useOrder, useOrderTickets } from "@/hooks/useBooking";
 import { RequireAuth } from "@/components/auth/require-auth";
 import { TicketCard } from "./ticket-card";
@@ -33,6 +33,13 @@ const STATUS_COPY: Record<OrderStatus, { label: string; tone: string; blurb: str
     label: "Expired",
     tone: "border-line-2 text-faint",
     blurb: "The payment window closed, so the seats were released.",
+  },
+  REFUNDED: {
+    label: "Refunded",
+    tone: "border-line-strong text-muted",
+    // The order is refunded the moment the box office decides; the money can take longer, and
+    // the email that says it is on its way is only sent once the card company has accepted it.
+    blurb: "This order was refunded, so its tickets no longer admit anyone. We email you as soon as the money is on its way back to your card.",
   },
 };
 
@@ -79,9 +86,13 @@ function Order({ orderId }: { orderId: string }) {
   if (error || !order) {
     return (
       <div className="rounded-2xl border border-line bg-ink-2 p-8 text-center">
-        <h2 className="font-display text-xl tracking-tight">Order not found</h2>
+        <h2 className="font-display text-xl tracking-tight">
+          {!error || apiStatus(error) === 404 ? "Order not found" : "Could not load this order"}
+        </h2>
         <p className="mx-auto mt-2 max-w-sm text-[0.86rem] text-muted">
-          {apiErrorMessage(error, "That order does not exist, or it is not yours.")}
+          {!error || apiStatus(error) === 404
+            ? "That order does not exist, or it is not yours."
+            : apiErrorMessage(error, "The booking service did not answer. Try again in a moment.")}
         </p>
         <div className="mt-6 flex justify-center">
           <Button href="/account" size="md">
@@ -121,7 +132,13 @@ function Order({ orderId }: { orderId: string }) {
           </div>
         )}
 
-        {(order.status === "CANCELLED" || order.status === "EXPIRED") && (
+        {order.cancelReason === "EVENT_CANCELLED" && (
+          <p className="mt-3 max-w-md text-[0.9rem] text-muted">
+            The event itself was called off, so there are no seats to pick again. You have not been charged.
+          </p>
+        )}
+
+        {(order.status === "CANCELLED" || order.status === "EXPIRED") && order.cancelReason !== "EVENT_CANCELLED" && (
           <div className="mt-6">
             <Button href={`/events/${order.eventSlug}/seats`} size="md" arrow>
               Pick seats again

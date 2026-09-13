@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Logo } from "./logo";
 import { FooterSeries } from "./footer-series";
+import { SiteModeNote } from "./site-mode";
 import { ArrowUpRight } from "@/components/ui/icons";
 
 const EXPLORE = [
@@ -64,8 +65,7 @@ export function Footer() {
 
         <div className="mt-16 flex flex-col gap-4 border-t border-line pt-8 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-[0.8rem] text-faint">
-            2026 ApexTick. A demonstration experience. Fixtures, prices, and seats
-            are sample data.
+            2026 ApexTick. <SiteModeNote variant="footer" as="span" />
           </p>
           <a
             href="#top"

@@ -85,4 +85,25 @@ public class Payment {
 
     @Column(name = "refunded_at")
     private Instant refundedAt;
+
+    /**
+     * What is owed back, once a refund has been asked for: the whole charge, or -- for a charge
+     * that took a sum other than the payment's -- exactly what it took.
+     */
+    @Column(name = "refund_amount", precision = 12, scale = 2)
+    private BigDecimal refundAmount;
+
+    @Column(name = "refund_currency")
+    private String refundCurrency;
+
+    /** How many times the provider has been asked for this refund. */
+    @Column(name = "refund_attempts", nullable = false)
+    private int refundAttempts;
+
+    @Column(name = "refund_last_attempt_at")
+    private Instant refundLastAttemptAt;
+
+    /** The provider's answer the last time it refused the refund. */
+    @Column(name = "refund_error")
+    private String refundError;
 }

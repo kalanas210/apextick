@@ -13,7 +13,12 @@ public record AppProperties(Hold hold, Outbox outbox, Order order, Payment payme
     public record Hold(Duration duration, int maxSeats, Duration expiryTolerance, int sweeperBatch) {
     }
 
-    public record Outbox(Duration pollInterval, int batchSize, int maxAttempts, Duration confirmTimeout) {
+    /**
+     * @param requireRoute event types a queue must take before they count as published. The broker acks a
+     *                     message no queue is bound for, so an ack alone would mark such an event sent.
+     */
+    public record Outbox(Duration pollInterval, int batchSize, int maxAttempts, Duration confirmTimeout,
+                         Set<String> requireRoute) {
     }
 
     public record Order(BigDecimal feePercent, Duration paymentWindow) {

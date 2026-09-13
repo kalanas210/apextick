@@ -32,3 +32,9 @@ databaseChangeLog:
   - include:
       file: 011-ticket-scans.sql
       relativeToChangelogFile: true
+  - include:
+      file: 012-refunds.sql
+      relativeToChangelogFile: true
+  - include:
+      file: 013-event-cancellation.sql
+      relativeToChangelogFile: true

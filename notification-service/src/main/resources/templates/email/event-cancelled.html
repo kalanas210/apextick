@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head><meta charset="UTF-8"/><title>Event cancelled</title></head>
+<body style="font-family: Arial, Helvetica, sans-serif; color: #1a1a1a;">
+<h2 th:text="${cancelled.eventName} + ' has been cancelled'">The event has been cancelled</h2>
+<p>We are sorry: <strong th:text="${cancelled.eventName}">the event</strong>, due on
+   <span th:text="${when}">the date</span><span th:if="${cancelled.venue}" th:text="' at ' + ${cancelled.venue}"> at the venue</span>,
+   will not go ahead.</p>
+<p th:if="${cancelled.reason}" th:text="'The reason given: ' + ${cancelled.reason}">The reason.</p>
+<p th:if="${cancelled.refundDue}">Your order <strong th:text="${cancelled.orderNumber}">APX-XXXX</strong> is being
+   refunded in full, <strong th:text="${amount}">USD 0.00</strong>, to the card you paid with, and its tickets no
+   longer admit anyone. We email you as soon as the refund is on its way.</p>
+<p th:unless="${cancelled.refundDue}">Your order <strong th:text="${cancelled.orderNumber}">APX-XXXX</strong> had
+   not been paid for, so it has been cancelled and you have not been charged. If a payment for it still goes
+   through, it is refunded automatically.</p>
+<p>See the order at <a th:href="${orderUrl}" th:text="${orderUrl}">the order</a>.</p>
+</body>
+</html>

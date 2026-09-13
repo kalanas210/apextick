@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/hooks/useSession";
 import { Button } from "@/components/ui/button";
+import { useSiteMode } from "@/components/site/site-mode";
 
 /**
  * Hands sign-in over to Keycloak (authorization code + PKCE). ApexTick never
@@ -17,6 +18,7 @@ export function KeycloakSignIn({
 }) {
   const router = useRouter();
   const { isAuthenticated, isLoading, signIn } = useSession();
+  const { demo } = useSiteMode();
 
   // Already signed in? There is nothing to do on this page.
   useEffect(() => {
@@ -46,10 +48,13 @@ export function KeycloakSignIn({
         {isLoading ? "Preparing…" : copy.button}
       </Button>
       <p className="text-center text-[0.78rem] text-faint">{copy.note}</p>
-      <p className="text-center text-[0.72rem] text-faint">
-        Demo account: <span className="tnum text-muted">kalana</span> /{" "}
-        <span className="tnum text-muted">12345</span>
-      </p>
+      {/* Only on a demo deployment, and said to be shared: anyone who reads this page can use it. */}
+      {demo && (
+        <p className="text-center text-[0.72rem] text-faint">
+          Shared demo account: <span className="tnum text-muted">kalana</span> /{" "}
+          <span className="tnum text-muted">12345</span>. Anyone can sign in with it and see its orders.
+        </p>
+      )}
     </div>
   );
 }

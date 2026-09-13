@@ -44,7 +44,8 @@ export function buildSections(event: EventDetail, seats: ApiSeat[]): MapSection[
     const section = sectionById.get(seat.sectionId);
     if (!section) continue;
     const state: MapSeat["state"] =
-      seat.status === "BOOKED" ? "sold"
+      // a blocked seat reads as taken: it is not for sale, and why is nobody's business at checkout
+      seat.status === "BOOKED" || seat.status === "BLOCKED" ? "sold"
         // a seat this user is holding stays pickable — it is already theirs
         : seat.status === "HELD" && !seat.mine ? "held"
           : "available";

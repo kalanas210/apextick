@@ -161,6 +161,11 @@ export function usePayOrder(orderId: string) {
                 headers: { ...authHeaders(token), 'Idempotency-Key': attemptKey.current },
             })).data;
         },
+        // An answer settles the attempt, so the next submit -- another card, or another go after a
+        // 3-D Secure challenge the bank refused -- is a new payment with a key of its own.
+        onSuccess: () => {
+            attemptKey.current = null;
+        },
         onError: (error) => {
             if (settlesAttempt(apiStatus(error), apiErrorCode(error))) {
                 attemptKey.current = null;

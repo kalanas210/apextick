@@ -24,6 +24,8 @@ import { useSession } from "@/hooks/useSession";
 import type { Seat as ApiSeat } from "@/lib/types";
 import { Legend, Pitch, Stand, mmss, type MapSeat } from "./parts";
 import { buildSections, bySide, isLinkedSection, type MapSection } from "./sections";
+import { mergeSeatChanges } from "./realtime-merge";
+import { Button } from "@/components/ui/button";
 import { Clock } from "@/components/ui/icons";
 
 export function LiveSeatMap({
@@ -40,7 +42,13 @@ export function LiveSeatMap({
   const { isAuthenticated, isLoading: authLoading, signIn } = useSession();
 
   const { data: event, isLoading: eventLoading, error: eventError } = useEvent(slug);
-  const { data: seats, isLoading: seatsLoading } = useSeats(slug);
+  const {
+    data: seats,
+    isLoading: seatsLoading,
+    error: seatsError,
+    refetch: refetchSeats,
+    isFetching: seatsFetching,
+  } = useSeats(slug);
   const holdSeats = useHoldSeats(slug);
   const releaseHold = useReleaseHold(slug);
   const createOrder = useCreateOrder();
@@ -70,18 +78,9 @@ export function LiveSeatMap({
   // Live seat flips from other buyers, applied straight into the cache so the
   // map moves without waiting for a refetch.
   useSeatUpdates(event?.id, (changes: SeatStatusChange[]) => {
-    queryClient.setQueriesData<ApiSeat[]>({ queryKey: ["seats", slug] }, (current) => {
-      if (!current) return current;
-      const byId = new Map(changes.map((c) => [c.seatId, c]));
-      return current.map((seat) => {
-        const change = byId.get(seat.id);
-        if (!change) return seat;
-        // our own holds are only ever confirmed by our own responses
-        return change.status === "HELD" && seat.mine
-          ? seat
-          : { ...seat, status: change.status, heldUntil: change.heldUntil, mine: false };
-      });
-    });
+    queryClient.setQueriesData<ApiSeat[]>({ queryKey: ["seats", slug] }, (current) =>
+      mergeSeatChanges(current, changes),
+    );
   });
 
   // Seats the API already says are ours — a hold that survived a reload.
@@ -256,6 +255,24 @@ export function LiveSeatMap({
         <p className="mt-2 text-[0.76rem] text-faint">
           {apiErrorMessage(eventError, "Could not reach the booking service.")}
         </p>
+      </div>
+    );
+  }
+
+  // Without its seats the map drew an empty ground under a headline saying seats are open --
+  // and a seat request fails exactly when it matters most, under an on-sale rush.
+  if (seatsError && !seats) {
+    return (
+      <div role="alert" className="rounded-2xl border border-line bg-ink-2 p-8 text-center">
+        <p className="text-[0.9rem] text-muted">The seats could not be loaded.</p>
+        <p className="mt-2 text-[0.76rem] text-faint">
+          {apiErrorMessage(seatsError, "The booking service did not answer.")} Nothing is held for you.
+        </p>
+        <div className="mt-6 flex justify-center">
+          <Button onClick={() => void refetchSeats()} size="md" variant="outline">
+            {seatsFetching ? "Trying again…" : "Try again"}
+          </Button>
+        </div>
       </div>
     );
   }

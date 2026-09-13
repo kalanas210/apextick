@@ -1,0 +1,1321 @@
+{
+  "info": {
+    "_postman_id": "7f6b9f2e-4a1c-4e2b-9a63-0d3c5a1b8e42",
+    "name": "ApexTick Booking API",
+    "description": "Full surface of the ApexTick booking-service (Spring Boot, port **8081**).\n\n**Quick start**\n1. Select the *ApexTick Local* environment, and set `username` and `password` to your account.\n2. `01 · Auth → Get token` - stores `{{accessToken}}`; every request inherits it as Bearer auth.\n3. `02 · Catalog → Event detail` then `Seats for event` - saves `eventId`, `seatId1`, `seatId2`.\n4. `03 · Holds → Hold seats` → `04 · Orders → Create order` → `Pay (mock card)`.\n5. `05 · Tickets → Tickets for order` → `Ticket PDF` (use *Send and Download*), then `08 · Gate → Scan ticket`.\n\n**Notes**\n- The token comes from the confidential `apextick-loadtest` client; `clientSecret` is `LOADTEST_CLIENT_SECRET` from `.env`.\n- Errors are RFC-7807 `application/problem+json`, with a machine-readable `code`.\n- If port 8081 is taken, run booking-service on another port and change `baseUrl`.\n- Admin needs the `admin` realm role, and Gate the `admin` or `scanner` role: `scripts/grant-role.sh admin|scanner <user>`, then a new token.\n- Realtime seat updates are STOMP over `/api/ws`, outside Postman's HTTP scope.\n- The WSO2 gateway fronts this same API in production; the collection talks to the service directly.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "01 · Auth",
+      "description": "Run **Get token** first. It logs in to Keycloak with the resource-owner-password (direct) grant and stores the JWT in `{{accessToken}}`, which every other request inherits as a Bearer token. Tokens are short-lived (~5 min) - when anything starts returning 401, just re-run this.",
+      "item": [
+        {
+          "name": "Get token (Keycloak password grant)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Token issued\", () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "if (json.access_token) {",
+                  "    pm.environment.set(\"accessToken\", json.access_token);",
+                  "    console.log(\"accessToken saved, expires in \" + json.expires_in + \"s\");",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": {
+              "raw": "{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/token",
+              "host": [
+                "{{keycloakUrl}}"
+              ],
+              "path": [
+                "realms",
+                "{{realm}}",
+                "protocol",
+                "openid-connect",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{clientId}}",
+                  "type": "text"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{clientSecret}}",
+                  "type": "text"
+                },
+                {
+                  "key": "username",
+                  "value": "{{username}}",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}",
+                  "type": "text"
+                },
+                {
+                  "key": "scope",
+                  "value": "openid profile email",
+                  "type": "text"
+                }
+              ]
+            },
+            "description": "Password grant on the confidential `apextick-loadtest` client: the browser's public client, `apextick-web`, takes authorization code + PKCE only and refuses this grant. `clientSecret` is `LOADTEST_CLIENT_SECRET` from `.env` (`dev-loadtest-secret` locally), and `username`/`password` are your own account's; a demo deployment prints its shared account on the sign-in page. The test script saves `access_token`."
+          }
+        },
+        {
+          "name": "My profile - GET /api/me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "me"
+              ]
+            },
+            "description": "The authenticated user's profile and realm roles, resolved from the JWT. Good smoke test that the token works."
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 · Catalog (public)",
+      "description": "Public, no token needed. **Event detail** and **Seats** have test scripts that auto-save `eventId`, `seatId1`, `seatId2` for the hold/order requests downstream.",
+      "item": [
+        {
+          "name": "All series - GET /api/series",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/series",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "series"
+              ]
+            },
+            "description": "Seeded series: `icc-t20-2026`, `ipl-2026`, `premier-league`, `fifa-world-cup`.",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Series by slug - GET /api/series/{slug}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/series/{{seriesSlug}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "series",
+                "{{seriesSlug}}"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Browse events - GET /api/events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/events?status=onsale&page=0&size=20&sort=soonest",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "onsale",
+                  "description": "onsale | selling-fast | final-release | sold-out (draft/cancelled are hidden)"
+                },
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                },
+                {
+                  "key": "sort",
+                  "value": "soonest",
+                  "description": "soonest is the default"
+                },
+                {
+                  "key": "sport",
+                  "value": "CRICKET",
+                  "description": "CRICKET | FOOTBALL",
+                  "disabled": true
+                },
+                {
+                  "key": "series",
+                  "value": "{{seriesSlug}}",
+                  "description": "filter by series slug",
+                  "disabled": true
+                },
+                {
+                  "key": "seriesId",
+                  "value": "1",
+                  "description": "filter by series id",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "india",
+                  "description": "free-text search",
+                  "disabled": true
+                },
+                {
+                  "key": "city",
+                  "value": "Colombo",
+                  "disabled": true
+                },
+                {
+                  "key": "from",
+                  "value": "2026-02-01",
+                  "description": "ISO date",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-03-31",
+                  "description": "ISO date",
+                  "disabled": true
+                },
+                {
+                  "key": "month",
+                  "value": "2026-02",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Paged event summaries. Enable the disabled params to filter.",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Event detail - GET /api/events/{idOrSlug}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/events/{{eventSlug}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "events",
+                "{{eventSlug}}"
+              ]
+            },
+            "description": "Accepts a numeric id or a slug. Draft and cancelled events answer 404 here; admins read them with Admin → *Event detail*. Saves `eventId`, which the order and gate requests use.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const e = pm.response.json();",
+                  "if (e.id) { pm.environment.set(\"eventId\", e.id); console.log(\"eventId =\", e.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Seats for event - GET /api/events/{idOrSlug}/seats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/events/{{eventSlug}}/seats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "events",
+                "{{eventSlug}}",
+                "seats"
+              ]
+            },
+            "description": "Flat list of seats (status AVAILABLE | HELD | BOOKED | BLOCKED). With a token, your own holds come back with `mine: true`. Saves the first two AVAILABLE seat ids into `seatId1`/`seatId2`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const seats = pm.response.json();",
+                  "const free = seats.filter(s => s.status === \"AVAILABLE\").slice(0, 2);",
+                  "if (free[0]) pm.environment.set(\"seatId1\", free[0].id);",
+                  "if (free[1]) pm.environment.set(\"seatId2\", free[1].id);",
+                  "console.log(\"Saved seats:\", free.map(s => s.id + \" (\" + s.label + \")\").join(\", \") || \"none available\");"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 · Holds",
+      "description": "Requires a token. Holds are all-or-nothing and expire after **5 minutes** (`app.hold.duration = PT5M`); an expired hold is swept back to AVAILABLE. Live seat updates fan out over STOMP at `/api/ws` (WebSocket - not exercisable from Postman's HTTP requests).",
+      "item": [
+        {
+          "name": "Hold seats - POST /api/events/{idOrSlug}/holds",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/events/{{eventSlug}}/holds",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "events",
+                "{{eventSlug}}",
+                "holds"
+              ]
+            },
+            "description": "Holds every seat in the list for the caller, or none of them: **409** (RFC-7807, naming the seats) if any is already held or booked. Holding seats you already hold extends the hold. Refused outside the event's sales window, beyond the per-person cap (8 seats per event, 422 `TOO_MANY_SEATS`) and over the rate limit (429). Run *Seats for event* first so `seatId1`/`seatId2` are set.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"seatIds\": [{{seatId1}}, {{seatId2}}]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "My holds - GET /api/events/{idOrSlug}/holds/me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/events/{{eventSlug}}/holds/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "events",
+                "{{eventSlug}}",
+                "holds",
+                "me"
+              ]
+            },
+            "description": "The caller's current holds for this event, with `heldUntil`."
+          }
+        },
+        {
+          "name": "Release my holds - DELETE /api/events/{idOrSlug}/holds",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/events/{{eventSlug}}/holds",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "events",
+                "{{eventSlug}}",
+                "holds"
+              ]
+            },
+            "description": "Releases all of the caller's holds for this event. 409 `ORDER_PENDING` while an unpaid order of yours still covers them: cancel that order instead."
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 · Orders",
+      "description": "Requires a token. Flow: hold seats → **Create order** (turns your holds into a PENDING_PAYMENT order with a payment window) → **Pay**. Statuses: PENDING_PAYMENT | PAID | CANCELLED | EXPIRED.",
+      "item": [
+        {
+          "name": "Create order - POST /api/orders",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "Fresh GUID per attempt. Reusing the same key on a retry of the SAME order clashes with uq_payments_provider_ref - just send again to get a new one."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders"
+              ]
+            },
+            "description": "Creates an order from the caller's **held** seats (hold them first). Idempotent per `Idempotency-Key`. Saves `orderId`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": {{eventId}},\n  \"seatIds\": [{{seatId1}}, {{seatId2}}]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Order created\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "const o = pm.response.json();",
+                  "if (o.id) { pm.environment.set(\"orderId\", o.id); console.log(\"orderId =\", o.id, \"number =\", o.orderNumber); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "My orders - GET /api/orders/me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders",
+                "me"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Order detail - GET /api/orders/{id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "description": "404 for another user's order."
+          }
+        },
+        {
+          "name": "Pay (mock card) - POST /api/orders/{id}/pay",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "Fresh GUID per attempt. Reusing the same key on a retry of the SAME order clashes with uq_payments_provider_ref - just send again to get a new one."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders/{{orderId}}/pay",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders",
+                "{{orderId}}",
+                "pay"
+              ]
+            },
+            "description": "Pays via the configured gateway (`app.payment.provider`, default **mock**).\n\n**Mock cards:** `4242 4242 4242 4242` → success · `4000 0000 0000 0002` → declined · `4000 0000 0000 9995` → insufficient funds.\n\n**Stripe (server-confirm)** - set `APP_PAYMENT_PROVIDER=stripe` and send instead:\n\n```json\n{ \"paymentMethodId\": \"pm_card_visa\" }\n```\n\nClient-confirm (Stripe Elements) returns a `client_secret` and the webhook completes the order. If seats were lost while paying you get a SEATS_LOST compensation (auto-refund + cancel).\n\n**Answers.** A decline is 402 and carries the payment itself, with `failureCode` and `failureMessage`. `REQUIRES_ACTION` means 3-D Secure: its `clientSecret` goes to Stripe.js in the browser. Postman's `{{$guid}}` makes a new `Idempotency-Key` on every send, so each send is a new attempt; resend an attempt's own key to replay its answer instead of paying twice.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"card\": {\n    \"number\": \"4242 4242 4242 4242\",\n    \"expMonth\": 12,\n    \"expYear\": 2030,\n    \"cvc\": \"123\",\n    \"holder\": \"Kalana Sandakelum\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Payment attempts - GET /api/orders/{id}/payments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders/{{orderId}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders",
+                "{{orderId}}",
+                "payments"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cancel order - POST /api/orders/{id}/cancel",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders/{{orderId}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders",
+                "{{orderId}}",
+                "cancel"
+              ]
+            },
+            "description": "Cancels a PENDING_PAYMENT order and releases its seats. A paid order can't be cancelled here."
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 · Tickets",
+      "description": "Tickets are issued when an order is PAID. PDFs (with the QR code) are pre-rendered asynchronously to MinIO/in-memory storage and regenerated on a miss.",
+      "item": [
+        {
+          "name": "Tickets for order - GET /api/orders/{orderId}/tickets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders/{{orderId}}/tickets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders",
+                "{{orderId}}",
+                "tickets"
+              ]
+            },
+            "description": "Saves `ticketId` and `qrToken` (used by Gate → *Scan ticket*)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const tickets = pm.response.json();",
+                  "if (tickets.length) {",
+                  "    pm.environment.set(\"ticketId\", tickets[0].id);",
+                  "    if (tickets[0].qrToken) pm.environment.set(\"qrToken\", tickets[0].qrToken);",
+                  "    console.log(\"ticketId =\", tickets[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ticket detail - GET /api/tickets/{id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/tickets/{{ticketId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tickets",
+                "{{ticketId}}"
+              ]
+            },
+            "description": "404 for a stranger's ticket."
+          }
+        },
+        {
+          "name": "Ticket PDF - GET /api/tickets/{id}/pdf",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/tickets/{{ticketId}}/pdf",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tickets",
+                "{{ticketId}}",
+                "pdf"
+              ]
+            },
+            "description": "`application/pdf` with the QR code. In Postman use **Send and Download** (arrow next to Send) to save the file."
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 · Payments (public)",
+      "item": [
+        {
+          "name": "Payment config - GET /api/payments/config",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/payments/config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payments",
+                "config"
+              ]
+            },
+            "description": "The active provider and the Stripe publishable key, which the checkout reads to choose Stripe Elements or the mock card form; `testMode` (no real money can be taken) and `demo` (the demo season is seeded), which decide whether the storefront calls itself a demonstration and says checkout runs in test mode.",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Stripe webhook - POST /api/payments/stripe/webhook",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Stripe-Signature",
+                "value": "t=1700000000,v1=replace-with-real-signature",
+                "description": "Generated by Stripe; cannot be handcrafted."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payments/stripe/webhook",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payments",
+                "stripe",
+                "webhook"
+              ]
+            },
+            "description": "Signature-verified and idempotent (`payment_webhook_events`), so this sample body will be **rejected (400)** without a real `Stripe-Signature`.\n\nTo exercise it for real:\n\n```\nstripe listen --forward-to localhost:8081/api/payments/stripe/webhook\nstripe trigger payment_intent.succeeded\n```\n\nand put the printed whsec_… in `STRIPE_WEBHOOK_SECRET`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"evt_local_example\",\n  \"object\": \"event\",\n  \"type\": \"payment_intent.succeeded\",\n  \"data\": {\n    \"object\": {\n      \"id\": \"pi_local_example\",\n      \"object\": \"payment_intent\",\n      \"status\": \"succeeded\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 · Admin (ADMIN role)",
+      "description": "Needs the `admin` realm role: grant it with `scripts/grant-role.sh admin <user>`, then get a new token.",
+      "item": [
+        {
+          "name": "All events - GET /api/admin/events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/events?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                },
+                {
+                  "key": "status",
+                  "value": "draft",
+                  "disabled": true
+                },
+                {
+                  "key": "sport",
+                  "value": "cricket",
+                  "disabled": true
+                },
+                {
+                  "key": "series",
+                  "value": "icc-t20-2026",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Every event, drafts and cancelled ones included, which the public list leaves out. Filter with the disabled params."
+          }
+        },
+        {
+          "name": "Create event - POST /api/admin/events",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "events"
+              ]
+            },
+            "description": "Required: name, slug, sport, venue, startsAt, currency. Optional: seriesId, homeTeamId/awayTeamId (existing ids: Admin → *Teams* lists them). Saves `adminEventId`. Also saves `adminEventSlug`. The pre-request script dates the event a month out, on sale from the day before until two hours before kickoff, and the slug takes a timestamp, so the request can be sent again.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sri Lanka v Afghanistan\",\n  \"slug\": \"sri-lanka-afghanistan-{{$timestamp}}\",\n  \"sport\": \"CRICKET\",\n  \"venue\": \"R. Premadasa Stadium\",\n  \"city\": \"Colombo\",\n  \"country\": \"Sri Lanka\",\n  \"stage\": \"Group Stage\",\n  \"startsAt\": \"{{eventStartsAt}}\",\n  \"salesStartAt\": \"{{salesStartAt}}\",\n  \"salesEndAt\": \"{{salesEndAt}}\",\n  \"timeZone\": \"Asia/Colombo\",\n  \"currency\": \"LKR\",\n  \"status\": \"draft\",\n  \"seriesId\": 1,\n  \"blurb\": \"A Colombo night under lights as the hosts open their campaign.\",\n  \"image\": \"1540747913346-19e32dc3e97e\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// a month out, on sale from yesterday until two hours before kickoff, so the event can be sold",
+                  "const day = 24 * 60 * 60 * 1000;",
+                  "const startsAt = new Date(Date.now() + 30 * day);",
+                  "pm.environment.set(\"eventStartsAt\", startsAt.toISOString());",
+                  "pm.environment.set(\"salesStartAt\", new Date(Date.now() - day).toISOString());",
+                  "pm.environment.set(\"salesEndAt\", new Date(startsAt.getTime() - 2 * 60 * 60 * 1000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Created\", () => pm.response.to.have.status(201));",
+                  "const e = pm.response.json();",
+                  "if (e.id) { pm.environment.set(\"adminEventId\", e.id); console.log(\"adminEventId =\", e.id); }",
+                  "if (e.slug) pm.environment.set(\"adminEventSlug\", e.slug);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Event detail - GET /api/admin/events/{id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/events/{{adminEventId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "events",
+                "{{adminEventId}}"
+              ]
+            },
+            "description": "Any event, whatever its status: what the admin panel's editor reads."
+          }
+        },
+        {
+          "name": "Update event - PUT /api/admin/events/{id}",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/events/{{adminEventId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "events",
+                "{{adminEventId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sri Lanka v Afghanistan (updated)\",\n  \"slug\": \"{{adminEventSlug}}\",\n  \"sport\": \"CRICKET\",\n  \"venue\": \"R. Premadasa Stadium\",\n  \"city\": \"Colombo\",\n  \"country\": \"Sri Lanka\",\n  \"stage\": \"Group Stage\",\n  \"startsAt\": \"{{eventStartsAt}}\",\n  \"salesStartAt\": \"{{salesStartAt}}\",\n  \"salesEndAt\": \"{{salesEndAt}}\",\n  \"timeZone\": \"Asia/Colombo\",\n  \"currency\": \"LKR\",\n  \"seriesId\": 1,\n  \"blurb\": \"A Colombo night under lights as the hosts open their campaign.\",\n  \"image\": \"1540747913346-19e32dc3e97e\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Replaces the event's details. It cannot change the status: leave `status` out and use *Set status*; a different status here answers 409 `EVENT_STATUS_TRANSITION`."
+          }
+        },
+        {
+          "name": "Apply layout - POST /api/admin/events/{id}/layout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/events/{{adminEventId}}/layout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "events",
+                "{{adminEventId}}",
+                "layout"
+              ]
+            },
+            "description": "Generates tiers, sections and seats (rows × seatsPerRow per section) for the event, once. `side` is `n`, `s`, `e` or `w`: where the stand sits around the pitch.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tiers\": [\n    { \"code\": \"VIP\", \"name\": \"VIP Box\", \"price\": 25000, \"perks\": [\"Lounge access\", \"Free parking\"], \"sortOrder\": 1 },\n    { \"code\": \"GRD\", \"name\": \"Grandstand\", \"price\": 8000, \"perks\": [], \"sortOrder\": 2 }\n  ],\n  \"sections\": [\n    { \"code\": \"A\", \"name\": \"Pavilion A\", \"tierCode\": \"VIP\", \"rows\": 5, \"seatsPerRow\": 10, \"side\": \"n\", \"sortOrder\": 1 },\n    { \"code\": \"B\", \"name\": \"East Stand\", \"tierCode\": \"GRD\", \"rows\": 10, \"seatsPerRow\": 20, \"side\": \"e\", \"sortOrder\": 2 }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Set status - PATCH /api/admin/events/{id}/status",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/events/{{adminEventId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "events",
+                "{{adminEventId}}",
+                "status"
+              ]
+            },
+            "description": "Status codes: `onsale` | `selling-fast` | `final-release` | `sold-out` | `draft` | `cancelled`. Only the first four are public.\n\n`{\"status\": \"cancelled\", \"reason\": \"...\"}` cancels the event and everything sold for it: paid orders are refunded, unpaid ones cancelled, holds released, and every buyer is e-mailed. A cancelled event cannot be reopened, and an event that has sold cannot go back to `draft` (409 `EVENT_STATUS_TRANSITION`).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"onsale\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Event stats - GET /api/admin/events/{id}/stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/events/{{adminEventId}}/stats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "events",
+                "{{adminEventId}}",
+                "stats"
+              ]
+            },
+            "description": "Per-tier availability/held/booked counts and revenue."
+          }
+        },
+        {
+          "name": "Teams - GET /api/admin/teams",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/teams",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "teams"
+              ]
+            },
+            "description": "Team ids, for an event's `homeTeamId` and `awayTeamId`."
+          }
+        },
+        {
+          "name": "All orders - GET /api/admin/orders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/orders?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                },
+                {
+                  "key": "q",
+                  "value": "APX-",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "PAID",
+                  "disabled": true
+                },
+                {
+                  "key": "refundRequired",
+                  "value": "true",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Newest first. `q` finds an order by its number or its customer, and `refundRequired=true` lists the orders whose refund the provider has not accepted yet; both are disabled params."
+          }
+        },
+        {
+          "name": "Order detail - GET /api/admin/orders/{id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "description": "The whole order: items, payments with any refund still owed, tickets, and whatever would block a refund."
+          }
+        },
+        {
+          "name": "Refund order - POST /api/admin/orders/{id}/refund",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/orders/{{orderId}}/refund",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "orders",
+                "{{orderId}}",
+                "refund"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Refunded at the box office\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Refunds a paid order in full. Its tickets are voided and its seats go back on sale before the provider is asked for the money, and a refund the provider refuses stays owed (`REFUND_REQUIRED`) and is asked for again. 409 `ORDER_TICKETS_USED` while one of its tickets is admitted: undo that at the gate first."
+          }
+        },
+        {
+          "name": "Retry refund - POST /api/admin/orders/{id}/refund/retry",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/orders/{{orderId}}/refund/retry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "orders",
+                "{{orderId}}",
+                "refund",
+                "retry"
+              ]
+            },
+            "description": "Asks the provider again for a refund that is still owed, without waiting for the scheduled retry."
+          }
+        },
+        {
+          "name": "Seats by event - GET /api/admin/seats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/seats?eventId={{eventId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "seats"
+              ],
+              "query": [
+                {
+                  "key": "eventId",
+                  "value": "{{eventId}}"
+                }
+              ]
+            },
+            "description": "Admin view of an event's seats (AVAILABLE | HELD | BOOKED | BLOCKED), with each holder and hold expiry."
+          }
+        },
+        {
+          "name": "Force-release seat - POST /api/admin/seats/{id}/release",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/seats/{{seatId1}}/release",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "seats",
+                "{{seatId1}}",
+                "release"
+              ]
+            },
+            "description": "Releases a held seat whoever holds it, and cancels the unpaid order that covers it. A seat that is not held answers 409 `SEAT_NOT_HELD`."
+          }
+        },
+        {
+          "name": "Block seat - POST /api/admin/seats/{id}/block",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/seats/{{seatId1}}/block",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "seats",
+                "{{seatId1}}",
+                "block"
+              ]
+            },
+            "description": "Takes an available seat off sale (`BLOCKED`); any other seat answers 409 `SEAT_UNAVAILABLE`."
+          }
+        },
+        {
+          "name": "Unblock seat - POST /api/admin/seats/{id}/unblock",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/seats/{{seatId1}}/unblock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "seats",
+                "{{seatId1}}",
+                "unblock"
+              ]
+            },
+            "description": "Puts a blocked seat back on sale; a seat that is not blocked answers 409 `SEAT_NOT_BLOCKED`."
+          }
+        },
+        {
+          "name": "Delete event - DELETE /api/admin/events/{id}",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/events/{{adminEventId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "events",
+                "{{adminEventId}}"
+              ]
+            },
+            "description": "204 on success. Run last - it removes the event created above."
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 · Gate (admin or scanner role)",
+      "description": "The turnstile API. The `scanner` role reaches these and nothing else: `scripts/grant-role.sh scanner <user>`.",
+      "item": [
+        {
+          "name": "Scan ticket - POST /api/gate/scans",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/gate/scans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "gate",
+                "scans"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"qrToken\": \"{{qrToken}}\",\n  \"eventId\": {{eventId}},\n  \"gate\": \"North 1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Admits a ticket once, and only at its own event. Scanning it again answers 409 `TICKET_ALREADY_USED`, a ticket for another event 409 `TICKET_WRONG_EVENT`, and an event that is not admitting `EVENT_NOT_ADMITTING`. Every scan, admitted or refused, is recorded. `qrToken` comes from Tickets → *Tickets for order*."
+          }
+        },
+        {
+          "name": "Admissions - GET /api/gate/events/{eventId}/admissions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/gate/events/{{eventId}}/admissions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "gate",
+                "events",
+                "{{eventId}}",
+                "admissions"
+              ]
+            },
+            "description": "How many tickets have been admitted to the event, across every gate."
+          }
+        },
+        {
+          "name": "Undo admission - POST /api/gate/tickets/{ticketId}/unadmit",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/gate/tickets/{{ticketId}}/unadmit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "gate",
+                "tickets",
+                "{{ticketId}}",
+                "unadmit"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Scanned the wrong phone\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Admin only: returns an admitted ticket to unused, recording why. 409 `TICKET_NOT_ADMITTED` when there is nothing to undo."
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 · Ops",
+      "item": [
+        {
+          "name": "Health - GET /actuator/health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/actuator/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "actuator",
+                "health"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Prometheus metrics - GET /actuator/prometheus",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/actuator/prometheus",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "actuator",
+                "prometheus"
+              ]
+            },
+            "description": "What Prometheus scrapes (`docker compose --profile observability up`); includes http.server.requests histograms.",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

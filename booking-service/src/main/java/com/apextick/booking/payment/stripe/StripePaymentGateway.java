@@ -15,6 +15,7 @@ import com.stripe.exception.EventDataObjectDeserializationException;
 import com.stripe.exception.SignatureVerificationException;
 import com.stripe.exception.StripeException;
 import com.stripe.model.Charge;
+import com.stripe.model.Dispute;
 import com.stripe.model.Event;
 import com.stripe.model.EventDataObjectDeserializer;
 import com.stripe.model.PaymentIntent;
@@ -159,37 +160,70 @@ public class StripePaymentGateway implements PaymentGateway {
             throw new WebhookVerificationException("Invalid Stripe signature");
         }
 
-        PaymentOutcome outcome = switch (event.getType()) {
-            case "payment_intent.succeeded" -> PaymentOutcome.SUCCEEDED;
-            case "payment_intent.payment_failed" -> PaymentOutcome.FAILED;
-            default -> null; // an event type we don't act on -> acknowledge with 200, no state change
+        return switch (event.getType()) {
+            case "payment_intent.succeeded" -> intentResult(event, req, PaymentOutcome.SUCCEEDED);
+            case "payment_intent.payment_failed" -> intentResult(event, req, PaymentOutcome.FAILED);
+            // an intent given up on: a 3-D Secure challenge abandoned, or one cancelled in the dashboard
+            case "payment_intent.canceled" -> intentResult(event, req, PaymentOutcome.CANCELLED);
+            case "charge.refunded" -> refundResult(event, req);
+            case "charge.dispute.created" -> disputeResult(event, req);
+            default -> Optional.empty(); // an event type we don't act on -> acknowledge with 200, no state change
         };
-        if (outcome == null) {
-            return Optional.empty();
-        }
+    }
 
-        PaymentIntent pi = extractPaymentIntent(event);
-        if (pi == null) {
+    private Optional<PaymentResult> intentResult(Event event, CallbackRequest req, PaymentOutcome outcome) {
+        if (!(dataObject(event) instanceof PaymentIntent pi)) {
             log.warn("Stripe {} event {} carried no PaymentIntent", event.getType(), event.getId());
             return Optional.empty();
         }
-
         String currency = pi.getCurrency() == null ? null : pi.getCurrency().toUpperCase(Locale.ROOT);
         Long minor = pi.getAmountReceived() != null && pi.getAmountReceived() > 0
                 ? pi.getAmountReceived() : pi.getAmount();
-        BigDecimal amount = minor == null || currency == null ? null
-                : StripeAmounts.fromMinorUnits(minor, currency);
         String[] card = cardOf(pi);
         String failureCode = null;
         if (outcome == PaymentOutcome.FAILED && pi.getLastPaymentError() != null) {
             com.stripe.model.StripeError err = pi.getLastPaymentError();
             failureCode = err.getDeclineCode() != null ? err.getDeclineCode() : err.getCode();
+        } else if (outcome == PaymentOutcome.CANCELLED) {
+            failureCode = pi.getCancellationReason() == null ? "canceled" : pi.getCancellationReason();
         }
         // stamped on the intent by initiate(), so a callback can name its payment even before the
         // intent's id has been recorded against it
         String paymentId = pi.getMetadata() == null ? null : pi.getMetadata().get("paymentId");
-        return Optional.of(new PaymentResult(event.getId(), pi.getId(), paymentId, outcome, amount, currency,
-                card[0], card[1], failureCode, req.rawBody()));
+        return Optional.of(new PaymentResult(event.getId(), pi.getId(), paymentId, outcome, amountOf(minor, currency),
+                currency, card[0], card[1], failureCode, req.rawBody()));
+    }
+
+    /**
+     * A charge refunded in Stripe itself: in the dashboard, or the refund this service asked for,
+     * reported back. Only a charge refunded in full is passed on. A partial refund in the dashboard
+     * is a goodwill gesture, not the end of the order.
+     */
+    private Optional<PaymentResult> refundResult(Event event, CallbackRequest req) {
+        if (!(dataObject(event) instanceof Charge charge) || charge.getPaymentIntent() == null) {
+            log.warn("Stripe {} event {} carried no charge of a PaymentIntent", event.getType(), event.getId());
+            return Optional.empty();
+        }
+        if (!Boolean.TRUE.equals(charge.getRefunded())) {
+            log.info("Stripe charge {} of intent {} was partly refunded ({} of {}); its order stands",
+                    charge.getId(), charge.getPaymentIntent(), charge.getAmountRefunded(), charge.getAmount());
+            return Optional.empty();
+        }
+        String currency = charge.getCurrency() == null ? null : charge.getCurrency().toUpperCase(Locale.ROOT);
+        return Optional.of(new PaymentResult(event.getId(), charge.getPaymentIntent(), null, PaymentOutcome.REFUNDED,
+                amountOf(charge.getAmountRefunded(), currency), currency, null, null, null, req.rawBody()));
+    }
+
+    /** The cardholder disputed a charge with their bank: the money is being clawed back. */
+    private Optional<PaymentResult> disputeResult(Event event, CallbackRequest req) {
+        if (!(dataObject(event) instanceof Dispute dispute) || dispute.getPaymentIntent() == null) {
+            log.warn("Stripe {} event {} carried no dispute of a PaymentIntent", event.getType(), event.getId());
+            return Optional.empty();
+        }
+        String currency = dispute.getCurrency() == null ? null : dispute.getCurrency().toUpperCase(Locale.ROOT);
+        return Optional.of(new PaymentResult(event.getId(), dispute.getPaymentIntent(), null,
+                PaymentOutcome.CHARGEBACK, amountOf(dispute.getAmount(), currency), currency, null, null,
+                dispute.getReason(), req.rawBody()));
     }
 
     @Override
@@ -203,9 +237,19 @@ public class StripePaymentGateway implements PaymentGateway {
             Refund refund = Refund.create(params, options(idempotencyKey));
             return new RefundResult(true, refund.getId(), null);
         } catch (StripeException e) {
+            if ("charge_already_refunded".equals(e.getCode())) {
+                // refunded already -- in the dashboard, or by an ask whose answer never arrived: the
+                // money is back either way, and asking again forever would not change that
+                log.info("Stripe intent {} was already refunded", providerRef);
+                return new RefundResult(true, null, null);
+            }
             log.error("Stripe refund failed for intent {}", providerRef, e);
             return new RefundResult(false, null, e.getMessage());
         }
+    }
+
+    private static BigDecimal amountOf(Long minor, String currency) {
+        return minor == null || currency == null ? null : StripeAmounts.fromMinorUnits(minor, currency);
     }
 
     /** brand (upper-case) + last4 from the intent's latest charge, or {nulls} when unavailable. */
@@ -220,7 +264,7 @@ public class StripePaymentGateway implements PaymentGateway {
         return new String[]{null, null};
     }
 
-    private static PaymentIntent extractPaymentIntent(Event event) {
+    private static StripeObject dataObject(Event event) {
         EventDataObjectDeserializer deserializer = event.getDataObjectDeserializer();
         StripeObject obj = deserializer.getObject().orElse(null);
         if (obj == null) {
@@ -231,7 +275,7 @@ public class StripePaymentGateway implements PaymentGateway {
                 return null;
             }
         }
-        return obj instanceof PaymentIntent pi ? pi : null;
+        return obj;
     }
 
     private RequestOptions options(String idempotencyKey) {

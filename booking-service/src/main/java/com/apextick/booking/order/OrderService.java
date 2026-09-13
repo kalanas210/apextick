@@ -177,6 +177,22 @@ public class OrderService {
         return toResponse(order);
     }
 
+    /**
+     * An unpaid order of an event being cancelled: closed and its seats let go, inside the
+     * cancellation's transaction. Its buyer is told by the cancellation itself.
+     *
+     * @return whether the order was still open to cancel
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean cancelForCancelledEvent(UUID id) {
+        Order order = orders.findByIdForUpdate(id).orElse(null);
+        if (order == null || order.getStatus() != OrderStatus.PENDING_PAYMENT) {
+            return false;
+        }
+        releaseSeatsAndClose(order, OrderStatus.CANCELLED, "EVENT_CANCELLED");
+        return true;
+    }
+
     /** Called by the expiry sweeper. */
     @Transactional
     public void expire(UUID id) {
@@ -310,6 +326,72 @@ public class OrderService {
         }
     }
 
+    /**
+     * Marks a paid order refunded and voids its tickets. Callers hold the order's row lock.
+     *
+     * @return how many tickets were voided
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public int markRefunded(Order order, String refundedBy, String reason) {
+        int voided = voidTickets(order, "REFUNDED");
+        Instant now = Instant.now();
+        order.setStatus(OrderStatus.REFUNDED);
+        order.setRefundedAt(now);
+        order.setRefundedBy(refundedBy);
+        order.setRefundReason(reason);
+        order.setUpdatedAt(now);
+        return voided;
+    }
+
+    /**
+     * A paid order whose charge the customer disputed with their bank. The money is being clawed
+     * back however the dispute ends, so its tickets stop admitting anyone and its seats go back on
+     * sale. Callers hold the order's row lock.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void markDisputed(Order order) {
+        voidTickets(order, "CHARGEBACK");
+        Instant now = Instant.now();
+        order.setStatus(OrderStatus.CANCELLED);
+        order.setCancelReason("CHARGEBACK");
+        order.setCancelledAt(now);
+        order.setUpdatedAt(now);
+        announceCancelled(order, order.getItems().stream().map(OrderItem::getSeatId).toList(), "CHARGEBACK");
+    }
+
+    private void announceCancelled(Order order, List<Long> seatIds, String reason) {
+        Map<String, Object> cancelPayload = new LinkedHashMap<>();
+        cancelPayload.put("orderId", order.getId().toString());
+        cancelPayload.put("orderNumber", order.getOrderNumber());
+        cancelPayload.put("userSub", order.getUserSub());
+        cancelPayload.put("userEmail", order.getUserEmail());
+        cancelPayload.put("eventId", order.getEvent().getId());
+        cancelPayload.put("seatIds", seatIds);
+        cancelPayload.put("reason", reason);
+        domainEvents.publish(EventTypes.ORDER_CANCELLED, "order", order.getId().toString(), cancelPayload);
+    }
+
+    /**
+     * Voids a paid order's unused tickets, so they stop opening gates, and puts their seats back on
+     * sale. A ticket already used stays used: its holder is inside, and so is their seat.
+     */
+    private int voidTickets(Order order, String reason) {
+        List<Long> seatIds = tickets.cancelIssued(order.getId());
+        if (seatIds.isEmpty()) {
+            return 0;
+        }
+        List<Long> released = seats.releaseBooked(seatIds);
+        Long eventId = order.getEvent().getId();
+        for (Long seatId : released) {
+            domainEvents.publish(EventTypes.SEAT_RELEASED, "seat", String.valueOf(seatId),
+                    new SeatReleasedPayload(seatId, eventId, "ORDER_" + reason));
+        }
+        List<SeatStatusChange> changes = released.stream()
+                .map(sid -> new SeatStatusChange(sid, SeatStatus.AVAILABLE.name(), null)).toList();
+        AfterCommit.run(() -> realtime.seatStatusChanged(eventId, changes));
+        return seatIds.size();
+    }
+
     public OrderResponse toResponse(Order order) {
         Map<Long, UUID> ticketByItem = tickets.findByOrderId(order.getId()).stream()
                 .collect(Collectors.toMap(t -> t.getOrderItem().getId(), Ticket::getId));
@@ -348,15 +430,7 @@ public class OrderService {
             domainEvents.publish(EventTypes.SEAT_RELEASED, "seat", String.valueOf(seatId),
                     new SeatReleasedPayload(seatId, eventId, "ORDER_" + reason));
         }
-        Map<String, Object> cancelPayload = new LinkedHashMap<>();
-        cancelPayload.put("orderId", order.getId().toString());
-        cancelPayload.put("orderNumber", order.getOrderNumber());
-        cancelPayload.put("userSub", order.getUserSub());
-        cancelPayload.put("userEmail", order.getUserEmail());
-        cancelPayload.put("eventId", eventId);
-        cancelPayload.put("seatIds", seatIds);
-        cancelPayload.put("reason", reason);
-        domainEvents.publish(EventTypes.ORDER_CANCELLED, "order", order.getId().toString(), cancelPayload);
+        announceCancelled(order, seatIds, reason);
 
         List<SeatStatusChange> changes = released.stream()
                 .map(sid -> new SeatStatusChange(sid, SeatStatus.AVAILABLE.name(), null)).toList();
