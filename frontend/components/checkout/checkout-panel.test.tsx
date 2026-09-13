@@ -45,7 +45,13 @@ const order = (over: Partial<Order> = {}) =>
     ...over,
   }) as Order;
 
-const mock: PaymentConfig = { provider: "mock", enabledProviders: ["mock"], stripePublishableKey: null };
+const mock: PaymentConfig = {
+  provider: "mock",
+  enabledProviders: ["mock"],
+  stripePublishableKey: null,
+  testMode: true,
+  demo: true,
+};
 
 function answered(status: number) {
   const headers = new AxiosHeaders();

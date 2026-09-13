@@ -42,6 +42,11 @@ spring:
     username: ${RABBITMQ_USER:apextick}
     password: ${RABBITMQ_PASSWORD:apextick}
     publisher-confirm-type: correlated
+    # A message no queue takes comes back rather than being acked into the void, and the outbox keeps an event
+    # that must reach a queue unpublished until one does (app.outbox.require-route).
+    publisher-returns: true
+    template:
+      mandatory: true
   data:
     redis:
       host: ${SPRING_DATA_REDIS_HOST:localhost}
@@ -92,6 +97,9 @@ app:
     batch-size: ${APP_OUTBOX_BATCH_SIZE:100}
     max-attempts: ${APP_OUTBOX_MAX_ATTEMPTS:10}
     confirm-timeout: ${APP_OUTBOX_CONFIRM_TIMEOUT:PT5S}
+    # Events a queue must take before they count as published: the ones notification-service e-mails a customer
+    # about. Any other event that no queue is bound to yet is marked published all the same.
+    require-route: ${APP_OUTBOX_REQUIRE_ROUTE:booking.confirmed,order.cancelled,payment.refunded,payment.failed,event.cancelled}
   order:
     fee-percent: ${APP_ORDER_FEE_PERCENT:5}
     payment-window: ${APP_ORDER_PAYMENT_WINDOW:PT10M}

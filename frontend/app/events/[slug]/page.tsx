@@ -17,6 +17,7 @@ import { TierPanel } from "@/components/fixtures/tier-panel";
 import { StadiumDiagram } from "@/components/seatmap/stadium-diagram";
 import { FixtureCard } from "@/components/fixtures/fixture-card";
 import { Pin, Clock, ArrowUpRight } from "@/components/ui/icons";
+import { SiteModeNote } from "@/components/site/site-mode";
 
 /**
  * Read live: an operator can publish, re-price or pull this fixture at any
@@ -268,10 +269,10 @@ export default async function FixtureDetailPage({
                   </Button>
                 </div>
                 {sales.open ? (
-                  <p className="mt-4 text-center text-[0.72rem] text-faint">
-                    Checkout runs in test mode. Pay with a test card; no real
-                    money is charged.
-                  </p>
+                  <SiteModeNote
+                    variant="checkout"
+                    className="mt-4 text-center text-[0.72rem] text-faint"
+                  />
                 ) : (
                   <p className="mt-4 text-center text-[0.72rem] text-faint">
                     <span className="text-bone/80">{sales.title}.</span>{" "}

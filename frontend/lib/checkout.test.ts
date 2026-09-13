@@ -28,6 +28,8 @@ const stripe = (key: string | null): PaymentConfig => ({
   provider: "stripe",
   enabledProviders: ["stripe"],
   stripePublishableKey: key,
+  testMode: true,
+  demo: false,
 });
 
 describe("cardFormFor", () => {
@@ -37,7 +39,14 @@ describe("cardFormFor", () => {
   });
 
   it("shows the gateway the config names, and nothing when it cannot", () => {
-    expect(cardFormFor({ provider: "mock", enabledProviders: ["mock"], stripePublishableKey: null }, false)).toBe("mock");
+    const mock: PaymentConfig = {
+      provider: "mock",
+      enabledProviders: ["mock"],
+      stripePublishableKey: null,
+      testMode: true,
+      demo: true,
+    };
+    expect(cardFormFor(mock, false)).toBe("mock");
     expect(cardFormFor(stripe("pk_test_123"), false)).toBe("stripe");
     expect(cardFormFor(stripe(null), false)).toBe("unavailable");
     expect(cardFormFor(undefined, true)).toBe("unavailable");

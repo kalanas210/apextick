@@ -1,6 +1,6 @@
 # Keycloak realm
 
-`import/apextick-realm.json` is imported by `start-dev --import-realm` the first
+`import/apextick-realm.json` is imported by `--import-realm` the first
 time Keycloak starts on an empty database. After that the realm lives in the
 database, and editing this file changes nothing on that instance -- patch a
 running realm through the Admin API instead (see `scripts/grant-role.sh`).
@@ -16,6 +16,7 @@ of git. The compose files pass these through from `.env`.
 | `WSO2_KM_CLIENT_SECRET` | secret of `apextick-wso2-km`, the service account WSO2 uses to read and manage clients | none -- required |
 | `LOADTEST_CLIENT_SECRET` | secret of `apextick-loadtest`, the only client that accepts the password grant | none -- required |
 | `APP_WEB_URL` | the deployed frontend's origin, allowed as an `apextick-web` redirect URI (prod: `https://<SERVER_IP>.nip.io`) | `http://localhost:3000` |
+| `DEV_PREVIEW_WEB_URL`, `DEV_DOCKER_WEB_URL` | two more `apextick-web` redirect URIs for local development: a preview server on :3005, and the frontend as seen from inside docker. Production sets both to its own origin, so it allows no localhost redirect | `http://localhost:3005`, `http://host.docker.internal:3000` |
 | `DEMO_USER_EMAIL` | the seeded `kalana` account's address | `kalana@apextick.local` |
 | `SMTP_*` | outgoing mail | the bundled Mailpit |
 
@@ -66,30 +67,32 @@ the policy has nothing to check against. Keycloak re-hashes it with the current
 default algorithm at the first login. To regenerate it: PBKDF2WithHmacSHA512,
 210000 iterations, a 16-byte random salt, a 512-bit key, both base64-encoded.
 
+## Where the realm lives
+
+Production Keycloak keeps the realm, its accounts and their sessions in the
+`keycloak` database on the stack's Postgres, so recreating the container keeps
+all of it. Local development still runs `start-dev`, whose database lives inside
+the container: a recreate there re-imports this file and drops the accounts
+registered since.
+
+**A production stack still on `start-dev` moves onto Postgres** the first time
+it is brought up with the current `docker-compose.prod.yml`. Keycloak starts on
+an empty `keycloak` database and imports this file one last time: everything
+above comes with it (the demo account keeps its `sub`), but accounts registered
+on the old container, roles granted with `scripts/grant-role.sh` and the
+master-realm `frontendUrl` the console tunnel needs do not. Grant the roles and
+set the `frontendUrl` again (the commands are next to the keycloak service in
+`docker-compose.prod.yml`), then run `scripts/wso2/setup.sh`, so WSO2 checks its
+key-manager secret against the new realm. After that, recreating Keycloak
+changes nothing.
+
 ## Bringing a realm that already exists up to date
 
 None of the above reaches a Keycloak that imported an older version of this
-file -- production, for one, where `apextick-wso2-km` still has the secret
-that used to be committed here. There are two ways to bring it up to date, and
-the choice is really about the accounts in it: the dev-mode database lives
-inside the container, so **any recreate drops every account registered since
-the last import** and re-imports this file.
-
-**Recreating is what a plain `docker compose -f docker-compose.prod.yml up -d`
-does after this change**, because the keycloak service gained environment
-variables and a loopback port. A fresh import gets everything above in one go
-(the demo account keeps its `sub`); self-registered accounts are gone, and so
-is every role granted with `scripts/grant-role.sh` and the master-realm
-`frontendUrl` the console tunnel needs (see docker-compose.prod.yml). Run
-`scripts/wso2/setup.sh` afterwards so WSO2 picks up the new key-manager secret.
-
-**To keep the accounts**, leave the running container alone -- update the
-other services by name with `--no-deps` (e.g.
-`docker compose -f docker-compose.prod.yml up -d --no-deps booking-service
-notification-service frontend caddy wso2am`) -- and patch the realm through
-the Admin API instead. The console's loopback port only appears when Keycloak
-is eventually recreated; until then use `docker exec` as below. From the repo
-checkout the stack runs from, with the two new secrets already in `.env`:
+file: once a realm exists in the database, editing this file changes nothing on
+it. Patch it through the Admin API instead. The block below brings a realm
+imported before the hardening up to date; run it from the repo checkout the
+stack runs from, with the two secrets already in `.env`:
 
 ```bash
 kc() { docker exec -i apextick-keycloak /opt/keycloak/bin/kcadm.sh "$@"; }

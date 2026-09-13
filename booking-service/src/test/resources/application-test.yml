@@ -23,6 +23,9 @@ app:
     batch-size: 100
     max-attempts: 5
     confirm-timeout: PT5S
+    # The notification events, plus one no queue is bound to, so OutboxPublisherTest can watch an event wait for a
+    # queue. IntegrationTestConfig binds a stand-in queue to the rest, as notification-service does in production.
+    require-route: booking.confirmed,order.cancelled,payment.refunded,payment.failed,event.cancelled,test.must-route
   order:
     fee-percent: 5
     payment-window: PT10M

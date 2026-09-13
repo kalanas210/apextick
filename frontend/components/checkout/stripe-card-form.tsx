@@ -30,6 +30,7 @@ export function StripeCardForm({
   onPaymentMethod,
   onAuthenticated,
   submitting,
+  testMode = false,
   total,
 }: {
   /** Pays with the PaymentMethod, and answers what came of it. */
@@ -37,6 +38,8 @@ export function StripeCardForm({
   /** The bank's challenge was passed: Stripe's webhook settles the charge from here. */
   onAuthenticated: () => void;
   submitting?: boolean;
+  /** Test keys: say which card to use. A buyer paying with live keys is never shown a test card. */
+  testMode?: boolean;
   total: string;
 }) {
   const stripe = useStripe();
@@ -78,10 +81,12 @@ export function StripeCardForm({
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <p className="text-[0.72rem] text-faint">
-        Test mode — use <span className="tnum">4242 4242 4242 4242</span> with any
-        future expiry and CVC.
-      </p>
+      {testMode && (
+        <p className="text-[0.72rem] text-faint">
+          Test mode — use <span className="tnum">4242 4242 4242 4242</span> with any
+          future expiry and CVC.
+        </p>
+      )}
 
       <div className="rounded-lg border border-line-2 bg-ink px-3.5 py-3.5 transition-colors focus-within:border-bone">
         <CardElement options={CARD_STYLE} onChange={() => setError(null)} />

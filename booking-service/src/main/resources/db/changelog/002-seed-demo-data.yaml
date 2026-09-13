@@ -3,10 +3,12 @@ databaseChangeLog:
   # Seed one demo event + a 4x5 block of available seats so the UI has something
   # to render out of the box. Guarded by a precondition: if the events table is
   # already populated, the changeSet is marked as ran without executing, so it
-  # never conflicts with data inserted by hand or on a re-run.
+  # never conflicts with data inserted by hand or on a re-run. Demo context only,
+  # like every other seed: LIQUIBASE_CONTEXTS=prod starts with no events at all.
   - changeSet:
       id: 3
       author: kalanas210
+      context: demo
       comment: Seed demo event 1 with 20 AVAILABLE seats (skipped if events already exist)
       preConditions:
         - onFail: MARK_RAN

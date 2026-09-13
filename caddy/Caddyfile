@@ -7,6 +7,9 @@
 {$SERVER_IP}.nip.io {
 	encode gzip
 
+	# HSTS, and the rules on framing and sniffing, for every response: see the file.
+	import security-headers.caddy
+
 	# --- Keycloak: only what the apextick realm's OIDC flow needs ---
 	#   /realms     discovery, auth, token, login pages, account console
 	#   /resources  theme CSS/JS/images for those pages

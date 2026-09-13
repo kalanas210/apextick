@@ -204,6 +204,10 @@ export interface PaymentConfig {
     provider: 'mock' | 'stripe';
     enabledProviders: string[];
     stripePublishableKey: string | null;
+    /** No real money can be taken: the mock gateway, or Stripe with test keys. */
+    testMode: boolean;
+    /** Seeded with the demo season and its shared account: fixtures, prices and seats are sample data. */
+    demo: boolean;
 }
 
 export interface Me {

@@ -37,3 +37,6 @@ load-test/results/
 
 # WSO2 setup scratch (setup.sh uses mktemp, but be defensive)
 apextick-api.json
+
+# Production database dumps (the backup service in docker-compose.prod.yml)
+backups/

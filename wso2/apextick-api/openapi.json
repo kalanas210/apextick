@@ -925,6 +925,9 @@
       },
       "PaymentConfigResponse": {
         "properties": {
+          "demo": {
+            "type": "boolean"
+          },
           "enabledProviders": {
             "items": {
               "type": "string"
@@ -936,6 +939,9 @@
           },
           "stripePublishableKey": {
             "type": "string"
+          },
+          "testMode": {
+            "type": "boolean"
           }
         },
         "type": "object"
@@ -2920,7 +2926,7 @@
           }
         },
         "security": [],
-        "summary": "Active payment provider + Stripe publishable key for the checkout UI",
+        "summary": "Active payment provider, Stripe publishable key, and whether this deployment takes test payments and is the demo",
         "tags": [
           "Payments"
         ],
