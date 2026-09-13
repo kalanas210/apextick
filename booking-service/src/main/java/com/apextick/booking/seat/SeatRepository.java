@@ -135,6 +135,18 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
             """, nativeQuery = true)
     List<Long> releaseSeatsHeldBy(@Param("ids") Collection<Long> ids, @Param("sub") String sub);
 
+    /**
+     * Puts booked seats back on sale, when the tickets that booked them are voided. Returns the
+     * ids that actually moved, the way every other release does.
+     */
+    @Query(value = """
+            UPDATE seats
+               SET status = 'AVAILABLE', held_by = NULL, held_until = NULL, version = version + 1
+             WHERE id IN (:ids) AND status = 'BOOKED'
+            RETURNING id
+            """, nativeQuery = true)
+    List<Long> releaseBooked(@Param("ids") Collection<Long> ids);
+
     @Modifying(flushAutomatically = true)
     @Query("""
             update Seat s

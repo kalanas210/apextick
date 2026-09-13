@@ -7,13 +7,17 @@ import com.apextick.booking.order.OrderService;
 import com.apextick.booking.order.dto.CreateOrderRequest;
 import com.apextick.booking.order.dto.OrderResponse;
 import com.apextick.booking.payment.PaymentGatewaySpies;
+import com.apextick.booking.payment.RefundReconciler;
+import com.apextick.booking.payment.RefundService;
 import com.apextick.booking.payment.model.RefundResult;
 import com.apextick.booking.security.CurrentUser;
 import com.apextick.booking.seat.Seat;
 import com.apextick.booking.seat.SeatRepository;
 import com.apextick.booking.seat.SeatStatus;
 import com.apextick.booking.support.StripeWebhooks;
+import com.apextick.booking.ticket.Ticket;
 import com.apextick.booking.ticket.TicketRepository;
+import com.apextick.booking.ticket.TicketStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
@@ -48,6 +52,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class StripeWebhookApiTest extends PaymentGatewaySpies {
 
     private static final String SLUG = "bengaluru-kolkata-night";
+    private static final CurrentUser ADMIN = new CurrentUser("webhook-admin", "webhook-admin",
+            "webhook-admin@apextick.local", "Webhook Admin", Set.of("admin"));
 
     @Autowired MockMvc mvc;
     @Autowired HoldService holdService;
@@ -57,6 +63,8 @@ class StripeWebhookApiTest extends PaymentGatewaySpies {
     @Autowired SeatRepository seatRepository;
     @Autowired TicketRepository ticketRepository;
     @Autowired JdbcClient jdbc;
+    @Autowired RefundService refundService;
+    @Autowired RefundReconciler reconciler;
 
     /** A Stripe charge for an order, as the pay endpoint leaves it while the buyer finishes paying. */
     private record Charge(UUID orderId, UUID paymentId, String intentId, long amountMinor, String currency,
@@ -145,6 +153,27 @@ class StripeWebhookApiTest extends PaymentGatewaySpies {
 
     private static String refundKeyOf(Charge c) {
         return "refund:" + c.paymentId();
+    }
+
+    /** An order Stripe has already charged for: its seats booked and its tickets issued. */
+    private Charge paidStripeOrder(String buyer) throws Exception {
+        Charge c = pendingStripeOrder(buyer);
+        deliver(event(c, "evt_paid_" + buyer, "payment_intent.succeeded")).andExpect(status().isOk());
+        assertThat(orderStatus(c)).isEqualTo("PAID");
+        return c;
+    }
+
+    private List<TicketStatus> ticketStatuses(Charge c) {
+        return ticketRepository.findByOrderId(c.orderId()).stream().map(Ticket::getStatus).toList();
+    }
+
+    private List<SeatStatus> seatStatuses(Charge c) {
+        return seatRepository.findAllById(c.seatIds()).stream().map(Seat::getStatus).toList();
+    }
+
+    private long published(String type, Object aggregateId) {
+        return jdbc.sql("SELECT count(*) FROM outbox_events WHERE type = :type AND aggregate_id = :id")
+                .param("type", type).param("id", aggregateId.toString()).query(Long.class).single();
     }
 
     @Test
@@ -338,5 +367,102 @@ class StripeWebhookApiTest extends PaymentGatewaySpies {
         verify(stripe).refund(eq(c.intentId()), any(), eq(otherCurrency), eq(refundKeyOf(c)));
         assertThat(failureCode(c)).isEqualTo("amount_mismatch");
         assertThat(orderStatus(c)).isEqualTo("PENDING_PAYMENT");
+    }
+
+    /**
+     * A refund made in Stripe's own dashboard used to leave the tickets it paid for scannable and their
+     * seats booked. The charge has gone back, so the order is refunded as the box office would have.
+     */
+    @Test
+    void a_charge_refunded_in_the_stripe_dashboard_refunds_its_order() throws Exception {
+        Charge c = paidStripeOrder("webhook-dashboard-refund");
+
+        deliver(StripeWebhooks.chargeRefundedEvent("evt_dashboard_refund", c.intentId(), c.amountMinor(),
+                c.amountMinor(), c.currency())).andExpect(status().isOk());
+
+        assertThat(orderStatus(c)).isEqualTo("REFUNDED");
+        assertThat(paymentStatus(c)).isEqualTo("REFUNDED");
+        assertThat(ticketStatuses(c)).containsOnly(TicketStatus.CANCELLED);
+        assertThat(seatStatuses(c)).containsOnly(SeatStatus.AVAILABLE);
+        assertThat(outcomeRecorded("evt_dashboard_refund")).isEqualTo("REFUNDED");
+        assertThat(published("payment.refunded", c.paymentId())).isEqualTo(1);
+        // Stripe has already given the money back, so nothing is asked of it
+        verify(stripe, never()).refund(any(), any(), any(), any());
+    }
+
+    @Test
+    void the_refund_asked_for_here_reported_back_by_stripe_changes_nothing() throws Exception {
+        Charge c = paidStripeOrder("webhook-refund-echo");
+        refundService.refundOrder(c.orderId(), "Cannot attend", ADMIN);
+
+        deliver(StripeWebhooks.chargeRefundedEvent("evt_refund_echo", c.intentId(), c.amountMinor(),
+                c.amountMinor(), c.currency())).andExpect(status().isOk());
+
+        assertThat(orderStatus(c)).isEqualTo("REFUNDED");
+        assertThat(paymentStatus(c)).isEqualTo("REFUNDED");
+        assertThat(published("payment.refunded", c.paymentId())).isEqualTo(1);
+        verify(stripe, times(1)).refund(any(), any(), any(), eq(refundKeyOf(c)));
+    }
+
+    @Test
+    void a_partial_refund_in_the_dashboard_leaves_the_order_standing() throws Exception {
+        Charge c = paidStripeOrder("webhook-partial-refund");
+
+        deliver(StripeWebhooks.chargeRefundedEvent("evt_partial_refund", c.intentId(), c.amountMinor(),
+                c.amountMinor() / 2, c.currency())).andExpect(status().isOk());
+
+        assertThat(orderStatus(c)).isEqualTo("PAID");
+        assertThat(paymentStatus(c)).isEqualTo("SUCCEEDED");
+        assertThat(ticketStatuses(c)).containsOnly(TicketStatus.ISSUED);
+        assertThat(deliveriesRecorded("evt_partial_refund")).isZero();
+    }
+
+    /**
+     * A disputed charge is money the customer's bank is clawing back. The tickets it bought used to
+     * go on admitting whoever held them; now they stop, and the order says why it was cancelled.
+     */
+    @Test
+    void a_disputed_charge_voids_the_tickets_it_bought() throws Exception {
+        Charge c = paidStripeOrder("webhook-disputed");
+
+        deliver(StripeWebhooks.disputeCreatedEvent("evt_disputed", c.intentId(), c.amountMinor(), c.currency(),
+                "fraudulent")).andExpect(status().isOk());
+
+        assertThat(paymentStatus(c)).isEqualTo("DISPUTED");
+        assertThat(failureCode(c)).isEqualTo("dispute:fraudulent");
+        assertThat(orderStatus(c)).isEqualTo("CANCELLED");
+        assertThat(orderRepository.findById(c.orderId()).orElseThrow().getCancelReason()).isEqualTo("CHARGEBACK");
+        assertThat(ticketStatuses(c)).containsOnly(TicketStatus.CANCELLED);
+        assertThat(seatStatuses(c)).containsOnly(SeatStatus.AVAILABLE);
+        assertThat(published("order.cancelled", c.orderId())).isEqualTo(1);
+    }
+
+    /** The bank returns the money through the dispute; refunding it as well would return it twice. */
+    @Test
+    void a_refund_still_owed_is_not_asked_for_again_once_its_charge_is_disputed() throws Exception {
+        Charge c = paidStripeOrder("webhook-disputed-owed");
+        doReturn(new RefundResult(false, null, "Refunds are paused")).when(stripe).refund(any(), any(), any(), any());
+        refundService.refundOrder(c.orderId(), "Cannot attend", ADMIN);
+        assertThat(paymentStatus(c)).isEqualTo("REFUND_REQUIRED");
+
+        deliver(StripeWebhooks.disputeCreatedEvent("evt_disputed_owed", c.intentId(), c.amountMinor(),
+                c.currency(), "product_not_received")).andExpect(status().isOk());
+        jdbc.sql("UPDATE payments SET refund_last_attempt_at = now() - INTERVAL '1 day' WHERE id = :id")
+                .param("id", c.paymentId()).update();
+        reconciler.retryDue();
+
+        assertThat(paymentStatus(c)).isEqualTo("DISPUTED");
+        verify(stripe, times(1)).refund(any(), any(), any(), eq(refundKeyOf(c)));
+    }
+
+    @Test
+    void an_intent_cancelled_before_it_was_paid_fails_its_payment_and_leaves_the_order_payable() throws Exception {
+        Charge c = pendingStripeOrder("webhook-intent-cancelled");
+
+        deliver(event(c, "evt_intent_cancelled", "payment_intent.canceled")).andExpect(status().isOk());
+
+        assertThat(paymentStatus(c)).isEqualTo("FAILED");
+        assertThat(orderStatus(c)).isEqualTo("PENDING_PAYMENT");
+        assertThat(outcomeRecorded("evt_intent_cancelled")).isEqualTo("CANCELLED");
     }
 }

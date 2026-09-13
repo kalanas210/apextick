@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -16,6 +17,28 @@ public interface TicketRepository extends JpaRepository<Ticket, UUID> {
     Optional<Ticket> findByQrToken(String qrToken);
 
     long countByEventIdAndStatus(Long eventId, TicketStatus status);
+
+    long countByOrderIdAndStatus(UUID orderId, TicketStatus status);
+
+    @Query("select t.id from Ticket t where t.order.id = :orderId and t.status = :status")
+    List<UUID> findIdsByOrderIdAndStatus(@Param("orderId") UUID orderId, @Param("status") TicketStatus status);
+
+    /** Which ticket each item of these orders was issued: a whole page of orders in one query. */
+    @Query("select t.order.id as orderId, t.orderItem.id as itemId, t.id as ticketId from Ticket t "
+            + "where t.order.id in :orderIds")
+    List<IssuedTicket> findIssuedForOrders(@Param("orderIds") Collection<UUID> orderIds);
+
+    /**
+     * Voids an order's tickets that have not been used, and names the seats they were for. A
+     * ticket a gate admitted a moment ago is no longer ISSUED and is left as it is, so a caller
+     * can tell from the count that came back whether it raced one.
+     */
+    @Query(value = """
+            UPDATE tickets SET status = 'CANCELLED'
+             WHERE order_id = :orderId AND status = 'ISSUED'
+            RETURNING seat_id
+            """, nativeQuery = true)
+    List<Long> cancelIssued(@Param("orderId") UUID orderId);
 
     /**
      * Admits the ticket if, and only if, it is still ISSUED. The same atomic conditional update the
@@ -45,4 +68,13 @@ public interface TicketRepository extends JpaRepository<Ticket, UUID> {
              where t.id = :id and t.status = com.apextick.booking.ticket.TicketStatus.USED
             """)
     int unadmit(@Param("id") UUID id);
+
+    /** A ticket, as the order list needs it: which order and which item it was issued for. */
+    interface IssuedTicket {
+        UUID getOrderId();
+
+        Long getItemId();
+
+        UUID getTicketId();
+    }
 }

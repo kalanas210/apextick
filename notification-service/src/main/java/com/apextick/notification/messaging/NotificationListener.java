@@ -3,6 +3,7 @@ package com.apextick.notification.messaging;
 import com.apextick.notification.log.NotificationLogService;
 import com.apextick.notification.messaging.payload.BookingConfirmedPayload;
 import com.apextick.notification.messaging.payload.OrderCancelledPayload;
+import com.apextick.notification.messaging.payload.PaymentRefundedPayload;
 import com.apextick.notification.messaging.payload.SeatEventPayload;
 import com.apextick.notification.service.NotificationService;
 import org.springframework.amqp.core.Message;
@@ -40,6 +41,18 @@ public class NotificationListener {
         EventEnvelope<OrderCancelledPayload> env = parser.parse(message.getBody(), OrderCancelledPayload.class);
         try {
             service.handleOrderCancelled(env);
+        } catch (RuntimeException e) {
+            logs.recordFailed(env.eventId(), env.type(),
+                    env.payload() == null ? null : env.payload().userEmail(), e.getMessage());
+            throw e;
+        }
+    }
+
+    @RabbitListener(queues = RabbitTopologyConfig.Q_REFUND)
+    public void onPaymentRefunded(Message message) {
+        EventEnvelope<PaymentRefundedPayload> env = parser.parse(message.getBody(), PaymentRefundedPayload.class);
+        try {
+            service.handlePaymentRefunded(env);
         } catch (RuntimeException e) {
             logs.recordFailed(env.eventId(), env.type(),
                     env.payload() == null ? null : env.payload().userEmail(), e.getMessage());

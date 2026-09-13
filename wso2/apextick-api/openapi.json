@@ -1,6 +1,105 @@
 {
   "components": {
     "schemas": {
+      "AdminOrderDetailResponse": {
+        "properties": {
+          "order": {
+            "$ref": "#/components/schemas/OrderResponse"
+          },
+          "payments": {
+            "items": {
+              "$ref": "#/components/schemas/AdminPaymentResponse"
+            },
+            "type": "array"
+          },
+          "refundBlockedBy": {
+            "type": "string"
+          },
+          "refundReason": {
+            "type": "string"
+          },
+          "refundedBy": {
+            "type": "string"
+          },
+          "tickets": {
+            "items": {
+              "$ref": "#/components/schemas/AdminTicketResponse"
+            },
+            "type": "array"
+          },
+          "userSub": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AdminPaymentResponse": {
+        "properties": {
+          "amount": {
+            "type": "number"
+          },
+          "cardBrand": {
+            "type": "string"
+          },
+          "cardLast4": {
+            "type": "string"
+          },
+          "confirmedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "failureCode": {
+            "type": "string"
+          },
+          "failureMessage": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "providerRef": {
+            "type": "string"
+          },
+          "refundAmount": {
+            "type": "number"
+          },
+          "refundAttempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "refundCurrency": {
+            "type": "string"
+          },
+          "refundError": {
+            "type": "string"
+          },
+          "refundLastAttemptAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "refundRef": {
+            "type": "string"
+          },
+          "refundedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "AdminSeatResponse": {
         "properties": {
           "heldBy": {
@@ -32,6 +131,42 @@
           "version": {
             "format": "int64",
             "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "AdminTicketResponse": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "issuedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "seatId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "seatLabel": {
+            "type": "string"
+          },
+          "sectionName": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tierName": {
+            "type": "string"
+          },
+          "usedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "usedGate": {
+            "type": "string"
           }
         },
         "type": "object"
@@ -586,6 +721,10 @@
           "cancelReason": {
             "type": "string"
           },
+          "cancelledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -626,6 +765,10 @@
             "format": "date-time",
             "type": "string"
           },
+          "refundedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
           "startsAt": {
             "format": "date-time",
             "type": "string"
@@ -644,6 +787,12 @@
           },
           "total": {
             "type": "number"
+          },
+          "userEmail": {
+            "type": "string"
+          },
+          "userName": {
+            "type": "string"
           }
         },
         "type": "object"
@@ -853,6 +1002,19 @@
             "type": "integer"
           }
         },
+        "type": "object"
+      },
+      "RefundRequest": {
+        "properties": {
+          "reason": {
+            "maxLength": 255,
+            "minLength": 0,
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
         "type": "object"
       },
       "ScanRequest": {
@@ -1594,6 +1756,23 @@
           },
           {
             "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refundRequired",
+            "required": false,
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
             "name": "pageable",
             "required": true,
             "schema": {
@@ -1613,6 +1792,121 @@
             "description": "OK"
           }
         },
+        "summary": "Orders, newest first: by status, by order number or customer, or those still owed a refund",
+        "tags": [
+          "Admin: Orders"
+        ]
+      }
+    },
+    "/admin/orders/{id}": {
+      "get": {
+        "operationId": "detail_2",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOrderDetailResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "One order in full: its tickets, its payments, and whether it can be refunded",
+        "tags": [
+          "Admin: Orders"
+        ]
+      }
+    },
+    "/admin/orders/{id}/refund": {
+      "post": {
+        "operationId": "refund",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "admin",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOrderDetailResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Refund a paid order in full: its tickets are voided and its seats go back on sale",
+        "tags": [
+          "Admin: Orders"
+        ]
+      }
+    },
+    "/admin/orders/{id}/refund/retry": {
+      "post": {
+        "operationId": "retryRefund",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOrderDetailResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Ask the payment provider again for a refund it has not yet made",
         "tags": [
           "Admin: Orders"
         ]

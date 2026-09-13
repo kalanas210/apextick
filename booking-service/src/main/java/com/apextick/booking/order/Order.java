@@ -17,6 +17,7 @@ import jakarta.persistence.Version;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.BatchSize;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -81,6 +82,17 @@ public class Order {
     @Column(name = "cancel_reason")
     private String cancelReason;
 
+    /** When a paid order was refunded. */
+    @Column(name = "refunded_at")
+    private Instant refundedAt;
+
+    /** Keycloak {@code sub} of the admin who refunded it; {@code null} when the provider's dashboard did. */
+    @Column(name = "refunded_by")
+    private String refundedBy;
+
+    @Column(name = "refund_reason")
+    private String refundReason;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -90,8 +102,10 @@ public class Order {
     @Version
     private Long version;
 
+    // A page of orders loads its items fifty orders at a time, not with one query per order.
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("id asc")
+    @BatchSize(size = 50)
     private List<OrderItem> items = new ArrayList<>();
 
     public void addItem(OrderItem item) {

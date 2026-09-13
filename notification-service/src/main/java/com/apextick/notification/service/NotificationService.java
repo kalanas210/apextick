@@ -8,6 +8,7 @@ import com.apextick.notification.mail.TemplateRenderer;
 import com.apextick.notification.messaging.EventEnvelope;
 import com.apextick.notification.messaging.payload.BookingConfirmedPayload;
 import com.apextick.notification.messaging.payload.OrderCancelledPayload;
+import com.apextick.notification.messaging.payload.PaymentRefundedPayload;
 import com.apextick.notification.messaging.payload.SeatEventPayload;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
@@ -17,6 +18,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.Currency;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -77,6 +81,30 @@ public class NotificationService {
         countEvent(env.type(), fresh);
     }
 
+    /**
+     * Sent only once the provider has accepted the refund. Telling a customer their money is on its
+     * way while the provider is still refusing it is the promise the old cancellation email made.
+     */
+    public void handlePaymentRefunded(EventEnvelope<PaymentRefundedPayload> env) {
+        PaymentRefundedPayload p = env.payload();
+        boolean fresh = idempotent.runOnce(env.eventId(), env.type(), () -> {
+            if (!StringUtils.hasText(p.userEmail())) {
+                logs.recordSkipped(env.eventId(), env.type(), "no recipient");
+                return;
+            }
+            Map<String, Object> model = new LinkedHashMap<>();
+            model.put("refund", p);
+            model.put("amount", money(p.amount(), p.currency()));
+            model.put("why", refundExplanation(p.reason()));
+            model.put("orderUrl", orderUrl(p.orderId()));
+            String subject = "Your refund for ApexTick order " + p.orderNumber();
+            email.send(new OutboundEmail(p.userEmail(), subject, templates.render("email/payment-refunded", model)));
+            logs.recordSent(env.eventId(), env.type(), p.userEmail(), subject);
+            meters.counter("notifications_sent_total", "type", env.type()).increment();
+        });
+        countEvent(env.type(), fresh);
+    }
+
     public void handleSeatEvent(EventEnvelope<SeatEventPayload> env) {
         // seat.held / seat.released: log + metric only (the UI shows these live over WebSocket)
         idempotent.runOnce(env.eventId(), env.type(), () -> {
@@ -87,6 +115,39 @@ public class NotificationService {
             log.debug("seat event {} for seat {}", env.type(), env.payload().seatId());
         });
         meters.counter("notifications_events_total", "type", env.type()).increment();
+    }
+
+    /**
+     * "USD 105.00": the amount to its currency's own minor units. The number can arrive as 105.0
+     * once it has been through a JSON tree, and a refund email is the last place to show that.
+     */
+    static String money(BigDecimal amount, String currency) {
+        if (amount == null) {
+            return currency == null ? "" : currency;
+        }
+        int places = 2;
+        try {
+            places = Math.max(0, Currency.getInstance(currency).getDefaultFractionDigits());
+        } catch (RuntimeException e) {
+            // an unknown or missing code keeps two places
+        }
+        String value = amount.setScale(places, RoundingMode.HALF_UP).toPlainString();
+        return currency == null ? value : currency + " " + value;
+    }
+
+    /** Why the money went back, in words for the customer rather than booking-service's codes. */
+    static String refundExplanation(String reason) {
+        return switch (reason == null ? "" : reason) {
+            case "box_office_refund" -> "The box office refunded this order, so its tickets no longer admit anyone.";
+            case "seats_lost" -> "Your seats were taken before your payment could be confirmed, so the order was cancelled.";
+            case "order_closed" -> "Your payment went through after the order had expired or been cancelled, "
+                    + "so it could not buy the seats.";
+            case "duplicate_charge" -> "The order had already been paid by another payment, so this second charge "
+                    + "has been returned. Your tickets are not affected.";
+            case "amount_mismatch" -> "The amount charged did not match the order, so the charge has been returned "
+                    + "in full. The order has not been paid.";
+            default -> "The payment has been returned to you.";
+        };
     }
 
     /** The frontend's order page (app/orders/[id]), keyed by the order's UUID; it lists the tickets. */
