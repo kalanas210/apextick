@@ -11,4 +11,9 @@ public interface PaymentRepository extends JpaRepository<Payment, UUID> {
 
     /** Locate the payment a provider callback refers to (for Stripe, the PaymentIntent id). */
     Optional<Payment> findByProviderAndProviderRef(PaymentProvider provider, String providerRef);
+
+    /** The attempt an {@code Idempotency-Key} already made on this order, if it made one. */
+    Optional<Payment> findByOrderIdAndIdempotencyKey(UUID orderId, String idempotencyKey);
+
+    List<Payment> findByOrderIdAndStatus(UUID orderId, PaymentStatus status);
 }

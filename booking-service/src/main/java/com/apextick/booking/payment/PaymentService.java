@@ -23,7 +23,9 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.util.StringUtils;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -33,6 +35,14 @@ import java.util.UUID;
 public class PaymentService {
 
     private static final Logger log = LoggerFactory.getLogger(PaymentService.class);
+
+    /**
+     * How long an INITIATED payment may wait on its provider call before it counts as abandoned.
+     * Longer than a call can take -- stripe-java gives up after a 30s connect and an 80s read --
+     * so a payment still INITIATED after this lost its request to a crash or a timeout, and must
+     * not block the order's next attempt.
+     */
+    static final Duration ABANDONED_AFTER = Duration.ofMinutes(2);
 
     private final PaymentRepository payments;
     private final OrderRepository orders;
@@ -53,14 +63,19 @@ public class PaymentService {
     }
 
     public PaymentResponse pay(UUID orderId, PayRequest request, String idempotencyKey, CurrentUser user) {
+        // Required here rather than only at the controller: the key is what tells a resend from a
+        // second charge, and a keyless attempt could never be recognised again.
+        if (!StringUtils.hasText(idempotencyKey)) {
+            throw new UnprocessableException(ErrorCodes.IDEMPOTENCY_KEY_MISSING, "Idempotency-Key header is required");
+        }
         PaymentGateway gateway = registry.defaultGateway();
 
-        // Phase A (tx): validate the order + create an INITIATED payment row.
-        PaymentContext ctx = tx.execute(s -> initPayment(orderId, request, idempotencyKey, user, gateway));
-        if (ctx == null) {
-            // order already paid -> return the succeeded payment
-            return tx.execute(s -> existingPaidResponse(orderId, user));
+        // Phase A (tx, order row locked): answer an attempt that already ran, or record an INITIATED payment.
+        Attempt attempt = tx.execute(s -> initPayment(orderId, request, idempotencyKey, user, gateway));
+        if (attempt.answer() != null) {
+            return attempt.answer();
         }
+        PaymentContext ctx = attempt.context();
 
         // Phase B (no tx): call the provider (may block on a network call for real gateways).
         PaymentInitiation init = gateway.initiate(ctx);
@@ -181,11 +196,35 @@ public class PaymentService {
         }
     }
 
-    private PaymentContext initPayment(UUID orderId, PayRequest request, String idempotencyKey,
-                                       CurrentUser user, PaymentGateway gateway) {
-        Order order = orderService.loadOwned(orderId, user);
+    /** What Phase A decided: the answer an attempt already has, or the context to make a new one. */
+    private record Attempt(PaymentResponse answer, PaymentContext context) {
+        static Attempt answered(PaymentResponse answer) {
+            return new Attempt(answer, null);
+        }
+
+        static Attempt started(PaymentContext context) {
+            return new Attempt(null, context);
+        }
+    }
+
+    private Attempt initPayment(UUID orderId, PayRequest request, String idempotencyKey,
+                                CurrentUser user, PaymentGateway gateway) {
+        // Locked before anything is decided, so attempts on one order take turns. Without it two
+        // of them could both pass every check below before either recorded a payment, and both
+        // would charge.
+        Order order = orderService.loadOwnedForUpdate(orderId, user);
+
+        // The same key is the same attempt, so it gets the answer that attempt got: a resend after
+        // a dropped connection must never become a second charge.
+        Optional<Payment> sameAttempt = payments.findByOrderIdAndIdempotencyKey(orderId, idempotencyKey);
+        if (sameAttempt.isPresent()) {
+            if (sameAttempt.get().getStatus() == PaymentStatus.INITIATED) {
+                throw new ConflictException(ErrorCodes.PAYMENT_IN_PROGRESS, "This payment is still being processed");
+            }
+            return Attempt.answered(responseOf(sameAttempt.get(), order));
+        }
         if (order.getStatus() == OrderStatus.PAID) {
-            return null;
+            return Attempt.answered(paidResponse(order));
         }
         if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
             throw new ConflictException(ErrorCodes.ORDER_NOT_PAYABLE, "Order is not payable");
@@ -196,6 +235,14 @@ public class PaymentService {
         if (!gateway.supports(order.getCurrency())) {
             throw new UnprocessableException("CURRENCY_UNSUPPORTED",
                     gateway.provider() + " does not support " + order.getCurrency());
+        }
+        // A new key while another attempt still waits on its provider is a second charge in the
+        // making: a second tab, or a double click the button did not swallow.
+        Instant abandoned = Instant.now().minus(ABANDONED_AFTER);
+        if (payments.findByOrderIdAndStatus(orderId, PaymentStatus.INITIATED).stream()
+                .anyMatch(inFlight -> inFlight.getCreatedAt().isAfter(abandoned))) {
+            throw new ConflictException(ErrorCodes.PAYMENT_IN_PROGRESS,
+                    "Another payment for this order is still being processed");
         }
         Payment p = new Payment();
         p.setId(UUID.randomUUID());
@@ -208,10 +255,10 @@ public class PaymentService {
         p.setCreatedAt(Instant.now());
         payments.saveAndFlush(p);
 
-        return new PaymentContext(p.getId(), order.getId(), order.getOrderNumber(), order.getTotal(),
+        return Attempt.started(new PaymentContext(p.getId(), order.getId(), order.getOrderNumber(), order.getTotal(),
                 order.getCurrency(), new Customer(user.sub(), user.email(), user.name()), idempotencyKey,
                 request == null ? null : request.returnUrl(), request == null ? null : request.cancelUrl(),
-                request == null ? null : request.card(), request == null ? null : request.paymentMethodId());
+                request == null ? null : request.card(), request == null ? null : request.paymentMethodId()));
     }
 
     private PaymentResponse applyResult(UUID paymentId, UUID orderId, PaymentInitiation init) {
@@ -255,9 +302,9 @@ public class PaymentService {
         return responseOf(p, orders.findById(orderId).orElseThrow(() -> new NotFoundException("Order", orderId)));
     }
 
-    private PaymentResponse existingPaidResponse(UUID orderId, CurrentUser user) {
-        Order order = orderService.loadOwned(orderId, user);
-        Payment succeeded = payments.findByOrderIdOrderByCreatedAtAsc(orderId).stream()
+    /** The order was already paid: answer with the payment that paid it. */
+    private PaymentResponse paidResponse(Order order) {
+        Payment succeeded = payments.findByOrderIdOrderByCreatedAtAsc(order.getId()).stream()
                 .filter(p -> p.getStatus() == PaymentStatus.SUCCEEDED).reduce((a, b) -> b).orElse(null);
         if (succeeded == null) {
             throw new ConflictException(ErrorCodes.ORDER_NOT_PAYABLE, "Order is already closed");

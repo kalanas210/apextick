@@ -253,8 +253,11 @@ The active gateway is chosen by `APP_PAYMENT_PROVIDER` (`mock` by default):
   ```bash
   curl -X POST localhost:8081/api/orders/<ORDER_ID>/pay \
     -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" \
+    -H "Idempotency-Key: <A NEW UUID>" \
     -d '{"paymentMethodId":"pm_card_visa"}'
   ```
+
+`POST /api/orders/{id}/pay` requires an `Idempotency-Key`, and a key names one payment attempt. Sending the same key again returns that attempt's result instead of charging a second time, so retrying after a dropped connection is safe; trying another card takes a new key. One attempt runs per order at a time, and a second one started meanwhile is refused with `409 PAYMENT_IN_PROGRESS`.
 
 `GET /api/payments/config` tells the frontend which provider is active and returns the Stripe publishable key.
 

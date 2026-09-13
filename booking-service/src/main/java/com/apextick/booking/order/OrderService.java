@@ -303,6 +303,15 @@ public class OrderService {
                 : orders.findByIdAndUserSub(id, user.sub()).orElseThrow(() -> new NotFoundException("Order", id));
     }
 
+    /** As {@link #loadOwned}, holding the order's row lock until the calling transaction ends. */
+    public Order loadOwnedForUpdate(UUID id, CurrentUser user) {
+        Order order = orders.findByIdForUpdate(id).orElseThrow(() -> new NotFoundException("Order", id));
+        if (!user.isAdmin() && !order.getUserSub().equals(user.sub())) {
+            throw new NotFoundException("Order", id);
+        }
+        return order;
+    }
+
     private void releaseSeatsAndClose(Order order, OrderStatus status, String reason) {
         List<Long> seatIds = order.getItems().stream().map(OrderItem::getSeatId).toList();
         // Only the rows this order actually still held. An order expires at its earliest hold
