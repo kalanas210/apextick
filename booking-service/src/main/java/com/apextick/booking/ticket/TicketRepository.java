@@ -15,6 +15,8 @@ public interface TicketRepository extends JpaRepository<Ticket, UUID> {
 
     Optional<Ticket> findByQrToken(String qrToken);
 
+    long countByEventIdAndStatus(Long eventId, TicketStatus status);
+
     /**
      * Admits the ticket if, and only if, it is still ISSUED. The same atomic conditional update the
      * seat hold uses: of two scans racing on one ticket, exactly one moves the row and gets 1, and
@@ -23,8 +25,10 @@ public interface TicketRepository extends JpaRepository<Ticket, UUID> {
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""
             update Ticket t
-               set t.status = com.apextick.booking.ticket.TicketStatus.USED, t.usedAt = :usedAt, t.usedBy = :usedBy
+               set t.status = com.apextick.booking.ticket.TicketStatus.USED, t.usedAt = :usedAt, t.usedBy = :usedBy,
+                   t.usedGate = :usedGate
              where t.id = :id and t.status = com.apextick.booking.ticket.TicketStatus.ISSUED
             """)
-    int admit(@Param("id") UUID id, @Param("usedAt") Instant usedAt, @Param("usedBy") String usedBy);
+    int admit(@Param("id") UUID id, @Param("usedAt") Instant usedAt, @Param("usedBy") String usedBy,
+              @Param("usedGate") String usedGate);
 }

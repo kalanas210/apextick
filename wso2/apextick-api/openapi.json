@@ -36,6 +36,23 @@
         },
         "type": "object"
       },
+      "AdmissionsResponse": {
+        "properties": {
+          "admitted": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "eventId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "issued": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "CreateOrderRequest": {
         "properties": {
           "eventId": {
@@ -844,6 +861,11 @@
             "format": "int64",
             "type": "integer"
           },
+          "gate": {
+            "maxLength": 64,
+            "minLength": 0,
+            "type": "string"
+          },
           "qrToken": {
             "minLength": 1,
             "type": "string"
@@ -857,6 +879,9 @@
       },
       "ScanResponse": {
         "properties": {
+          "admissions": {
+            "$ref": "#/components/schemas/AdmissionsResponse"
+          },
           "event": {
             "$ref": "#/components/schemas/GateEventResponse"
           },
@@ -1998,6 +2023,38 @@
           "Events"
         ],
         "x-auth-type": "None"
+      }
+    },
+    "/gate/events/{eventId}/admissions": {
+      "get": {
+        "operationId": "admissions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eventId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Tickets admitted to an event so far, across every gate",
+        "tags": [
+          "Gate"
+        ]
       }
     },
     "/gate/scans": {

@@ -17,8 +17,10 @@ import com.apextick.booking.web.ConflictException;
 import com.apextick.booking.web.ErrorCodes;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -26,6 +28,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -46,6 +49,7 @@ class TicketAdmissionConcurrencyTest {
     @Autowired PaymentService paymentService;
     @Autowired EventRepository eventRepository;
     @Autowired SeatRepository seatRepository;
+    @Autowired JdbcClient jdbc;
 
     @Test
     void scans_racing_on_one_ticket_admit_it_once() throws InterruptedException {
@@ -60,7 +64,7 @@ class TicketAdmissionConcurrencyTest {
         paymentService.pay(orderId,
                 new PayRequest(new PaymentCard("4242424242424242", 12, 2030, "123", "G"), null, null, null),
                 "gate-race-pay-" + System.nanoTime(), buyer);
-        String qrToken = ticketRepository.findByOrderId(orderId).getFirst().getQrToken();
+        Ticket ticket = ticketRepository.findByOrderId(orderId).getFirst();
 
         CurrentUser steward = new CurrentUser("gate-race-steward", "steward", "steward@apextick.local",
                 "Gate Steward", Set.of("user", "scanner"));
@@ -71,10 +75,11 @@ class TicketAdmissionConcurrencyTest {
         CountDownLatch done = new CountDownLatch(turnstiles);
         try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
             for (int i = 0; i < turnstiles; i++) {
+                String turnstile = "Turnstile " + i;
                 pool.submit(() -> {
                     try {
                         start.await();
-                        gate.scan(qrToken, eventId, steward);
+                        gate.scan(ticket.getQrToken(), eventId, turnstile, steward);
                         admitted.incrementAndGet();
                     } catch (ConflictException e) {
                         if (ErrorCodes.TICKET_ALREADY_USED.equals(e.getCode())) {
@@ -93,5 +98,11 @@ class TicketAdmissionConcurrencyTest {
 
         assertThat(admitted).hasValue(1);
         assertThat(turnedAway).hasValue(turnstiles - 1);
+        // and the record agrees: one admission, every other turnstile on file as turned away
+        Map<String, Long> recorded = jdbc.sql("SELECT outcome, count(*) AS n FROM ticket_scans WHERE ticket_id = :id GROUP BY outcome")
+                .param("id", ticket.getId())
+                .query((rs, row) -> Map.entry(rs.getString("outcome"), rs.getLong("n")))
+                .list().stream().collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        assertThat(recorded).containsOnly(Map.entry("ADMITTED", 1L), Map.entry("ALREADY_USED", (long) turnstiles - 1));
     }
 }

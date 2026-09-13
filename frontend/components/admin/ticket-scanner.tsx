@@ -8,10 +8,10 @@ import { DEFAULT_FILTERS } from "@/lib/catalog";
 import { formatInstant, relativeTime } from "@/lib/format";
 import { kickoffLabel, refusalOf, type GateProblem, type ScanRefusal } from "@/lib/gate";
 import { useEventList } from "@/hooks/useCatalog";
-import { useScanTicket } from "@/hooks/useGate";
+import { useAdmissions, useScanTicket } from "@/hooks/useGate";
 import { AdminHeader } from "./admin-shell";
 import { Button } from "@/components/ui/button";
-import { Field, Select, Textarea } from "@/components/ui/field";
+import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { Notice } from "@/components/ui/notice";
 import { Camera, Check, X } from "@/components/ui/icons";
 import type { Ticket } from "@/lib/types";
@@ -19,8 +19,9 @@ import type { Ticket } from "@/lib/types";
 /** Fast enough to feel instant at a turnstile, slow enough not to pin a CPU. */
 const SCAN_INTERVAL_MS = 250;
 const LOG_LIMIT = 20;
-/** The event this device's gate admits to outlives a reload: a steward sets it once a shift. */
+/** This device's gate outlives a reload: a steward sets the event and the gate once a shift. */
 const GATE_EVENT_KEY = "apextick.gate.eventId";
+const GATE_NAME_KEY = "apextick.gate.name";
 
 type Refused = ScanRefusal & { message: string };
 type Outcome = { kind: "admitted"; ticket: Ticket } | Refused;
@@ -38,25 +39,29 @@ type CameraState =
   | { kind: "unsupported"; reason: string }
   | { kind: "denied"; reason: string };
 
-function storedEventId(): number | null {
+function stored(key: string): string | null {
   try {
-    const id = Number(window.localStorage.getItem(GATE_EVENT_KEY));
-    return Number.isInteger(id) && id > 0 ? id : null;
+    return window.localStorage.getItem(key);
   } catch {
     return null;
   }
 }
 
-function rememberEventId(id: number | null) {
+function remember(key: string, value: string | null) {
   try {
-    if (id === null) {
-      window.localStorage.removeItem(GATE_EVENT_KEY);
+    if (value === null || value === "") {
+      window.localStorage.removeItem(key);
     } else {
-      window.localStorage.setItem(GATE_EVENT_KEY, String(id));
+      window.localStorage.setItem(key, value);
     }
   } catch {
-    // storage is blocked: the steward picks the event again after a reload
+    // storage is blocked: the steward sets the gate up again after a reload
   }
+}
+
+function storedEventId(): number | null {
+  const id = Number(stored(GATE_EVENT_KEY));
+  return Number.isInteger(id) && id > 0 ? id : null;
 }
 
 function logLabel(refused: Refused): string {
@@ -80,6 +85,8 @@ export function TicketScanner() {
   const scan = useScanTicket();
   const { data: events, isLoading: eventsLoading } = useEventList(DEFAULT_FILTERS);
   const [eventId, setEventId] = useState<number | null>(() => storedEventId());
+  const [gateName, setGateName] = useState(() => stored(GATE_NAME_KEY) ?? "");
+  const { data: admissions } = useAdmissions(eventId);
   const [token, setToken] = useState("");
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [log, setLog] = useState<LogEntry[]>([]);
@@ -127,7 +134,7 @@ export function TicketScanner() {
       const value = raw.trim();
       if (!value || eventId === null) return;
       scan.mutate(
-        { qrToken: value, eventId },
+        { qrToken: value, eventId, gate: gateName.trim() || undefined },
         {
           onSuccess: (result) => {
             setOutcome({ kind: "admitted", ticket: result.ticket });
@@ -145,16 +152,21 @@ export function TicketScanner() {
         },
       );
     },
-    [scan, eventId, pushLog],
+    [scan, eventId, gateName, pushLog],
   );
 
   /** A different gate event starts a clean slate: nothing on screen was checked against it. */
   const chooseEvent = (id: number | null) => {
     stopCamera();
     setEventId(id);
-    rememberEventId(id);
+    remember(GATE_EVENT_KEY, id === null ? null : String(id));
     setOutcome(null);
     setLog([]);
+  };
+
+  const nameGate = (name: string) => {
+    setGateName(name);
+    remember(GATE_NAME_KEY, name.trim());
   };
 
   const startCamera = useCallback(async () => {
@@ -257,7 +269,7 @@ export function TicketScanner() {
     submit(token);
   };
 
-  const admitted = log.filter((l) => l.admitted).length;
+  const turnedAway = log.filter((l) => !l.admitted).length;
   const ready = eventId !== null;
 
   return (
@@ -267,10 +279,16 @@ export function TicketScanner() {
         title="Scan tickets"
         description="Choose the event this gate admits to, then point a camera at the QR code or paste the token."
         action={
-          log.length > 0 ? (
+          ready && admissions ? (
             <p className="text-[0.8rem] text-muted">
-              <span className="tnum text-accent">{admitted}</span> admitted ·{" "}
-              <span className="tnum">{log.length - admitted}</span> rejected
+              {/* Every gate's admissions, not this device's: the figure a capacity call needs. */}
+              <span className="tnum text-accent">{admissions.admitted}</span> of{" "}
+              <span className="tnum">{admissions.issued}</span> admitted
+              {turnedAway > 0 && (
+                <>
+                  {" "}· <span className="tnum">{turnedAway}</span> turned away here
+                </>
+              )}
             </p>
           ) : undefined
         }
@@ -278,10 +296,10 @@ export function TicketScanner() {
 
       <div className="mt-8 grid gap-10 lg:grid-cols-12 lg:gap-12">
         <div className="lg:col-span-7">
-          <section>
-            <h2 className="kicker mb-3">This gate admits to</h2>
+          <section className="grid gap-4 sm:grid-cols-3">
             <Field
-              label="Event"
+              label="This gate admits to"
+              className="sm:col-span-2"
               hint={
                 gateEvent
                   ? `${kickoffLabel(gateEvent.startsAt, gateEvent.timeZone)} · ${gateEvent.stadium}`
@@ -296,6 +314,17 @@ export function TicketScanner() {
                   options={(events ?? []).map((e) => ({ value: String(e.id), label: `${e.name} · ${e.date}` }))}
                   placeholder={eventsLoading ? "Loading events…" : "Choose the event at this gate"}
                   disabled={eventsLoading}
+                />
+              )}
+            </Field>
+            <Field label="Gate" hint="Recorded against every scan">
+              {(a) => (
+                <Input
+                  {...a}
+                  value={gateName}
+                  onChange={(e) => nameGate(e.target.value)}
+                  placeholder="North 3"
+                  maxLength={64}
                 />
               )}
             </Field>
@@ -440,7 +469,7 @@ function Result({ outcome }: { outcome: Outcome }) {
       <Card tone="bad" word="Already scanned">
         <p className="mt-3 text-[0.84rem] text-muted">
           {outcome.usedAt
-            ? `First scanned ${relativeTime(outcome.usedAt)}, at ${formatInstant(outcome.usedAt)}.`
+            ? `First scanned ${relativeTime(outcome.usedAt)}${outcome.gate ? ` at ${outcome.gate}` : ""}, ${formatInstant(outcome.usedAt)}.`
             : outcome.message}
         </p>
       </Card>

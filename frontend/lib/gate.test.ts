@@ -2,11 +2,15 @@ import { describe, expect, it } from "vitest";
 import { kickoffLabel, refusalOf } from "./gate";
 
 describe("refusalOf", () => {
-  it("keeps when an already-used ticket was first scanned", () => {
-    expect(refusalOf(409, { code: "TICKET_ALREADY_USED", usedAt: "2026-09-26T13:25:00Z" })).toEqual({
-      kind: "already",
-      usedAt: "2026-09-26T13:25:00Z",
-    });
+  it("keeps when and where an already-used ticket was first scanned, and which ticket it was", () => {
+    expect(
+      refusalOf(409, {
+        code: "TICKET_ALREADY_USED",
+        usedAt: "2026-09-26T13:25:00Z",
+        usedGate: "North 3",
+        ticketId: "t-1",
+      }),
+    ).toEqual({ kind: "already", usedAt: "2026-09-26T13:25:00Z", gate: "North 3", ticketId: "t-1" });
   });
 
   it("names the event a wrong-event ticket belongs to", () => {

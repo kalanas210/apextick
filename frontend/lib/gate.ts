@@ -11,14 +11,28 @@ export interface GateEvent {
   status: EventStatus;
 }
 
-/** An admission: the ticket that was let in, and the event it was let in to. */
+/**
+ * How full the ground is: tickets admitted so far across every gate, out of the
+ * tickets that can still admit anyone (cancelled ones do not count).
+ */
+export interface Admissions {
+  eventId: number;
+  admitted: number;
+  issued: number;
+}
+
+/** An admission: the ticket let in, the event it was let in to, and the new count. */
 export interface ScanResult {
   ticket: Ticket;
   event: GateEvent;
+  admissions: Admissions;
 }
 
 /** The members a refused scan carries beyond an ordinary problem detail. */
 export interface GateProblem extends ProblemDetail {
+  /** TICKET_ALREADY_USED: which ticket, and the gate it was first let in at. */
+  ticketId?: string;
+  usedGate?: string;
   /** TICKET_WRONG_EVENT: the event the ticket does admit to. */
   ticketEventId?: number;
   ticketEventName?: string;
@@ -30,7 +44,7 @@ export interface GateProblem extends ProblemDetail {
 }
 
 export type ScanRefusal =
-  | { kind: "already"; usedAt: string | null }
+  | { kind: "already"; usedAt: string | null; gate: string | null; ticketId: string | null }
   | {
       kind: "wrong-event";
       name: string | null;
@@ -47,7 +61,12 @@ export type ScanRefusal =
 export function refusalOf(status: number | undefined, problem: GateProblem | undefined): ScanRefusal {
   switch (problem?.code) {
     case "TICKET_ALREADY_USED":
-      return { kind: "already", usedAt: problem.usedAt ?? null };
+      return {
+        kind: "already",
+        usedAt: problem.usedAt ?? null,
+        gate: problem.usedGate ?? null,
+        ticketId: problem.ticketId ?? null,
+      };
     case "TICKET_WRONG_EVENT":
       return {
         kind: "wrong-event",
