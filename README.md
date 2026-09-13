@@ -19,11 +19,11 @@ ApexTick simulates the hardest moment in any ticketing platform: the instant a p
 
 ## Proven under load
 
-An authenticated [k6](https://k6.io) test fires **5,000 hold attempts from 200 concurrent virtual users** at an event with exactly **300 seats**. Every virtual user logs into Keycloak as its *own* account, so this is 200 buyers, not 200 threads sharing one login — which is what makes "no seat was held by two people" a statement about people:
+A [k6](https://k6.io) storm fires **5,000 hold attempts from 200 concurrent virtual users** at an event with exactly **300 seats**, then reads the service's own seat map back to check that no seat went to two people. Its last measured run:
 
 | Metric | Result |
 | --- | --- |
-| Concurrent virtual users | 200 (one Keycloak identity each) |
+| Concurrent virtual users | 200 |
 | Total hold attempts | 5,000 |
 | Seats available | 300 |
 | **Holds won** | **300 / 300** |
@@ -34,7 +34,7 @@ An authenticated [k6](https://k6.io) test fires **5,000 hold attempts from 200 c
 | Latency (p95) | 233 ms |
 | Latency (p99) | 373 ms |
 
-Every seat was sold exactly once. Every losing request received a clean `409`. No seat was ever held by two people at the same time — and the test *proves* it by reading the service's own seat map back after the storm (`held == 300`, `available == 0`, and every seat's optimistic-lock `version` moved by exactly 1). Numbers from a single local instance against dockerised infrastructure; [Load testing](#load-testing) has the exact commands, including the one-off step that seeds the 200 accounts.
+Every seat was sold exactly once, and every losing request received a clean `409`. Those figures are from 22 August 2026, on a single local instance against dockerised infrastructure, and the test has changed since. That run went through one shared Keycloak account and a single-seat hold endpoint that has since been deleted, because it skipped the sales window, the per-person seat cap and the rate limiter. The current script sends each virtual user as its *own* account through the hold endpoint the storefront uses, with all three in force, and checks every holder and seat version afterwards. It has not been re-measured yet; [Load testing](#load-testing) has the commands to run it. What does not wait on a re-run is the atomic hold itself: `SeatConcurrencyTest` races buyers for one seat through that endpoint on every build, and exactly one of them wins.
 
 ## Architecture
 
@@ -120,7 +120,7 @@ There are no `synchronized` blocks, no application-level mutexes, and no distrib
 
 ## Engineering highlights
 
-- **Lock-free atomic concurrency**, proven at 300/300 holds with zero double-bookings under load.
+- **Lock-free atomic concurrency** — a hold is one conditional `UPDATE`, so buyers racing for a seat leave exactly one winner, which a concurrency test proves on every build. A k6 storm once sold 300 seats to 5,000 attempts with zero double-bookings, through an earlier version of the hold endpoint ([Proven under load](#proven-under-load)).
 - **Self-expiring holds** — a held seat is written to Redis with a TTL. When the key expires, a Redis keyspace notification triggers the seat's release back to `AVAILABLE` — no polling loop on the happy path.
 - **Event-driven decoupling** — the booking service writes to a **transactional outbox** and publishes to a RabbitMQ topic exchange after commit; the notification service consumes independently, idempotently, with a dead-letter queue for poison messages.
 - **PCI-conscious payments** — the Stripe adapter never sees a raw card number: it creates a PaymentIntent and returns a `client_secret`, with which the browser finishes any 3-D Secure challenge, treating the signed `payment_intent.succeeded` webhook as the source of truth. Webhooks are idempotent, and a charge that cannot buy its order (its seats lost, the order expired or already paid, a sum other than the payment's) is refunded under a key that lets it be refunded only once. Pay attempts racing on one order take turns on the order's row, so the order is charged once however many tabs race for it.
@@ -162,6 +162,8 @@ git clone https://github.com/kalanas210/apextick.git
 cd apextick
 cp .env.example .env   # defaults are fine for local development
 ```
+
+Every setting the services read, and its default, is listed in [docs/configuration.md](docs/configuration.md).
 
 ### 2. Start the backend and infrastructure
 
@@ -467,7 +469,9 @@ loss of its disk needs.
    `LIQUIBASE_CONTEXTS` (`demo`, for the existing demo), `POSTGRES_DB` if it was
    left to a default, and the three `*_IMAGE` tags.
    `docker compose -f docker-compose.prod.yml config -q` names anything still
-   missing.
+   missing. While there, replace `KEYCLOAK_ADMIN_PASSWORD` if it is still a default
+   such as `admin`: Keycloak's new database creates its administrator from it on this
+   first start, and ignores it afterwards.
 2. **Images and the rest** —
    `docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d`.
    This release recreates most services, two of them with consequences:

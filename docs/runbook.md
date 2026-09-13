@@ -96,6 +96,13 @@ service in `docker-compose.prod.yml`.
 
 Roles: `scripts/grant-role.sh admin <user>` or `scripts/grant-role.sh scanner <user>`.
 
+The console's own administrator is created from `KEYCLOAK_ADMIN` and
+`KEYCLOAK_ADMIN_PASSWORD` only when the `keycloak` database is empty, so set a
+real password before the first start; changing `.env` afterwards changes nothing.
+Keycloak marks that account temporary: once in, create a permanent administrator
+in the master realm and delete the temporary one. To change a password later,
+change it in the console, then in `.env`, so the two agree.
+
 ## Checks
 
 - `dc ps`: postgres, keycloak and rabbitmq have health checks, and db-init shows
