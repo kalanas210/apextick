@@ -50,6 +50,7 @@ class GateApiTest {
     private static final String OTHER_SLUG = "mumbai-indians-chennai-super-kings";
     private static final String CANCELLED_SLUG = "australia-england-super-8";
     private static final String STEWARD_SUB = "gate-steward";
+    private static final String ADMIN_SUB = "gate-admin";
 
     @Autowired MockMvc mvc;
     @Autowired HoldService holdService;
@@ -65,6 +66,10 @@ class GateApiTest {
 
     private static String steward() {
         return "Bearer " + TestTokens.withRoles(STEWARD_SUB, "steward", "steward@apextick.local", "user", "scanner");
+    }
+
+    private static String admin() {
+        return "Bearer " + TestTokens.admin(ADMIN_SUB, "gateadmin", "gateadmin@apextick.local");
     }
 
     private Long eventId(String slug) {
@@ -101,6 +106,13 @@ class GateApiTest {
         return mvc.perform(bearer == null ? request : request.header("Authorization", bearer));
     }
 
+    private ResultActions unadmit(String bearer, UUID ticketId, String reason) throws Exception {
+        return mvc.perform(post("/api/gate/tickets/" + ticketId + "/unadmit")
+                .header("Authorization", bearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(reason == null ? Map.of() : Map.of("reason", reason))));
+    }
+
     private long admitted(Long eventId) throws Exception {
         String body = mvc.perform(get("/api/gate/events/" + eventId + "/admissions").header("Authorization", steward()))
                 .andExpect(status().isOk())
@@ -110,6 +122,11 @@ class GateApiTest {
 
     private TicketStatus statusOf(Ticket ticket) {
         return ticketRepository.findById(ticket.getId()).orElseThrow().getStatus();
+    }
+
+    private long outboxEvents(String type, Ticket ticket) {
+        return jdbc.sql("SELECT count(*) FROM outbox_events WHERE type = :type AND aggregate_id = :id")
+                .param("type", type).param("id", ticket.getId().toString()).query(Long.class).single();
     }
 
     @Test
@@ -152,9 +169,7 @@ class GateApiTest {
                 .containsExactly(
                         tuple(ScanOutcome.ADMITTED, "North 3", STEWARD_SUB),
                         tuple(ScanOutcome.ALREADY_USED, "South 1", STEWARD_SUB));
-        assertThat(jdbc.sql("SELECT count(*) FROM outbox_events WHERE type = 'ticket.used' AND aggregate_id = :id")
-                .param("id", ticket.getId().toString()).query(Long.class).single())
-                .isEqualTo(1);
+        assertThat(outboxEvents("ticket.used", ticket)).isEqualTo(1);
     }
 
     /**
@@ -197,6 +212,57 @@ class GateApiTest {
         }
     }
 
+    /**
+     * A steward who scanned the wrong phone used to burn a paying customer's ticket for good. An
+     * admin can now undo the admission, the ticket admits again, and the record keeps the
+     * admission, the undo, who did it and why.
+     */
+    @Test
+    void an_admin_undoes_a_mistaken_admission_and_the_ticket_admits_again() throws Exception {
+        Ticket ticket = buyTicket(SLUG, "gate-undo");
+        scan(steward(), ticket.getQrToken(), ticket.getEventId(), "North 3").andExpect(status().isOk());
+        long before = admitted(ticket.getEventId());
+
+        unadmit(admin(), ticket.getId(), "Scanned the wrong phone")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ticket.status").value("ISSUED"))
+                .andExpect(jsonPath("$.ticket.usedAt").doesNotExist())
+                .andExpect(jsonPath("$.admissions.admitted").value((int) before - 1));
+
+        assertThat(scanRepository.findByTicketIdOrderByScannedAtAscIdAsc(ticket.getId()))
+                .extracting(TicketScan::getOutcome, TicketScan::getActorSub, TicketScan::getReason)
+                .containsExactly(
+                        tuple(ScanOutcome.ADMITTED, STEWARD_SUB, null),
+                        tuple(ScanOutcome.UNADMITTED, ADMIN_SUB, "Scanned the wrong phone"));
+        assertThat(outboxEvents("ticket.unadmitted", ticket)).isEqualTo(1);
+
+        scan(steward(), ticket.getQrToken(), ticket.getEventId(), "North 4").andExpect(status().isOk());
+    }
+
+    @Test
+    void a_steward_cannot_undo_an_admission() throws Exception {
+        Ticket ticket = buyTicket(SLUG, "gate-undo-steward");
+        scan(steward(), ticket.getQrToken(), ticket.getEventId()).andExpect(status().isOk());
+
+        unadmit(steward(), ticket.getId(), "Letting a friend back in").andExpect(status().isForbidden());
+
+        assertThat(statusOf(ticket)).isEqualTo(TicketStatus.USED);
+    }
+
+    @Test
+    void only_an_admitted_ticket_can_be_undone_and_only_with_a_reason() throws Exception {
+        Ticket ticket = buyTicket(SLUG, "gate-undo-unused");
+
+        unadmit(admin(), ticket.getId(), "Nothing to undo")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("TICKET_NOT_ADMITTED"));
+
+        scan(steward(), ticket.getQrToken(), ticket.getEventId()).andExpect(status().isOk());
+        unadmit(admin(), ticket.getId(), null).andExpect(status().isBadRequest());
+        unadmit(admin(), ticket.getId(), "   ").andExpect(status().isBadRequest());
+        assertThat(statusOf(ticket)).isEqualTo(TicketStatus.USED);
+    }
+
     @Test
     void only_a_steward_or_an_admin_can_scan() throws Exception {
         Ticket ticket = buyTicket(SLUG, "gate-roles");
@@ -208,9 +274,7 @@ class GateApiTest {
                 .andExpect(status().isForbidden());
         assertThat(statusOf(ticket)).isEqualTo(TicketStatus.ISSUED);
 
-        scan("Bearer " + TestTokens.admin("gate-admin", "gateadmin", "gateadmin@apextick.local"),
-                ticket.getQrToken(), ticket.getEventId())
-                .andExpect(status().isOk());
+        scan(admin(), ticket.getQrToken(), ticket.getEventId()).andExpect(status().isOk());
     }
 
     /** The whole point of the role: a turnstile device that goes missing opens no admin API. */

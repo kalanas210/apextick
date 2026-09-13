@@ -28,6 +28,12 @@ export interface ScanResult {
   admissions: Admissions;
 }
 
+/** An admission undone: the ticket, able to admit again, and the count without it. */
+export interface UnadmitResult {
+  ticket: Ticket;
+  admissions: Admissions;
+}
+
 /** The members a refused scan carries beyond an ordinary problem detail. */
 export interface GateProblem extends ProblemDetail {
   /** TICKET_ALREADY_USED: which ticket, and the gate it was first let in at. */

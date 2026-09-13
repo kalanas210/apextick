@@ -1186,6 +1186,30 @@
           }
         },
         "type": "object"
+      },
+      "UnadmitRequest": {
+        "properties": {
+          "reason": {
+            "maxLength": 255,
+            "minLength": 0,
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
+      "UnadmitResponse": {
+        "properties": {
+          "admissions": {
+            "$ref": "#/components/schemas/AdmissionsResponse"
+          },
+          "ticket": {
+            "$ref": "#/components/schemas/TicketResponse"
+          }
+        },
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -2093,6 +2117,56 @@
           }
         },
         "summary": "Admit the ticket behind a scanned QR code to the event this gate is admitting",
+        "tags": [
+          "Gate"
+        ]
+      }
+    },
+    "/gate/tickets/{ticketId}/unadmit": {
+      "post": {
+        "operationId": "unadmit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticketId",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "admin",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnadmitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnadmitResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Undo a mistaken admission, with a reason for the record",
         "tags": [
           "Gate"
         ]

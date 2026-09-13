@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, authHeaders, retryOn5xx } from '@/lib/api';
-import type { Admissions, ScanResult } from '@/lib/gate';
+import type { Admissions, ScanResult, UnadmitResult } from '@/lib/gate';
 import { useAccessToken } from './useSession';
 
 export interface ScanInput {
@@ -13,7 +13,13 @@ export interface ScanInput {
     gate?: string;
 }
 
-/** The query key of an event's admissions count, shared by the poll and the scan that bumps it. */
+export interface UnadmitInput {
+    ticketId: string;
+    /** Required: an admission undone goes on the ticket's record with its reason. */
+    reason: string;
+}
+
+/** The query key of an event's admissions count, shared by the poll and the scans that move it. */
 export function admissionsKey(eventId: number | null) {
     return ['gate', 'admissions', eventId] as const;
 }
@@ -32,6 +38,20 @@ export function useScanTicket() {
         // rather than at the next poll.
         onSuccess: (result: ScanResult) => {
             queryClient.setQueryData(admissionsKey(result.event.id), result.admissions);
+        },
+    });
+}
+
+/** Undoes a mistaken admission. An admin's action: the API refuses a steward. */
+export function useUnadmitTicket() {
+    const token = useAccessToken();
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async ({ ticketId, reason }: UnadmitInput) =>
+            (await api.post<UnadmitResult>(`/api/gate/tickets/${ticketId}/unadmit`, { reason },
+                { headers: authHeaders(token) })).data,
+        onSuccess: (result: UnadmitResult) => {
+            queryClient.setQueryData(admissionsKey(result.ticket.eventId), result.admissions);
         },
     });
 }

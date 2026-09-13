@@ -5,6 +5,7 @@ import com.apextick.booking.catalog.EventRepository;
 import com.apextick.booking.catalog.EventStatus;
 import com.apextick.booking.outbox.DomainEventPublisher;
 import com.apextick.booking.outbox.EventTypes;
+import com.apextick.booking.outbox.payload.TicketUnadmittedPayload;
 import com.apextick.booking.outbox.payload.TicketUsedPayload;
 import com.apextick.booking.security.CurrentUser;
 import com.apextick.booking.ticket.Ticket;
@@ -64,6 +65,29 @@ public class GateService {
         return countAdmissions(eventId);
     }
 
+    /**
+     * Undoes an admission: a steward scanned the wrong phone, or let someone in who was turned
+     * straight back. The ticket admits again, and the record keeps the admission as well as who
+     * undid it and why.
+     */
+    @Transactional
+    public UnadmitResponse unadmit(UUID ticketId, String reason, CurrentUser admin) {
+        Ticket ticket = tickets.findById(ticketId).orElseThrow(() -> new NotFoundException("Ticket", ticketId));
+        Long eventId = ticket.getEventId();
+        if (tickets.unadmit(ticketId) == 0) {
+            String status = tickets.findById(ticketId).map(t -> t.getStatus().name()).orElse("UNKNOWN");
+            throw new ConflictException(ErrorCodes.TICKET_NOT_ADMITTED, "Ticket has not been admitted",
+                    Map.of("status", status));
+        }
+        Instant now = Instant.now();
+        String why = reason.strip();
+        record(ticketId, eventId, ScanOutcome.UNADMITTED, null, why, admin);
+        domainEvents.publish(EventTypes.TICKET_UNADMITTED, "ticket", ticketId.toString(),
+                new TicketUnadmittedPayload(ticketId.toString(), eventId, why, now));
+        Ticket restored = tickets.findById(ticketId).orElseThrow();
+        return new UnadmitResponse(TicketResponse.from(restored), countAdmissions(eventId));
+    }
+
     /** An admission, or the refusal to throw once the scan's record has committed. */
     private record Verdict(ScanResponse admission, ConflictException refusal) {
         static Verdict admitted(ScanResponse admission) {
@@ -89,11 +113,11 @@ public class GateService {
         // A ticket opens the gates of its own event only. Checked before anything is spent, so a
         // holder who turned up at the wrong match leaves with a ticket that still works at theirs.
         if (!ticket.getEventId().equals(eventId)) {
-            record(ticket.getId(), eventId, ScanOutcome.WRONG_EVENT, gate, steward);
+            record(ticket.getId(), eventId, ScanOutcome.WRONG_EVENT, gate, null, steward);
             return Verdict.refused(wrongEvent(ticket));
         }
         if (ticket.getStatus() == TicketStatus.CANCELLED) {
-            record(ticket.getId(), eventId, ScanOutcome.TICKET_CANCELLED, gate, steward);
+            record(ticket.getId(), eventId, ScanOutcome.TICKET_CANCELLED, gate, null, steward);
             return Verdict.refused(cancelled());
         }
         Instant now = Instant.now();
@@ -103,14 +127,14 @@ public class GateService {
         if (tickets.admit(ticket.getId(), now, steward.sub(), gate) == 0) {
             Ticket current = tickets.findById(ticket.getId()).orElseThrow();
             if (current.getStatus() == TicketStatus.CANCELLED) {
-                record(current.getId(), eventId, ScanOutcome.TICKET_CANCELLED, gate, steward);
+                record(current.getId(), eventId, ScanOutcome.TICKET_CANCELLED, gate, null, steward);
                 return Verdict.refused(cancelled());
             }
-            record(current.getId(), eventId, ScanOutcome.ALREADY_USED, gate, steward);
+            record(current.getId(), eventId, ScanOutcome.ALREADY_USED, gate, null, steward);
             return Verdict.refused(alreadyUsed(current));
         }
         Ticket admitted = tickets.findById(ticket.getId()).orElseThrow();
-        record(admitted.getId(), eventId, ScanOutcome.ADMITTED, gate, steward);
+        record(admitted.getId(), eventId, ScanOutcome.ADMITTED, gate, null, steward);
         domainEvents.publish(EventTypes.TICKET_USED, "ticket", admitted.getId().toString(),
                 new TicketUsedPayload(admitted.getId().toString(), admitted.getOrder().getId().toString(),
                         admitted.getEventId(), admitted.getSeatId(), gate, now));
@@ -118,12 +142,14 @@ public class GateService {
                 countAdmissions(eventId)));
     }
 
-    private void record(UUID ticketId, Long eventId, ScanOutcome outcome, String gate, CurrentUser actor) {
+    private void record(UUID ticketId, Long eventId, ScanOutcome outcome, String gate, String reason,
+                        CurrentUser actor) {
         TicketScan scan = new TicketScan();
         scan.setTicketId(ticketId);
         scan.setEventId(eventId);
         scan.setOutcome(outcome);
         scan.setGate(gate);
+        scan.setReason(reason);
         scan.setActorSub(actor.sub());
         scan.setScannedAt(Instant.now());
         scans.save(scan);

@@ -31,4 +31,18 @@ public interface TicketRepository extends JpaRepository<Ticket, UUID> {
             """)
     int admit(@Param("id") UUID id, @Param("usedAt") Instant usedAt, @Param("usedBy") String usedBy,
               @Param("usedGate") String usedGate);
+
+    /**
+     * Reverses an admission, again only while the ticket is USED, so two admins undoing the same
+     * mistake -- or an undo racing a fresh scan -- cannot leave the record saying something the
+     * ticket row does not.
+     */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+            update Ticket t
+               set t.status = com.apextick.booking.ticket.TicketStatus.ISSUED, t.usedAt = null, t.usedBy = null,
+                   t.usedGate = null
+             where t.id = :id and t.status = com.apextick.booking.ticket.TicketStatus.USED
+            """)
+    int unadmit(@Param("id") UUID id);
 }

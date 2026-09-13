@@ -19,6 +19,7 @@ public final class ErrorCodes {
     public static final String TICKET_ALREADY_USED = "TICKET_ALREADY_USED";
     public static final String TICKET_CANCELLED = "TICKET_CANCELLED";
     public static final String TICKET_WRONG_EVENT = "TICKET_WRONG_EVENT";
+    public static final String TICKET_NOT_ADMITTED = "TICKET_NOT_ADMITTED";
     public static final String EVENT_NOT_ADMITTING = "EVENT_NOT_ADMITTING";
     public static final String CONFLICT = "CONFLICT";
     public static final String FORBIDDEN = "FORBIDDEN";

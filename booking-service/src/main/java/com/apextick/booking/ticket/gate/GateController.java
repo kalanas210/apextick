@@ -12,9 +12,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.UUID;
+
 /**
  * The gate API. A steward's turnstile device holds the {@code scanner} role and can reach this and
- * nothing else; an admin can do everything a steward can.
+ * nothing else; an admin can do everything a steward can, and undo an admission besides.
  */
 @RestController
 @RequestMapping("/api/gate")
@@ -38,5 +40,17 @@ public class GateController {
     @Operation(summary = "Tickets admitted to an event so far, across every gate")
     public AdmissionsResponse admissions(@PathVariable Long eventId) {
         return gate.admissions(eventId);
+    }
+
+    /**
+     * Admins only, not stewards: the device at the turnstile can let people in, but reopening a
+     * ticket someone has already walked through on is a supervisor's call.
+     */
+    @PostMapping("/tickets/{ticketId}/unadmit")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Undo a mistaken admission, with a reason for the record")
+    public UnadmitResponse unadmit(@PathVariable UUID ticketId, @Valid @RequestBody UnadmitRequest request,
+                                   CurrentUser admin) {
+        return gate.unadmit(ticketId, request.reason(), admin);
     }
 }
