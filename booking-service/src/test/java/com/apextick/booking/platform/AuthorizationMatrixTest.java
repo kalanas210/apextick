@@ -168,7 +168,7 @@ class AuthorizationMatrixTest {
 
     // ---- the admin API -----------------------------------------------------------
 
-    /** Every mutating route across the admin controllers. */
+    /** Every mutating route across the admin controllers, and the gate's admin-only undo. */
     static Stream<Arguments> mutatingAdminEndpoints() {
         return Stream.of(
                 Arguments.of("POST", "/api/admin/events"),
@@ -177,7 +177,7 @@ class AuthorizationMatrixTest {
                 Arguments.of("DELETE", "/api/admin/events/999999999"),
                 Arguments.of("POST", "/api/admin/events/999999999/layout"),
                 Arguments.of("POST", "/api/admin/seats/999999999/release"),
-                Arguments.of("POST", "/api/admin/tickets/verify"));
+                Arguments.of("POST", "/api/gate/tickets/00000000-0000-0000-0000-000000000000/unadmit"));
     }
 
     private MockHttpServletRequestBuilder adminCall(String method, String path) {

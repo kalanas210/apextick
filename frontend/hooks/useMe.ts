@@ -32,6 +32,17 @@ export function useMe() {
  * server-side regardless of what this returns.
  */
 export function useIsAdmin(): { isAdmin: boolean; isLoading: boolean; error: unknown } {
+    const { isAdmin, isLoading, error } = useRoles();
+    return { isAdmin, isLoading, error };
+}
+
+/**
+ * The panel roles the session holds. `scanner` is a gate steward's: the scanner and
+ * nothing else, where `admin` covers the scanner as well. Like useIsAdmin this only
+ * decides what renders; /api/gate/** and /api/admin/** enforce the same split.
+ */
+export function useRoles(): { isAdmin: boolean; isScanner: boolean; isLoading: boolean; error: unknown } {
     const { data, isLoading, error } = useMe();
-    return { isAdmin: data?.roles?.includes('admin') ?? false, isLoading, error };
+    const roles = data?.roles ?? [];
+    return { isAdmin: roles.includes('admin'), isScanner: roles.includes('scanner'), isLoading, error };
 }

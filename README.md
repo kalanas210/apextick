@@ -103,11 +103,12 @@ There are no `synchronized` blocks, no application-level mutexes, and no distrib
 | **Live seat map** | WebSocket / STOMP (`/api/ws`) with Redis pub/sub fan-out, so every browser sees a seat flip in real time — across multiple service instances. |
 | **Orders** | Idempotent order creation (`Idempotency-Key`), a payment window, and a sweeper that expires unpaid orders and releases their seats. |
 | **Payments** | Pluggable `PaymentGateway` — **mock** (offline, deterministic test cards) and **Stripe** (PaymentIntents + signed webhook + refund). Switch with `APP_PAYMENT_PROVIDER`. |
-| **Tickets** | On payment a QR-tokened ticket is issued per seat, rendered to a PDF and cached in S3/MinIO (off the payment path, regenerated on demand); admins verify tickets at the gate. |
+| **Tickets** | On payment a QR-tokened ticket is issued per seat, rendered to a PDF and cached in S3/MinIO (off the payment path, regenerated on demand); stewards scan them at the gate, where each admits once, and only to its own event. |
 | **Transactional outbox** | Domain events are written in the same transaction as the state change and published to RabbitMQ only after commit — no phantom events on rollback. |
 | **Async notifications** | An independent service consumes booking events (idempotently, with a DLQ) and sends templated email via Mailpit/SMTP. |
-| **Admin panel** | A `/admin` area behind the `admin` realm role: event CRUD, a one-shot seating-layout builder with a live seat/revenue preview, live event stats, an orders console, seat release, and a gate scanner that reads QR codes with the browser's own `BarcodeDetector`. |
-| **Admin API** | Events & layout management, live event stats, orders, seat release, ticket verification — all `ROLE_ADMIN`. |
+| **Admin panel** | A `/admin` area behind the `admin` realm role: event CRUD, a one-shot seating-layout builder with a live seat/revenue preview, live event stats, an orders console, seat release, and a gate scanner that reads QR codes with the browser's own `BarcodeDetector`, which a steward holding only the `scanner` role can open without the rest of the panel. |
+| **Admin API** | Events & layout management, live event stats, orders, seat release — all `ROLE_ADMIN`. |
+| **Gate API** | `/api/gate/**`, for the `scanner` role and admins: every scan checked against the event its gate admits to, admission as a single conditional `UPDATE` so two turnstiles can never both let one ticket in, each scan recorded with its gate and steward, a live admissions count across gates, and an admin-only undo that must give a reason. |
 | **Rate limiting** | Redis fixed-window limits on hold/order/pay, returning `429` + `Retry-After`. |
 | **Observability** | Micrometer → Prometheus, with a provisioned Grafana dashboard. |
 | **Errors** | RFC-7807 `application/problem+json` everywhere, with a correlation id per request. |
@@ -120,7 +121,7 @@ There are no `synchronized` blocks, no application-level mutexes, and no distrib
 - **PCI-conscious payments** — the Stripe adapter never sees a raw card number: it creates a PaymentIntent and returns a `client_secret` for the browser to confirm, treating the signed `payment_intent.succeeded` webhook as the source of truth. Webhooks are idempotent, and a charge that cannot buy its order (its seats lost, the order expired or already paid, a sum other than the payment's) is refunded under a key that lets it be refunded only once. Pay attempts racing on one order take turns on the order's row, so the order is charged once however many tabs race for it.
 - **Stateless JWT security** — Keycloak issues OIDC tokens the API validates statelessly; roles map from `realm_access.roles` to `ROLE_*`. Auth keeps working containerized by fetching signing keys over the internal network while validating the public issuer.
 - **One-command infrastructure** — the whole backend, its dependencies, the Keycloak realm, and an optional observability stack start with `docker compose up`. Every secret, including the realm's client secrets, comes from a git-ignored `.env`, and the production stack refuses to start while any credential is unset.
-- **Verified** — 179 booking-service tests, most of them full-stack **Testcontainers** integration tests covering concurrency, expiry, the outbox, orders, racing and resent payments, signed webhooks delivered over HTTP, admin, security and rate-limiting; GreenMail tests for the notification service's SMTP path (an authenticated login, and refusing a server that doesn't offer STARTTLS); Vitest unit tests for the frontend's money and status helpers, and for the admin hooks' bearer tokens and cache keys. CI also fails when the gateway's OpenAPI contract drifts from the code.
+- **Verified** — 188 booking-service tests, most of them full-stack **Testcontainers** integration tests covering concurrency, expiry, the outbox, orders, racing and resent payments, signed webhooks delivered over HTTP, turnstiles racing on one ticket, admin, security and rate-limiting; GreenMail tests for the notification service's SMTP path (an authenticated login, and refusing a server that doesn't offer STARTTLS); Vitest unit tests for the frontend's money, status and gate-refusal helpers, and for the admin and gate hooks' bearer tokens and cache keys. CI also fails when the gateway's OpenAPI contract drifts from the code.
 
 ## Tech stack
 
@@ -221,6 +222,15 @@ scripts/grant-admin.sh                 # grants to kalana
 scripts/grant-admin.sh someone-else
 ```
 
+Gate stewards need only the `scanner` role. It opens the gate API and the
+scanner at `/admin/scan` and nothing else, so a turnstile device that goes
+missing is not an admin session. The script creates the role first on a realm
+imported before it existed:
+
+```bash
+scripts/grant-role.sh scanner someone-else
+```
+
 The script patches the realm through Keycloak's Admin API, so it works on a
 stack that is already running — which matters, because Keycloak reads
 `keycloak/import/apextick-realm.json` only when the realm does not yet exist in
@@ -236,6 +246,11 @@ seed for local development, not a credential.
 The gate scanner reads QR codes through the browser's native `BarcodeDetector`
 (Chromium, on a secure origin — HTTPS or `localhost`); everywhere else it falls
 back to pasting the token, which is also how it is demoed without a camera.
+Each device is set once to the event its gate admits to, and a gate name. A
+ticket for any other event is turned away unspent, a repeat scan says when and
+at which gate the ticket was first let in, and every scan — refusals included —
+lands on the ticket's record, which is also where an admin's undo of a mistaken
+admission goes, with its reason.
 
 ## Payments
 
@@ -337,7 +352,7 @@ After the run, `teardown` reads the seat map back and asserts every targeted sea
 (cd frontend && npm ci --ignore-scripts && npm test)
 ```
 
-booking-service runs 179 tests, most of them full-stack Testcontainers integration tests: seat concurrency (1 winner / 199 losers) over the real hold endpoint, multi-seat all-or-nothing holds, the sales window and per-user seat cap, Redis-driven expiry, the hold sweeper, the transactional outbox, the order/payment flow, pay attempts racing on one order and resent under the same key, Stripe signature verification and mapping, signed Stripe webhooks delivered over HTTP (redelivered, late, duplicate, unmatched and mis-priced charges), refunds for charges an order can no longer take, the admin API, security, and rate limiting. Its verify also exports the served OpenAPI document to `target/openapi/api-docs.json`, which CI normalises and compares with the committed gateway contract. notification-service runs 8 (GreenMail, including an authenticated SMTP server and one that refuses STARTTLS); the frontend runs 75 Vitest unit tests.
+booking-service runs 188 tests, most of them full-stack Testcontainers integration tests: seat concurrency (1 winner / 199 losers) over the real hold endpoint, multi-seat all-or-nothing holds, the sales window and per-user seat cap, Redis-driven expiry, the hold sweeper, the transactional outbox, the order/payment flow, pay attempts racing on one order and resent under the same key, Stripe signature verification and mapping, signed Stripe webhooks delivered over HTTP (redelivered, late, duplicate, unmatched and mis-priced charges), refunds for charges an order can no longer take, the gate (twelve turnstiles racing on one ticket let it in once; scans for another event, at a cancelled event and repeat scans refused and recorded; an admin's undo, and a steward refused one), the admin API, security, and rate limiting. Its verify also exports the served OpenAPI document to `target/openapi/api-docs.json`, which CI normalises and compares with the committed gateway contract. notification-service runs 8 (GreenMail, including an authenticated SMTP server and one that refuses STARTTLS); the frontend runs 91 Vitest unit tests.
 
 ## Project structure
 
@@ -348,7 +363,7 @@ apextick/
 ├── frontend/               # Next.js — storefront, live seat map, checkout, tickets, /admin panel
 ├── load-test/              # k6 authenticated flash-sale + correctness test
 ├── keycloak/import/        # auto-imported apextick realm (client, roles, demo user)
-├── scripts/                # WSO2 gateway setup, grant-admin.sh
+├── scripts/                # WSO2 gateway setup, grant-role.sh / grant-admin.sh
 ├── infra/                  # Prometheus + Grafana provisioning, Terraform (AWS)
 ├── caddy/                  # TLS edge reverse proxy
 ├── wso2/                   # API Manager config + the published API contract

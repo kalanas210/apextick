@@ -59,6 +59,10 @@ public class Ticket {
     @Column(name = "used_by")
     private String usedBy;
 
+    /** The gate the ticket was admitted at, when the scanner named one. */
+    @Column(name = "used_gate")
+    private String usedGate;
+
     @Column(name = "s3_key")
     private String s3Key;
 

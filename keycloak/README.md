@@ -3,7 +3,7 @@
 `import/apextick-realm.json` is imported by `start-dev --import-realm` the first
 time Keycloak starts on an empty database. After that the realm lives in the
 database, and editing this file changes nothing on that instance -- patch a
-running realm through the Admin API instead (see `scripts/grant-admin.sh`).
+running realm through the Admin API instead (see `scripts/grant-role.sh`).
 
 ## Values that come from the environment
 
@@ -52,6 +52,10 @@ Generate a secret with `openssl rand -hex 32`.
   lock the published demo account.
 - Password policy: 8 to 128 characters, not the username or email. It applies
   to every password set after import -- registration, reset, the Admin API.
+- The import defines the `admin` and `scanner` realm roles and grants them to
+  nobody. `scanner` is for gate devices: it reaches `/api/gate/**` and nothing
+  else. `scripts/grant-role.sh admin|scanner <user>` grants one on a running
+  realm, creating the role first if that realm was imported before it existed.
 
 The demo account's published password (`12345`, advertised on the sign-in
 page) is shorter than that policy allows. Keycloak checks a plaintext seed
@@ -75,7 +79,7 @@ the last import** and re-imports this file.
 does after this change**, because the keycloak service gained environment
 variables and a loopback port. A fresh import gets everything above in one go
 (the demo account keeps its `sub`); self-registered accounts are gone, and so
-is every role granted with `scripts/grant-admin.sh` and the master-realm
+is every role granted with `scripts/grant-role.sh` and the master-realm
 `frontendUrl` the console tunnel needs (see docker-compose.prod.yml). Run
 `scripts/wso2/setup.sh` afterwards so WSO2 picks up the new key-manager secret.
 

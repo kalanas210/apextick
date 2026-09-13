@@ -5,7 +5,7 @@ import { api, authHeaders, retryOn5xx } from '@/lib/api';
 import { useAccessToken } from './useSession';
 import type {
     AdminSeat, EventDetail, EventStats, EventSummary, EventUpsert, LayoutInput, LayoutResult,
-    Order, PageResponse, Series, Team, VerifyResult,
+    Order, PageResponse, Series, Team,
 } from '@/lib/types';
 
 export interface AdminEventParams {
@@ -201,18 +201,6 @@ export function useReleaseSeat(eventId: number) {
             // Other browsers hear about this over STOMP; this tab asks directly.
             queryClient.invalidateQueries({ queryKey: ['seats'] });
         },
-    });
-}
-
-/* -------------------------------- tickets -------------------------------- */
-
-/** No invalidation: the scanner keeps its own result and log. */
-export function useVerifyTicket() {
-    const token = useAccessToken();
-    return useMutation({
-        mutationFn: async (qrToken: string) =>
-            (await api.post<VerifyResult>('/api/admin/tickets/verify', { qrToken },
-                { headers: authHeaders(token) })).data,
     });
 }
 

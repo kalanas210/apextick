@@ -39,6 +39,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/events/*/holds/me").authenticated()
                         .requestMatchers(HttpMethod.GET,
                                 "/api/series/**", "/api/events/**", "/api/payments/config").permitAll()
+                        // a gate steward scans tickets and reaches nothing else; an admin can do both
+                        .requestMatchers("/api/gate/**").hasAnyRole("ADMIN", "SCANNER")
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )

@@ -36,6 +36,23 @@
         },
         "type": "object"
       },
+      "AdmissionsResponse": {
+        "properties": {
+          "admitted": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "eventId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "issued": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "CreateOrderRequest": {
         "properties": {
           "eventId": {
@@ -404,6 +421,42 @@
           "startsAt",
           "venue"
         ],
+        "type": "object"
+      },
+      "GateEventResponse": {
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "startsAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "onsale",
+              "selling-fast",
+              "final-release",
+              "sold-out",
+              "draft",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "timeZone": {
+            "type": "string"
+          },
+          "venue": {
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "HoldRequest": {
@@ -802,6 +855,42 @@
         },
         "type": "object"
       },
+      "ScanRequest": {
+        "properties": {
+          "eventId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "gate": {
+            "maxLength": 64,
+            "minLength": 0,
+            "type": "string"
+          },
+          "qrToken": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "eventId",
+          "qrToken"
+        ],
+        "type": "object"
+      },
+      "ScanResponse": {
+        "properties": {
+          "admissions": {
+            "$ref": "#/components/schemas/AdmissionsResponse"
+          },
+          "event": {
+            "$ref": "#/components/schemas/GateEventResponse"
+          },
+          "ticket": {
+            "$ref": "#/components/schemas/TicketResponse"
+          }
+        },
+        "type": "object"
+      },
       "SeatResponse": {
         "properties": {
           "col": {
@@ -1003,6 +1092,10 @@
       },
       "TicketResponse": {
         "properties": {
+          "eventId": {
+            "format": "int64",
+            "type": "integer"
+          },
           "id": {
             "type": "string"
           },
@@ -1094,25 +1187,23 @@
         },
         "type": "object"
       },
-      "VerifyRequest": {
+      "UnadmitRequest": {
         "properties": {
-          "qrToken": {
-            "minLength": 1,
+          "reason": {
+            "maxLength": 255,
+            "minLength": 0,
             "type": "string"
           }
         },
         "required": [
-          "qrToken"
+          "reason"
         ],
         "type": "object"
       },
-      "VerifyResponse": {
+      "UnadmitResponse": {
         "properties": {
-          "ok": {
-            "type": "boolean"
-          },
-          "reason": {
-            "type": "string"
+          "admissions": {
+            "$ref": "#/components/schemas/AdmissionsResponse"
           },
           "ticket": {
             "$ref": "#/components/schemas/TicketResponse"
@@ -1634,46 +1725,6 @@
         ]
       }
     },
-    "/admin/tickets/verify": {
-      "post": {
-        "operationId": "verify",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "admin",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/CurrentUser"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VerifyRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "*/*": {
-                "schema": {
-                  "$ref": "#/components/schemas/VerifyResponse"
-                }
-              }
-            },
-            "description": "OK"
-          }
-        },
-        "tags": [
-          "Admin: Tickets"
-        ]
-      }
-    },
     "/events": {
       "get": {
         "operationId": "list_2",
@@ -1996,6 +2047,129 @@
           "Events"
         ],
         "x-auth-type": "None"
+      }
+    },
+    "/gate/events/{eventId}/admissions": {
+      "get": {
+        "operationId": "admissions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eventId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Tickets admitted to an event so far, across every gate",
+        "tags": [
+          "Gate"
+        ]
+      }
+    },
+    "/gate/scans": {
+      "post": {
+        "operationId": "scan",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "steward",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Admit the ticket behind a scanned QR code to the event this gate is admitting",
+        "tags": [
+          "Gate"
+        ]
+      }
+    },
+    "/gate/tickets/{ticketId}/unadmit": {
+      "post": {
+        "operationId": "unadmit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticketId",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "admin",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnadmitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnadmitResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Undo a mistaken admission, with a reason for the record",
+        "tags": [
+          "Gate"
+        ]
       }
     },
     "/me": {

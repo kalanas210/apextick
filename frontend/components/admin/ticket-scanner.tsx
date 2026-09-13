@@ -4,29 +4,32 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { cn } from "@/lib/cn";
 import { apiErrorCode, apiErrorMessage, apiProblem, apiStatus } from "@/lib/api";
+import { DEFAULT_FILTERS } from "@/lib/catalog";
 import { formatInstant, relativeTime } from "@/lib/format";
-import { useVerifyTicket } from "@/hooks/useAdmin";
+import { kickoffLabel, refusalOf, type GateProblem, type ScanRefusal } from "@/lib/gate";
+import { useEventList } from "@/hooks/useCatalog";
+import { useAdmissions, useScanTicket, useUnadmitTicket } from "@/hooks/useGate";
+import { useRoles } from "@/hooks/useMe";
 import { AdminHeader } from "./admin-shell";
 import { Button } from "@/components/ui/button";
-import { Field, Textarea } from "@/components/ui/field";
+import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { Notice } from "@/components/ui/notice";
-import { Camera, Check, X } from "@/components/ui/icons";
+import { Camera, Check, Refresh, X } from "@/components/ui/icons";
 import type { Ticket } from "@/lib/types";
 
 /** Fast enough to feel instant at a turnstile, slow enough not to pin a CPU. */
 const SCAN_INTERVAL_MS = 250;
 const LOG_LIMIT = 20;
+/** This device's gate outlives a reload: a steward sets the event and the gate once a shift. */
+const GATE_EVENT_KEY = "apextick.gate.eventId";
+const GATE_NAME_KEY = "apextick.gate.name";
 
-type Outcome =
-  | { kind: "admitted"; ticket: Ticket }
-  | { kind: "already"; usedAt: string | null; message: string }
-  | { kind: "cancelled"; message: string }
-  | { kind: "unknown"; message: string }
-  | { kind: "error"; message: string };
+type Refused = ScanRefusal & { message: string };
+type Outcome = { kind: "admitted"; ticket: Ticket } | { kind: "undone"; ticket: Ticket } | Refused;
 
 interface LogEntry {
   id: number;
-  admitted: boolean;
+  result: "admitted" | "refused" | "undone";
   label: string;
   at: string;
 }
@@ -37,12 +40,69 @@ type CameraState =
   | { kind: "unsupported"; reason: string }
   | { kind: "denied"; reason: string };
 
+function stored(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function remember(key: string, value: string | null) {
+  try {
+    if (value === null || value === "") {
+      window.localStorage.removeItem(key);
+    } else {
+      window.localStorage.setItem(key, value);
+    }
+  } catch {
+    // storage is blocked: the steward sets the gate up again after a reload
+  }
+}
+
+function storedEventId(): number | null {
+  const id = Number(stored(GATE_EVENT_KEY));
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+function logLabel(refused: Refused): string {
+  switch (refused.kind) {
+    case "already":
+      return "Already scanned";
+    case "wrong-event":
+      return refused.name ? `Wrong event: ${refused.name}` : "Wrong event";
+    case "event-closed":
+      return "Gates closed";
+    case "cancelled":
+      return "Cancelled ticket";
+    case "unknown":
+      return "Unknown ticket";
+    default:
+      return "Rejected";
+  }
+}
+
+/** The ticket an admin could reopen from this outcome: one just let in, or let in before. */
+function undoableTicketId(outcome: Outcome | null): string | null {
+  if (outcome?.kind === "admitted") return outcome.ticket.id;
+  if (outcome?.kind === "already") return outcome.ticketId;
+  return null;
+}
+
 export function TicketScanner() {
-  const verify = useVerifyTicket();
+  const scan = useScanTicket();
+  const unadmit = useUnadmitTicket();
+  const { isAdmin } = useRoles();
+  const { data: events, isLoading: eventsLoading } = useEventList(DEFAULT_FILTERS);
+  const [eventId, setEventId] = useState<number | null>(() => storedEventId());
+  const [gateName, setGateName] = useState(() => stored(GATE_NAME_KEY) ?? "");
+  const { data: admissions } = useAdmissions(eventId);
   const [token, setToken] = useState("");
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [log, setLog] = useState<LogEntry[]>([]);
   const [camera, setCamera] = useState<CameraState>({ kind: "idle" });
+
+  const gateEvent = events?.find((e) => e.id === eventId) ?? null;
 
   const videoRef = useRef<HTMLVideoElement>(null);
   // The stream lives in a ref, not state: stopCamera has to be callable from
@@ -73,61 +133,67 @@ export function TicketScanner() {
 
   useEffect(() => stopCamera, [stopCamera]);
 
+  const pushLog = useCallback((result: LogEntry["result"], label: string) => {
+    setLog((l) =>
+      [{ id: Date.now(), result, label, at: new Date().toISOString() }, ...l].slice(0, LOG_LIMIT),
+    );
+  }, []);
+
   const submit = useCallback(
     (raw: string) => {
       const value = raw.trim();
-      if (!value) return;
-      verify.mutate(value, {
-        onSuccess: (result) => {
-          setOutcome({ kind: "admitted", ticket: result.ticket });
-          setLog((l) =>
-            [
-              {
-                id: Date.now(),
-                admitted: true,
-                label: `${result.ticket.seatLabel} · ${result.ticket.sectionName}`,
-                at: new Date().toISOString(),
-              },
-              ...l,
-            ].slice(0, LOG_LIMIT),
-          );
-          setToken("");
+      if (!value || eventId === null) return;
+      // an undo that failed against the last ticket says nothing about this one
+      unadmit.reset();
+      scan.mutate(
+        { qrToken: value, eventId, gate: gateName.trim() || undefined },
+        {
+          onSuccess: (result) => {
+            setOutcome({ kind: "admitted", ticket: result.ticket });
+            pushLog("admitted", `${result.ticket.seatLabel} · ${result.ticket.sectionName}`);
+            setToken("");
+          },
+          onError: (err) => {
+            const refused: Refused = {
+              ...refusalOf(apiStatus(err), apiProblem(err) as GateProblem | undefined),
+              message: apiErrorMessage(err, "Could not verify that ticket."),
+            };
+            setOutcome(refused);
+            pushLog("refused", logLabel(refused));
+          },
         },
-        onError: (err) => {
-          const code = apiErrorCode(err);
-          const message = apiErrorMessage(err, "Could not verify that ticket.");
-          setOutcome(
-            code === "TICKET_ALREADY_USED"
-              ? { kind: "already", usedAt: apiProblem(err)?.usedAt ?? null, message }
-              : code === "TICKET_CANCELLED"
-                ? { kind: "cancelled", message }
-                : apiStatus(err) === 404
-                  ? { kind: "unknown", message }
-                  : { kind: "error", message },
-          );
-          setLog((l) =>
-            [
-              {
-                id: Date.now(),
-                admitted: false,
-                label:
-                  code === "TICKET_ALREADY_USED"
-                    ? "Already scanned"
-                    : code === "TICKET_CANCELLED"
-                      ? "Cancelled ticket"
-                      : apiStatus(err) === 404
-                        ? "Unknown ticket"
-                        : "Rejected",
-                at: new Date().toISOString(),
-              },
-              ...l,
-            ].slice(0, LOG_LIMIT),
-          );
-        },
-      });
+      );
     },
-    [verify],
+    [scan, unadmit, eventId, gateName, pushLog],
   );
+
+  /** A different gate event starts a clean slate: nothing on screen was checked against it. */
+  const chooseEvent = (id: number | null) => {
+    stopCamera();
+    setEventId(id);
+    remember(GATE_EVENT_KEY, id === null ? null : String(id));
+    setOutcome(null);
+    setLog([]);
+    unadmit.reset();
+  };
+
+  const nameGate = (name: string) => {
+    setGateName(name);
+    remember(GATE_NAME_KEY, name.trim());
+  };
+
+  /** An admin reopening a ticket let in by mistake. The record keeps the admission, and why it was undone. */
+  const undoAdmission = (ticketId: string, reason: string) => {
+    unadmit.mutate(
+      { ticketId, reason },
+      {
+        onSuccess: (result) => {
+          setOutcome({ kind: "undone", ticket: result.ticket });
+          pushLog("undone", `Undone: ${result.ticket.seatLabel} · ${result.ticket.sectionName}`);
+        },
+      },
+    );
+  };
 
   const startCamera = useCallback(async () => {
     const session = (sessionRef.current += 1);
@@ -229,19 +295,28 @@ export function TicketScanner() {
     submit(token);
   };
 
-  const admitted = log.filter((l) => l.admitted).length;
+  const turnedAway = log.filter((l) => l.result === "refused").length;
+  const ready = eventId !== null;
+  // Stewards never see this: reopening a ticket someone has walked through on is an admin's call.
+  const undoable = isAdmin ? undoableTicketId(outcome) : null;
 
   return (
     <>
       <AdminHeader
-        kicker="Admin"
+        kicker="Gate"
         title="Scan tickets"
-        description="Point a camera at the QR code, or paste the token from a ticket."
+        description="Choose the event this gate admits to, then point a camera at the QR code or paste the token."
         action={
-          log.length > 0 ? (
+          ready && admissions ? (
             <p className="text-[0.8rem] text-muted">
-              <span className="tnum text-accent">{admitted}</span> admitted ·{" "}
-              <span className="tnum">{log.length - admitted}</span> rejected
+              {/* Every gate's admissions, not this device's: the figure a capacity call needs. */}
+              <span className="tnum text-accent">{admissions.admitted}</span> of{" "}
+              <span className="tnum">{admissions.issued}</span> admitted
+              {turnedAway > 0 && (
+                <>
+                  {" "}· <span className="tnum">{turnedAway}</span> turned away here
+                </>
+              )}
             </p>
           ) : undefined
         }
@@ -249,7 +324,41 @@ export function TicketScanner() {
 
       <div className="mt-8 grid gap-10 lg:grid-cols-12 lg:gap-12">
         <div className="lg:col-span-7">
-          <section>
+          <section className="grid gap-4 sm:grid-cols-3">
+            <Field
+              label="This gate admits to"
+              className="sm:col-span-2"
+              hint={
+                gateEvent
+                  ? `${kickoffLabel(gateEvent.startsAt, gateEvent.timeZone)} · ${gateEvent.stadium}`
+                  : "A ticket for any other event is turned away, and stays unused."
+              }
+            >
+              {(a) => (
+                <Select
+                  {...a}
+                  value={eventId === null ? "" : String(eventId)}
+                  onChange={(e) => chooseEvent(e.target.value ? Number(e.target.value) : null)}
+                  options={(events ?? []).map((e) => ({ value: String(e.id), label: `${e.name} · ${e.date}` }))}
+                  placeholder={eventsLoading ? "Loading events…" : "Choose the event at this gate"}
+                  disabled={eventsLoading}
+                />
+              )}
+            </Field>
+            <Field label="Gate" hint="Recorded against every scan">
+              {(a) => (
+                <Input
+                  {...a}
+                  value={gateName}
+                  onChange={(e) => nameGate(e.target.value)}
+                  placeholder="North 3"
+                  maxLength={64}
+                />
+              )}
+            </Field>
+          </section>
+
+          <section className="mt-8">
             <h2 className="kicker mb-3">Camera</h2>
             <div className="overflow-hidden rounded-2xl border border-line bg-ink-2">
               <div className="relative aspect-video bg-ink">
@@ -268,10 +377,10 @@ export function TicketScanner() {
                       <Camera className="mx-auto h-8 w-8 text-faint" />
                       <p className="mt-3 text-[0.82rem] text-muted">
                         {camera.kind === "idle"
-                          ? "Camera off."
-                          : camera.kind === "unsupported"
-                            ? camera.reason
-                            : camera.reason}
+                          ? ready
+                            ? "Camera off."
+                            : "Choose the event first, so every scan is checked against it."
+                          : camera.reason}
                       </p>
                     </div>
                   </div>
@@ -283,7 +392,12 @@ export function TicketScanner() {
                     Stop camera
                   </Button>
                 ) : (
-                  <Button onClick={() => void startCamera()} size="sm" variant="outline">
+                  <Button
+                    onClick={() => void startCamera()}
+                    size="sm"
+                    variant="outline"
+                    className={ready ? "" : "pointer-events-none opacity-60"}
+                  >
                     Start camera
                   </Button>
                 )}
@@ -311,9 +425,9 @@ export function TicketScanner() {
               <Button
                 type="submit"
                 size="md"
-                className={verify.isPending ? "pointer-events-none opacity-60" : ""}
+                className={scan.isPending || !ready ? "pointer-events-none opacity-60" : ""}
               >
-                {verify.isPending ? "Checking…" : "Verify"}
+                {scan.isPending ? "Checking…" : "Verify"}
               </Button>
             </form>
           </section>
@@ -326,10 +440,29 @@ export function TicketScanner() {
             <div aria-live="assertive">
               {outcome ? <Result outcome={outcome} /> : (
                 <div className="rounded-2xl border border-line bg-ink-2 p-8 text-center">
-                  <p className="text-[0.86rem] text-muted">No ticket checked yet.</p>
+                  <p className="text-[0.86rem] text-muted">
+                    {ready ? "No ticket checked yet." : "Choose the event this gate admits to."}
+                  </p>
                 </div>
               )}
             </div>
+
+            {/* Outside the live region: typing a reason is not an outcome to announce. */}
+            {undoable && (
+              <UndoAdmission
+                key={`${outcome?.kind}:${undoable}`}
+                busy={unadmit.isPending}
+                error={
+                  !unadmit.isError
+                    ? null
+                    : apiErrorCode(unadmit.error) === "TICKET_NOT_ADMITTED"
+                      ? "This ticket is no longer admitted: its admission has already been undone."
+                      : apiErrorMessage(unadmit.error, "Could not undo that admission.")
+                }
+                onUndo={(reason) => undoAdmission(undoable, reason)}
+                onCancel={() => unadmit.reset()}
+              />
+            )}
 
             {log.length > 0 && (
               <section className="rounded-2xl border border-line bg-ink-2 p-6">
@@ -338,8 +471,10 @@ export function TicketScanner() {
                   {log.map((entry) => (
                     <li key={entry.id} className="flex items-center justify-between gap-3">
                       <span className="flex min-w-0 items-center gap-2">
-                        {entry.admitted ? (
+                        {entry.result === "admitted" ? (
                           <Check className="h-3.5 w-3.5 shrink-0 text-accent" />
+                        ) : entry.result === "undone" ? (
+                          <Refresh className="h-3.5 w-3.5 shrink-0 text-muted" />
                         ) : (
                           <X className="h-3.5 w-3.5 shrink-0 text-[#ff6b6b]" />
                         )}
@@ -361,6 +496,101 @@ export function TicketScanner() {
   );
 }
 
+/**
+ * Reopens a ticket a steward let in by mistake -- the wrong phone scanned, a holder turned
+ * straight back. It has to say why: the gate's record keeps the admission, the undo and the
+ * reason, against the admin who gave it.
+ */
+function UndoAdmission({
+  busy,
+  error,
+  onUndo,
+  onCancel,
+}: {
+  busy: boolean;
+  error: string | null;
+  onUndo: (reason: string) => void;
+  onCancel: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [missing, setMissing] = useState(false);
+
+  const confirm = (e: FormEvent) => {
+    e.preventDefault();
+    const why = reason.trim();
+    if (!why) {
+      setMissing(true);
+      return;
+    }
+    onUndo(why);
+  };
+
+  if (!open) {
+    return (
+      <section className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-ink-2 px-6 py-4">
+        <p className="text-[0.8rem] text-muted">Let in by mistake?</p>
+        <Button onClick={() => setOpen(true)} size="sm" variant="ghost">
+          Undo admission
+        </Button>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-2xl border border-line bg-ink-2 p-6">
+      <h2 className="kicker">Undo admission</h2>
+      <form onSubmit={confirm} className="mt-4 space-y-4">
+        <Field
+          label="Reason"
+          required
+          hint="Kept on the ticket's record, with the admission it undoes."
+          error={missing ? "Say why the admission is being undone." : undefined}
+        >
+          {(a) => (
+            <Input
+              {...a}
+              value={reason}
+              onChange={(e) => {
+                setReason(e.target.value);
+                setMissing(false);
+              }}
+              placeholder="Scanned the wrong phone"
+              maxLength={255}
+              autoFocus
+            />
+          )}
+        </Field>
+        {error && <Notice tone="error">{error}</Notice>}
+        <div className="flex gap-3">
+          <Button
+            type="submit"
+            size="sm"
+            variant="outline"
+            className={cn(
+              "border-[#ff6b6b]/50 text-[#ff6b6b] hover:border-[#ff6b6b] hover:bg-[#ff6b6b]/10",
+              busy && "pointer-events-none opacity-60",
+            )}
+          >
+            {busy ? "Undoing…" : "Undo admission"}
+          </Button>
+          <Button
+            onClick={() => {
+              setOpen(false);
+              onCancel();
+            }}
+            size="sm"
+            variant="ghost"
+            className={cn(busy && "pointer-events-none opacity-60")}
+          >
+            Cancel
+          </Button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
 function Result({ outcome }: { outcome: Outcome }) {
   if (outcome.kind === "admitted") {
     const t = outcome.ticket;
@@ -376,13 +606,51 @@ function Result({ outcome }: { outcome: Outcome }) {
     );
   }
 
+  if (outcome.kind === "undone") {
+    const t = outcome.ticket;
+    return (
+      <Card tone="muted" word="Admission undone" icon={<Refresh className="h-5 w-5" />}>
+        <p className="mt-3 text-[0.84rem] text-muted">
+          {t.seatLabel} · {t.sectionName} is unused again and admits on its next scan. The
+          admission and its undo both stay on the ticket&apos;s record.
+        </p>
+      </Card>
+    );
+  }
+
   if (outcome.kind === "already") {
     return (
       <Card tone="bad" word="Already scanned">
         <p className="mt-3 text-[0.84rem] text-muted">
           {outcome.usedAt
-            ? `First scanned ${relativeTime(outcome.usedAt)}, at ${formatInstant(outcome.usedAt)}.`
+            ? `First scanned ${relativeTime(outcome.usedAt)}${outcome.gate ? ` at ${outcome.gate}` : ""}, ${formatInstant(outcome.usedAt)}.`
             : outcome.message}
+        </p>
+      </Card>
+    );
+  }
+
+  if (outcome.kind === "wrong-event") {
+    const when = kickoffLabel(outcome.startsAt, outcome.timeZone);
+    return (
+      <Card tone="bad" word="Wrong event">
+        <p className="mt-3 text-[0.84rem] text-muted">
+          {outcome.name
+            ? `This ticket is for ${outcome.name}${when ? `, ${when}` : ""}${outcome.venue ? `, at ${outcome.venue}` : ""}.`
+            : "This ticket is for a different event."}{" "}
+          It has not been used and still admits there.
+        </p>
+      </Card>
+    );
+  }
+
+  if (outcome.kind === "event-closed") {
+    return (
+      <Card tone="bad" word="Gates closed">
+        <p className="mt-3 text-[0.84rem] text-muted">
+          {outcome.status === "cancelled"
+            ? "This event has been cancelled, so nobody is admitted."
+            : "This event is not published, so its gates are not open."}
         </p>
       </Card>
     );
@@ -418,10 +686,13 @@ function Result({ outcome }: { outcome: Outcome }) {
 function Card({
   tone,
   word,
+  icon,
   children,
 }: {
   tone: "good" | "bad" | "muted";
   word: string;
+  /** Overrides the tick or cross, for an outcome that is neither a yes nor a no. */
+  icon?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -442,7 +713,7 @@ function Card({
         )}
       >
         {/* Icon and word both, so the outcome does not depend on colour alone. */}
-        {tone === "good" ? <Check className="h-5 w-5" /> : <X className="h-5 w-5" />}
+        {icon ?? (tone === "good" ? <Check className="h-5 w-5" /> : <X className="h-5 w-5" />)}
         {word}
       </p>
       {children}

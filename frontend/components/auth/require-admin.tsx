@@ -1,33 +1,45 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useIsAdmin } from "@/hooks/useMe";
+import { useRoles } from "@/hooks/useMe";
 import { useSession } from "@/hooks/useSession";
 import { apiStatus } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { RequireAuth } from "./require-auth";
 
 /**
- * Gates the admin area on the `admin` realm role.
+ * Gates the admin area on the `admin` realm role, or on `admin` or `scanner` for the
+ * one screen a gate steward may open.
  *
  * Composes RequireAuth rather than repeating it, so a signed-out visitor gets the
  * same inline prompt as everywhere else. Because it returns instead of rendering
- * children, a non-admin never fires a single /api/admin request — the API would
- * refuse them anyway, but there is no reason to make it say so.
+ * children, a visitor without the role never fires a single request the API would
+ * refuse — it would refuse them anyway, but there is no reason to make it say so.
  */
-export function RequireAdmin({ children }: { children: ReactNode }) {
+export function RequireAdmin({
+  children,
+  allowScanner = false,
+}: {
+  children: ReactNode;
+  /** Let a gate steward in as well: true for the scanner, and only the scanner. */
+  allowScanner?: boolean;
+}) {
   return (
     <RequireAuth
       title="Sign in to continue"
-      description="The admin area needs an ApexTick account with the admin role."
+      description={
+        allowScanner
+          ? "The scanner needs an ApexTick account with the admin or scanner role."
+          : "The admin area needs an ApexTick account with the admin role."
+      }
     >
-      <AdminGate>{children}</AdminGate>
+      <AdminGate allowScanner={allowScanner}>{children}</AdminGate>
     </RequireAuth>
   );
 }
 
-function AdminGate({ children }: { children: ReactNode }) {
-  const { isAdmin, isLoading, error } = useIsAdmin();
+function AdminGate({ children, allowScanner }: { children: ReactNode; allowScanner: boolean }) {
+  const { isAdmin, isScanner, isLoading, error } = useRoles();
   const { signIn } = useSession();
 
   if (isLoading) {
@@ -64,20 +76,34 @@ function AdminGate({ children }: { children: ReactNode }) {
     );
   }
 
-  if (!isAdmin) {
+  if (isAdmin || (allowScanner && isScanner)) {
+    return <>{children}</>;
+  }
+
+  // A steward who wandered off the scanner: send them back to the page they can use.
+  if (isScanner) {
     return (
       <Card
         title="Not authorised"
-        description="This area is for ApexTick administrators. Your account does not have the admin role."
+        description="Your account scans tickets at the gate. The rest of the admin area needs the admin role."
       >
-        <Button href="/" size="md" variant="outline">
-          Back to the site
+        <Button href="/admin/scan" size="md" variant="outline">
+          Open the scanner
         </Button>
       </Card>
     );
   }
 
-  return <>{children}</>;
+  return (
+    <Card
+      title="Not authorised"
+      description="This area is for ApexTick administrators. Your account does not have the admin role."
+    >
+      <Button href="/" size="md" variant="outline">
+        Back to the site
+      </Button>
+    </Card>
+  );
 }
 
 function Card({

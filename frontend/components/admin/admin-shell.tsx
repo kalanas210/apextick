@@ -4,16 +4,19 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
-import { useMe } from "@/hooks/useMe";
+import { useMe, useRoles } from "@/hooks/useMe";
 import { useSession } from "@/hooks/useSession";
 import { RequireAdmin } from "@/components/auth/require-admin";
 import { Logo } from "@/components/site/logo";
 
+/** The scanner is the one screen a gate steward's scanner role opens. */
+const SCANNER_PATH = "/admin/scan";
+
 const NAV = [
-  { href: "/admin", label: "Dashboard", exact: true },
-  { href: "/admin/events", label: "Events" },
-  { href: "/admin/orders", label: "Orders" },
-  { href: "/admin/scan", label: "Scan tickets" },
+  { href: "/admin", label: "Dashboard", exact: true, adminOnly: true },
+  { href: "/admin/events", label: "Events", adminOnly: true },
+  { href: "/admin/orders", label: "Orders", adminOnly: true },
+  { href: SCANNER_PATH, label: "Scan tickets", adminOnly: false },
 ];
 
 /**
@@ -23,8 +26,9 @@ const NAV = [
  * than a second focus-trapping drawer.
  */
 export function AdminShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
   return (
-    <RequireAdmin>
+    <RequireAdmin allowScanner={pathname.startsWith(SCANNER_PATH)}>
       <Panel>{children}</Panel>
     </RequireAdmin>
   );
@@ -33,7 +37,10 @@ export function AdminShell({ children }: { children: ReactNode }) {
 function Panel({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { data: me } = useMe();
+  const { isAdmin } = useRoles();
   const { signOut } = useSession();
+  // A steward sees the scanner and nothing else, rather than links that all end in "not authorised".
+  const nav = NAV.filter((item) => isAdmin || !item.adminOnly);
 
   return (
     <div className="lg:flex lg:min-h-screen">
@@ -41,7 +48,7 @@ function Panel({ children }: { children: ReactNode }) {
         <div className="flex items-center justify-between gap-4 px-5 py-4 lg:block lg:px-6 lg:py-7">
           <div>
             <Logo />
-            <p className="kicker mt-2 hidden lg:block">Admin</p>
+            <p className="kicker mt-2 hidden lg:block">{isAdmin ? "Admin" : "Gate"}</p>
           </div>
           <Link href="/" className="ulink text-[0.78rem] text-muted lg:hidden">
             Exit
@@ -50,7 +57,7 @@ function Panel({ children }: { children: ReactNode }) {
 
         <nav aria-label="Admin sections" className="px-3 pb-3 lg:px-3 lg:pb-6">
           <ul className="flex gap-1 overflow-x-auto lg:block lg:space-y-1 lg:overflow-visible">
-            {NAV.map((item) => {
+            {nav.map((item) => {
               const active = item.exact
                 ? pathname === item.href
                 : pathname.startsWith(item.href);
