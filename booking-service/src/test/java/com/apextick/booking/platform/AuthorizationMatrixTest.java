@@ -176,8 +176,7 @@ class AuthorizationMatrixTest {
                 Arguments.of("PATCH", "/api/admin/events/999999999/status"),
                 Arguments.of("DELETE", "/api/admin/events/999999999"),
                 Arguments.of("POST", "/api/admin/events/999999999/layout"),
-                Arguments.of("POST", "/api/admin/seats/999999999/release"),
-                Arguments.of("POST", "/api/admin/tickets/verify"));
+                Arguments.of("POST", "/api/admin/seats/999999999/release"));
     }
 
     private MockHttpServletRequestBuilder adminCall(String method, String path) {

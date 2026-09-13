@@ -47,4 +47,13 @@ public enum EventStatus {
     public boolean isPurchasable() {
         return this == ONSALE || this == SELLING_FAST || this == FINAL_RELEASE;
     }
+
+    /**
+     * Statuses whose tickets open the gates: any event that went on sale and was not called
+     * off. Wider than {@link #isPurchasable()}, because a sold-out match is exactly the one with
+     * a full ground to let in.
+     */
+    public boolean isAdmitting() {
+        return this != DRAFT && this != CANCELLED;
+    }
 }

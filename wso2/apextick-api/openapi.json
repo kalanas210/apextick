@@ -406,6 +406,42 @@
         ],
         "type": "object"
       },
+      "GateEventResponse": {
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "startsAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "onsale",
+              "selling-fast",
+              "final-release",
+              "sold-out",
+              "draft",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "timeZone": {
+            "type": "string"
+          },
+          "venue": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "HoldRequest": {
         "properties": {
           "seatIds": {
@@ -802,6 +838,34 @@
         },
         "type": "object"
       },
+      "ScanRequest": {
+        "properties": {
+          "eventId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "qrToken": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "eventId",
+          "qrToken"
+        ],
+        "type": "object"
+      },
+      "ScanResponse": {
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/GateEventResponse"
+          },
+          "ticket": {
+            "$ref": "#/components/schemas/TicketResponse"
+          }
+        },
+        "type": "object"
+      },
       "SeatResponse": {
         "properties": {
           "col": {
@@ -1003,6 +1067,10 @@
       },
       "TicketResponse": {
         "properties": {
+          "eventId": {
+            "format": "int64",
+            "type": "integer"
+          },
           "id": {
             "type": "string"
           },
@@ -1090,32 +1158,6 @@
           "total": {
             "format": "int64",
             "type": "integer"
-          }
-        },
-        "type": "object"
-      },
-      "VerifyRequest": {
-        "properties": {
-          "qrToken": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "qrToken"
-        ],
-        "type": "object"
-      },
-      "VerifyResponse": {
-        "properties": {
-          "ok": {
-            "type": "boolean"
-          },
-          "reason": {
-            "type": "string"
-          },
-          "ticket": {
-            "$ref": "#/components/schemas/TicketResponse"
           }
         },
         "type": "object"
@@ -1634,46 +1676,6 @@
         ]
       }
     },
-    "/admin/tickets/verify": {
-      "post": {
-        "operationId": "verify",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "admin",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/CurrentUser"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VerifyRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "*/*": {
-                "schema": {
-                  "$ref": "#/components/schemas/VerifyResponse"
-                }
-              }
-            },
-            "description": "OK"
-          }
-        },
-        "tags": [
-          "Admin: Tickets"
-        ]
-      }
-    },
     "/events": {
       "get": {
         "operationId": "list_2",
@@ -1996,6 +1998,47 @@
           "Events"
         ],
         "x-auth-type": "None"
+      }
+    },
+    "/gate/scans": {
+      "post": {
+        "operationId": "scan",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "steward",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CurrentUser"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Admit the ticket behind a scanned QR code to the event this gate is admitting",
+        "tags": [
+          "Gate"
+        ]
       }
     },
     "/me": {

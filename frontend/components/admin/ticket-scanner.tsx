@@ -3,12 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { cn } from "@/lib/cn";
-import { apiErrorCode, apiErrorMessage, apiProblem, apiStatus } from "@/lib/api";
+import { apiErrorMessage, apiProblem, apiStatus } from "@/lib/api";
+import { DEFAULT_FILTERS } from "@/lib/catalog";
 import { formatInstant, relativeTime } from "@/lib/format";
-import { useVerifyTicket } from "@/hooks/useAdmin";
+import { kickoffLabel, refusalOf, type GateProblem, type ScanRefusal } from "@/lib/gate";
+import { useEventList } from "@/hooks/useCatalog";
+import { useScanTicket } from "@/hooks/useGate";
 import { AdminHeader } from "./admin-shell";
 import { Button } from "@/components/ui/button";
-import { Field, Textarea } from "@/components/ui/field";
+import { Field, Select, Textarea } from "@/components/ui/field";
 import { Notice } from "@/components/ui/notice";
 import { Camera, Check, X } from "@/components/ui/icons";
 import type { Ticket } from "@/lib/types";
@@ -16,13 +19,11 @@ import type { Ticket } from "@/lib/types";
 /** Fast enough to feel instant at a turnstile, slow enough not to pin a CPU. */
 const SCAN_INTERVAL_MS = 250;
 const LOG_LIMIT = 20;
+/** The event this device's gate admits to outlives a reload: a steward sets it once a shift. */
+const GATE_EVENT_KEY = "apextick.gate.eventId";
 
-type Outcome =
-  | { kind: "admitted"; ticket: Ticket }
-  | { kind: "already"; usedAt: string | null; message: string }
-  | { kind: "cancelled"; message: string }
-  | { kind: "unknown"; message: string }
-  | { kind: "error"; message: string };
+type Refused = ScanRefusal & { message: string };
+type Outcome = { kind: "admitted"; ticket: Ticket } | Refused;
 
 interface LogEntry {
   id: number;
@@ -37,12 +38,54 @@ type CameraState =
   | { kind: "unsupported"; reason: string }
   | { kind: "denied"; reason: string };
 
+function storedEventId(): number | null {
+  try {
+    const id = Number(window.localStorage.getItem(GATE_EVENT_KEY));
+    return Number.isInteger(id) && id > 0 ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberEventId(id: number | null) {
+  try {
+    if (id === null) {
+      window.localStorage.removeItem(GATE_EVENT_KEY);
+    } else {
+      window.localStorage.setItem(GATE_EVENT_KEY, String(id));
+    }
+  } catch {
+    // storage is blocked: the steward picks the event again after a reload
+  }
+}
+
+function logLabel(refused: Refused): string {
+  switch (refused.kind) {
+    case "already":
+      return "Already scanned";
+    case "wrong-event":
+      return refused.name ? `Wrong event: ${refused.name}` : "Wrong event";
+    case "event-closed":
+      return "Gates closed";
+    case "cancelled":
+      return "Cancelled ticket";
+    case "unknown":
+      return "Unknown ticket";
+    default:
+      return "Rejected";
+  }
+}
+
 export function TicketScanner() {
-  const verify = useVerifyTicket();
+  const scan = useScanTicket();
+  const { data: events, isLoading: eventsLoading } = useEventList(DEFAULT_FILTERS);
+  const [eventId, setEventId] = useState<number | null>(() => storedEventId());
   const [token, setToken] = useState("");
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [log, setLog] = useState<LogEntry[]>([]);
   const [camera, setCamera] = useState<CameraState>({ kind: "idle" });
+
+  const gateEvent = events?.find((e) => e.id === eventId) ?? null;
 
   const videoRef = useRef<HTMLVideoElement>(null);
   // The stream lives in a ref, not state: stopCamera has to be callable from
@@ -73,61 +116,46 @@ export function TicketScanner() {
 
   useEffect(() => stopCamera, [stopCamera]);
 
+  const pushLog = useCallback((admitted: boolean, label: string) => {
+    setLog((l) =>
+      [{ id: Date.now(), admitted, label, at: new Date().toISOString() }, ...l].slice(0, LOG_LIMIT),
+    );
+  }, []);
+
   const submit = useCallback(
     (raw: string) => {
       const value = raw.trim();
-      if (!value) return;
-      verify.mutate(value, {
-        onSuccess: (result) => {
-          setOutcome({ kind: "admitted", ticket: result.ticket });
-          setLog((l) =>
-            [
-              {
-                id: Date.now(),
-                admitted: true,
-                label: `${result.ticket.seatLabel} · ${result.ticket.sectionName}`,
-                at: new Date().toISOString(),
-              },
-              ...l,
-            ].slice(0, LOG_LIMIT),
-          );
-          setToken("");
+      if (!value || eventId === null) return;
+      scan.mutate(
+        { qrToken: value, eventId },
+        {
+          onSuccess: (result) => {
+            setOutcome({ kind: "admitted", ticket: result.ticket });
+            pushLog(true, `${result.ticket.seatLabel} · ${result.ticket.sectionName}`);
+            setToken("");
+          },
+          onError: (err) => {
+            const refused: Refused = {
+              ...refusalOf(apiStatus(err), apiProblem(err) as GateProblem | undefined),
+              message: apiErrorMessage(err, "Could not verify that ticket."),
+            };
+            setOutcome(refused);
+            pushLog(false, logLabel(refused));
+          },
         },
-        onError: (err) => {
-          const code = apiErrorCode(err);
-          const message = apiErrorMessage(err, "Could not verify that ticket.");
-          setOutcome(
-            code === "TICKET_ALREADY_USED"
-              ? { kind: "already", usedAt: apiProblem(err)?.usedAt ?? null, message }
-              : code === "TICKET_CANCELLED"
-                ? { kind: "cancelled", message }
-                : apiStatus(err) === 404
-                  ? { kind: "unknown", message }
-                  : { kind: "error", message },
-          );
-          setLog((l) =>
-            [
-              {
-                id: Date.now(),
-                admitted: false,
-                label:
-                  code === "TICKET_ALREADY_USED"
-                    ? "Already scanned"
-                    : code === "TICKET_CANCELLED"
-                      ? "Cancelled ticket"
-                      : apiStatus(err) === 404
-                        ? "Unknown ticket"
-                        : "Rejected",
-                at: new Date().toISOString(),
-              },
-              ...l,
-            ].slice(0, LOG_LIMIT),
-          );
-        },
-      });
+      );
     },
-    [verify],
+    [scan, eventId, pushLog],
   );
+
+  /** A different gate event starts a clean slate: nothing on screen was checked against it. */
+  const chooseEvent = (id: number | null) => {
+    stopCamera();
+    setEventId(id);
+    rememberEventId(id);
+    setOutcome(null);
+    setLog([]);
+  };
 
   const startCamera = useCallback(async () => {
     const session = (sessionRef.current += 1);
@@ -230,13 +258,14 @@ export function TicketScanner() {
   };
 
   const admitted = log.filter((l) => l.admitted).length;
+  const ready = eventId !== null;
 
   return (
     <>
       <AdminHeader
-        kicker="Admin"
+        kicker="Gate"
         title="Scan tickets"
-        description="Point a camera at the QR code, or paste the token from a ticket."
+        description="Choose the event this gate admits to, then point a camera at the QR code or paste the token."
         action={
           log.length > 0 ? (
             <p className="text-[0.8rem] text-muted">
@@ -250,6 +279,29 @@ export function TicketScanner() {
       <div className="mt-8 grid gap-10 lg:grid-cols-12 lg:gap-12">
         <div className="lg:col-span-7">
           <section>
+            <h2 className="kicker mb-3">This gate admits to</h2>
+            <Field
+              label="Event"
+              hint={
+                gateEvent
+                  ? `${kickoffLabel(gateEvent.startsAt, gateEvent.timeZone)} · ${gateEvent.stadium}`
+                  : "A ticket for any other event is turned away, and stays unused."
+              }
+            >
+              {(a) => (
+                <Select
+                  {...a}
+                  value={eventId === null ? "" : String(eventId)}
+                  onChange={(e) => chooseEvent(e.target.value ? Number(e.target.value) : null)}
+                  options={(events ?? []).map((e) => ({ value: String(e.id), label: `${e.name} · ${e.date}` }))}
+                  placeholder={eventsLoading ? "Loading events…" : "Choose the event at this gate"}
+                  disabled={eventsLoading}
+                />
+              )}
+            </Field>
+          </section>
+
+          <section className="mt-8">
             <h2 className="kicker mb-3">Camera</h2>
             <div className="overflow-hidden rounded-2xl border border-line bg-ink-2">
               <div className="relative aspect-video bg-ink">
@@ -268,10 +320,10 @@ export function TicketScanner() {
                       <Camera className="mx-auto h-8 w-8 text-faint" />
                       <p className="mt-3 text-[0.82rem] text-muted">
                         {camera.kind === "idle"
-                          ? "Camera off."
-                          : camera.kind === "unsupported"
-                            ? camera.reason
-                            : camera.reason}
+                          ? ready
+                            ? "Camera off."
+                            : "Choose the event first, so every scan is checked against it."
+                          : camera.reason}
                       </p>
                     </div>
                   </div>
@@ -283,7 +335,12 @@ export function TicketScanner() {
                     Stop camera
                   </Button>
                 ) : (
-                  <Button onClick={() => void startCamera()} size="sm" variant="outline">
+                  <Button
+                    onClick={() => void startCamera()}
+                    size="sm"
+                    variant="outline"
+                    className={ready ? "" : "pointer-events-none opacity-60"}
+                  >
                     Start camera
                   </Button>
                 )}
@@ -311,9 +368,9 @@ export function TicketScanner() {
               <Button
                 type="submit"
                 size="md"
-                className={verify.isPending ? "pointer-events-none opacity-60" : ""}
+                className={scan.isPending || !ready ? "pointer-events-none opacity-60" : ""}
               >
-                {verify.isPending ? "Checking…" : "Verify"}
+                {scan.isPending ? "Checking…" : "Verify"}
               </Button>
             </form>
           </section>
@@ -326,7 +383,9 @@ export function TicketScanner() {
             <div aria-live="assertive">
               {outcome ? <Result outcome={outcome} /> : (
                 <div className="rounded-2xl border border-line bg-ink-2 p-8 text-center">
-                  <p className="text-[0.86rem] text-muted">No ticket checked yet.</p>
+                  <p className="text-[0.86rem] text-muted">
+                    {ready ? "No ticket checked yet." : "Choose the event this gate admits to."}
+                  </p>
                 </div>
               )}
             </div>
@@ -383,6 +442,32 @@ function Result({ outcome }: { outcome: Outcome }) {
           {outcome.usedAt
             ? `First scanned ${relativeTime(outcome.usedAt)}, at ${formatInstant(outcome.usedAt)}.`
             : outcome.message}
+        </p>
+      </Card>
+    );
+  }
+
+  if (outcome.kind === "wrong-event") {
+    const when = kickoffLabel(outcome.startsAt, outcome.timeZone);
+    return (
+      <Card tone="bad" word="Wrong event">
+        <p className="mt-3 text-[0.84rem] text-muted">
+          {outcome.name
+            ? `This ticket is for ${outcome.name}${when ? `, ${when}` : ""}${outcome.venue ? `, at ${outcome.venue}` : ""}.`
+            : "This ticket is for a different event."}{" "}
+          It has not been used and still admits there.
+        </p>
+      </Card>
+    );
+  }
+
+  if (outcome.kind === "event-closed") {
+    return (
+      <Card tone="bad" word="Gates closed">
+        <p className="mt-3 text-[0.84rem] text-muted">
+          {outcome.status === "cancelled"
+            ? "This event has been cancelled, so nobody is admitted."
+            : "This event is not published, so its gates are not open."}
         </p>
       </Card>
     );

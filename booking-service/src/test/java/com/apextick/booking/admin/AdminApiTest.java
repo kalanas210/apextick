@@ -11,11 +11,8 @@ import com.apextick.booking.payment.model.PaymentCard;
 import com.apextick.booking.security.CurrentUser;
 import com.apextick.booking.seat.Seat;
 import com.apextick.booking.seat.SeatRepository;
-import com.apextick.booking.seat.SeatStatus;
 import com.apextick.booking.support.IntegrationTest;
 import com.apextick.booking.support.TestTokens;
-import com.apextick.booking.ticket.Ticket;
-import com.apextick.booking.ticket.TicketRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,7 +38,6 @@ class AdminApiTest {
     @Autowired HoldService holdService;
     @Autowired OrderService orderService;
     @Autowired PaymentService paymentService;
-    @Autowired TicketRepository ticketRepository;
 
     private final ObjectMapper json = new ObjectMapper();
 
@@ -126,37 +122,6 @@ class AdminApiTest {
                 .andExpect(jsonPath("$.byTier[0].available").value(2))
                 .andExpect(jsonPath("$.byTier[0].held").value(1))
                 .andExpect(jsonPath("$.byTier[0].booked").value(1));
-    }
-
-    @Test
-    void admin_verifies_a_ticket_once_then_rejects_reuse() throws Exception {
-        String slug = "australia-england-super-8";
-        Long eventId = eventRepository.findBySlug(slug).orElseThrow().getId();
-        List<Long> seatIds = seatRepository.findAllForEventWithLayout(eventId).stream()
-                .filter(s -> s.getStatus() == SeatStatus.AVAILABLE).map(Seat::getId).limit(1).toList();
-
-        String sub = "verify-buyer";
-        CurrentUser buyer = new CurrentUser(sub, "verifybuyer", "vb@apextick.local", "Verify Buyer", Set.of("user"));
-        holdService.hold(slug, seatIds, buyer);
-        OrderResponse order = orderService.create(new CreateOrderRequest(eventId, seatIds),
-                "verify-order-" + System.nanoTime(), buyer);
-        paymentService.pay(UUID.fromString(order.id()),
-                new PayRequest(new PaymentCard("4242424242424242", 12, 2030, "123", "H"), null, null, null),
-                "verify-pay-" + System.nanoTime(), buyer);
-
-        Ticket ticket = ticketRepository.findByOrderId(UUID.fromString(order.id())).get(0);
-        String verifyBody = json.writeValueAsString(Map.of("qrToken", ticket.getQrToken()));
-
-        mvc.perform(post("/api/admin/tickets/verify").header("Authorization", adminToken())
-                        .contentType(MediaType.APPLICATION_JSON).content(verifyBody))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.ok").value(true))
-                .andExpect(jsonPath("$.ticket.status").value("USED"));
-
-        mvc.perform(post("/api/admin/tickets/verify").header("Authorization", adminToken())
-                        .contentType(MediaType.APPLICATION_JSON).content(verifyBody))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("TICKET_ALREADY_USED"));
     }
 
     @Test

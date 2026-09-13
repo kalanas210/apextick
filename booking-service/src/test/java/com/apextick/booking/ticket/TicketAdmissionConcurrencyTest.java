@@ -12,7 +12,7 @@ import com.apextick.booking.seat.Seat;
 import com.apextick.booking.seat.SeatRepository;
 import com.apextick.booking.seat.SeatStatus;
 import com.apextick.booking.support.IntegrationTest;
-import com.apextick.booking.ticket.admin.TicketVerificationService;
+import com.apextick.booking.ticket.gate.GateService;
 import com.apextick.booking.web.ConflictException;
 import com.apextick.booking.web.ErrorCodes;
 import org.junit.jupiter.api.Test;
@@ -39,7 +39,7 @@ class TicketAdmissionConcurrencyTest {
 
     private static final String SLUG = "south-africa-new-zealand-super-8";
 
-    @Autowired TicketVerificationService verification;
+    @Autowired GateService gate;
     @Autowired TicketRepository ticketRepository;
     @Autowired HoldService holdService;
     @Autowired OrderService orderService;
@@ -63,7 +63,7 @@ class TicketAdmissionConcurrencyTest {
         String qrToken = ticketRepository.findByOrderId(orderId).getFirst().getQrToken();
 
         CurrentUser steward = new CurrentUser("gate-race-steward", "steward", "steward@apextick.local",
-                "Gate Steward", Set.of("user", "admin"));
+                "Gate Steward", Set.of("user", "scanner"));
         int turnstiles = 12;
         AtomicInteger admitted = new AtomicInteger();
         AtomicInteger turnedAway = new AtomicInteger();
@@ -74,7 +74,7 @@ class TicketAdmissionConcurrencyTest {
                 pool.submit(() -> {
                     try {
                         start.await();
-                        verification.verify(qrToken, steward);
+                        gate.scan(qrToken, eventId, steward);
                         admitted.incrementAndGet();
                     } catch (ConflictException e) {
                         if (ErrorCodes.TICKET_ALREADY_USED.equals(e.getCode())) {

@@ -353,6 +353,10 @@
       {
         "name": "admin",
         "description": "ApexTick administrator: full access to /api/admin/**"
+      },
+      {
+        "name": "scanner",
+        "description": "ApexTick gate steward: scans tickets at /api/gate/** and nothing else"
       }
     ]
   },

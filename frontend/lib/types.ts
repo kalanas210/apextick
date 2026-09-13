@@ -168,6 +168,8 @@ export interface Order {
 export interface Ticket {
     id: string;
     orderId: string;
+    /** The event this ticket admits to, and the only one. */
+    eventId: number;
     status: TicketStatus;
     qrToken: string;
     issuedAt: string;
@@ -316,10 +318,4 @@ export interface AdminSeat {
     heldBy: string | null;
     heldUntil: string | null;
     version: number;
-}
-
-export interface VerifyResult {
-    ok: boolean;
-    ticket: Ticket;
-    reason: string | null;
 }
