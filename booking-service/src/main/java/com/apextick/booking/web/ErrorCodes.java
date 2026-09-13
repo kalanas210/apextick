@@ -12,6 +12,9 @@ public final class ErrorCodes {
     public static final String ORDER_ALREADY_PENDING = "ORDER_ALREADY_PENDING";
     public static final String ORDER_PENDING = "ORDER_PENDING";
     public static final String ORDER_NOT_PAYABLE = "ORDER_NOT_PAYABLE";
+    public static final String ORDER_NOT_REFUNDABLE = "ORDER_NOT_REFUNDABLE";
+    public static final String ORDER_TICKETS_USED = "ORDER_TICKETS_USED";
+    public static final String REFUND_NOT_OWED = "REFUND_NOT_OWED";
     public static final String IDEMPOTENCY_KEY_REUSED = "IDEMPOTENCY_KEY_REUSED";
     public static final String IDEMPOTENCY_KEY_MISSING = "IDEMPOTENCY_KEY_MISSING";
     public static final String PAYMENT_FAILED = "PAYMENT_FAILED";

@@ -77,7 +77,7 @@ public class GateService {
         if (tickets.unadmit(ticketId) == 0) {
             String status = tickets.findById(ticketId).map(t -> t.getStatus().name()).orElse("UNKNOWN");
             throw new ConflictException(ErrorCodes.TICKET_NOT_ADMITTED, "Ticket has not been admitted",
-                    Map.of("status", status));
+                    Map.of("ticketStatus", status));
         }
         Instant now = Instant.now();
         String why = reason.strip();

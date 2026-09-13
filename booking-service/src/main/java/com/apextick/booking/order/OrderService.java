@@ -310,6 +310,44 @@ public class OrderService {
         }
     }
 
+    /**
+     * Marks a paid order refunded and voids its tickets. Callers hold the order's row lock.
+     *
+     * @return how many tickets were voided
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public int markRefunded(Order order, String refundedBy, String reason) {
+        int voided = voidTickets(order, "REFUNDED");
+        Instant now = Instant.now();
+        order.setStatus(OrderStatus.REFUNDED);
+        order.setRefundedAt(now);
+        order.setRefundedBy(refundedBy);
+        order.setRefundReason(reason);
+        order.setUpdatedAt(now);
+        return voided;
+    }
+
+    /**
+     * Voids a paid order's unused tickets, so they stop opening gates, and puts their seats back on
+     * sale. A ticket already used stays used: its holder is inside, and so is their seat.
+     */
+    private int voidTickets(Order order, String reason) {
+        List<Long> seatIds = tickets.cancelIssued(order.getId());
+        if (seatIds.isEmpty()) {
+            return 0;
+        }
+        List<Long> released = seats.releaseBooked(seatIds);
+        Long eventId = order.getEvent().getId();
+        for (Long seatId : released) {
+            domainEvents.publish(EventTypes.SEAT_RELEASED, "seat", String.valueOf(seatId),
+                    new SeatReleasedPayload(seatId, eventId, "ORDER_" + reason));
+        }
+        List<SeatStatusChange> changes = released.stream()
+                .map(sid -> new SeatStatusChange(sid, SeatStatus.AVAILABLE.name(), null)).toList();
+        AfterCommit.run(() -> realtime.seatStatusChanged(eventId, changes));
+        return seatIds.size();
+    }
+
     public OrderResponse toResponse(Order order) {
         Map<Long, UUID> ticketByItem = tickets.findByOrderId(order.getId()).stream()
                 .collect(Collectors.toMap(t -> t.getOrderItem().getId(), Ticket::getId));

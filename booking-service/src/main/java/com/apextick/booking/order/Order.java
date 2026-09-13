@@ -81,6 +81,17 @@ public class Order {
     @Column(name = "cancel_reason")
     private String cancelReason;
 
+    /** When a paid order was refunded. */
+    @Column(name = "refunded_at")
+    private Instant refundedAt;
+
+    /** Keycloak {@code sub} of the admin who refunded it; {@code null} when the provider's dashboard did. */
+    @Column(name = "refunded_by")
+    private String refundedBy;
+
+    @Column(name = "refund_reason")
+    private String refundReason;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 

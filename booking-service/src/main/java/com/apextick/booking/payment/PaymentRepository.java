@@ -1,11 +1,13 @@
 package com.apextick.booking.payment;
 
 import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -34,4 +36,18 @@ public interface PaymentRepository extends JpaRepository<Payment, UUID> {
     List<Payment> findByOrderIdAndStatus(UUID orderId, PaymentStatus status);
 
     boolean existsByOrderIdAndStatusAndIdNot(UUID orderId, PaymentStatus status, UUID id);
+
+    long countByStatus(PaymentStatus status);
+
+    /**
+     * Refunds still owed that are due another try: last asked for before {@code askedBefore}, and
+     * asked fewer than {@code maxAttempts} times. Oldest first, so one refund the provider keeps
+     * refusing cannot starve the rest.
+     */
+    @Query("select p.id from Payment p where p.status = com.apextick.booking.payment.PaymentStatus.REFUND_REQUIRED "
+            + "and p.refundAttempts < :maxAttempts "
+            + "and (p.refundLastAttemptAt is null or p.refundLastAttemptAt < :askedBefore) "
+            + "order by p.refundLastAttemptAt asc nulls first")
+    List<UUID> findRefundsDue(@Param("askedBefore") Instant askedBefore, @Param("maxAttempts") int maxAttempts,
+                              Pageable pageable);
 }

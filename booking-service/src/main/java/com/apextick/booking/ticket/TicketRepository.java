@@ -17,6 +17,23 @@ public interface TicketRepository extends JpaRepository<Ticket, UUID> {
 
     long countByEventIdAndStatus(Long eventId, TicketStatus status);
 
+    long countByOrderIdAndStatus(UUID orderId, TicketStatus status);
+
+    @Query("select t.id from Ticket t where t.order.id = :orderId and t.status = :status")
+    List<UUID> findIdsByOrderIdAndStatus(@Param("orderId") UUID orderId, @Param("status") TicketStatus status);
+
+    /**
+     * Voids an order's tickets that have not been used, and names the seats they were for. A
+     * ticket a gate admitted a moment ago is no longer ISSUED and is left as it is, so a caller
+     * can tell from the count that came back whether it raced one.
+     */
+    @Query(value = """
+            UPDATE tickets SET status = 'CANCELLED'
+             WHERE order_id = :orderId AND status = 'ISSUED'
+            RETURNING seat_id
+            """, nativeQuery = true)
+    List<Long> cancelIssued(@Param("orderId") UUID orderId);
+
     /**
      * Admits the ticket if, and only if, it is still ISSUED. The same atomic conditional update the
      * seat hold uses: of two scans racing on one ticket, exactly one moves the row and gets 1, and
